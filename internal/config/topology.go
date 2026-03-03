@@ -53,7 +53,10 @@ func ExpandTopologies(cfg *City, fs fsys.FS, cityRoot string, rigFormulaDirs map
 		var rigAgents []Agent
 		var rigTopoDirs []string
 		for _, ref := range topoRefs {
-			topoDir := resolveConfigPath(ref, cityRoot, cityRoot)
+			topoDir, err := resolveTopologyRef(ref, cityRoot, cityRoot)
+			if err != nil {
+				return fmt.Errorf("rig %q topology %q: %w", rig.Name, ref, err)
+			}
 			topoPath := filepath.Join(topoDir, topologyFile)
 
 			agents, providers, topoDirs, reqs, err := loadTopology(fs, topoPath, topoDir, cityRoot, rig.Name, nil)
@@ -170,7 +173,10 @@ func ExpandCityTopologies(cfg *City, fs fsys.FS, cityRoot string) ([]string, []T
 	var allRequires []TopologyRequirement
 
 	for _, ref := range topos {
-		topoDir := resolveConfigPath(ref, cityRoot, cityRoot)
+		topoDir, err := resolveTopologyRef(ref, cityRoot, cityRoot)
+		if err != nil {
+			return nil, nil, fmt.Errorf("city topology %q: %w", ref, err)
+		}
 		topoPath := filepath.Join(topoDir, topologyFile)
 
 		agents, providers, topoDirs, reqs, err := loadTopology(fs, topoPath, topoDir, cityRoot, "", nil)
