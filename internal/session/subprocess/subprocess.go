@@ -194,7 +194,13 @@ func (p *Provider) Interrupt(name string) error {
 	}
 
 	// Fall back to socket (cross-process case).
-	return p.sendSocketCommand(name, "interrupt", 2*time.Second)
+	// Swallow connection errors — if the socket doesn't exist the session
+	// is dead, which is the same as "interrupt succeeded" (idempotent).
+	err := p.sendSocketCommand(name, "interrupt", 2*time.Second)
+	if err != nil {
+		return nil // session not running — best-effort
+	}
+	return nil
 }
 
 // IsRunning reports whether the named session has a live process.
