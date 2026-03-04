@@ -119,13 +119,6 @@ type Rig struct {
 	Prefix string `toml:"prefix,omitempty"`
 	// Suspended prevents the reconciler from spawning agents in this rig. Toggle with gc rig suspend/resume.
 	Suspended bool `toml:"suspended,omitempty"`
-	// Pack is the path to a pack directory to stamp agents from.
-	// Relative paths resolve against the declaring config file's directory.
-	Pack string `toml:"pack,omitempty"`
-	// RigPacks lists multiple pack directories for this rig.
-	// Each is loaded and expanded like Pack. When both Pack and
-	// RigPacks are set, Pack is prepended to the list.
-	RigPacks []string `toml:"packs,omitempty"`
 	// FormulasDir is a rig-local formula directory (Layer 4). Overrides
 	// pack formulas for this rig by filename.
 	// Relative paths resolve against the city directory.
@@ -374,16 +367,6 @@ type Workspace struct {
 	// into agent working directories. Agent-level overrides workspace-level
 	// (replace, not additive). Supported: "claude", "gemini", "opencode", "copilot".
 	InstallAgentHooks []string `toml:"install_agent_hooks,omitempty"`
-	// Pack is the path to a city-level pack directory.
-	// Stamps agents with dir="" (city-scoped). Resolved like rig packs.
-	// Combined with rig-level packs — city pack agents get dir=""
-	// while rig pack agents inherit the rig name as their dir.
-	Pack string `toml:"pack,omitempty"`
-	// CityPacks lists multiple city-level pack directories.
-	// Each is loaded and expanded like Pack. When both Pack and
-	// CityPacks are set, Pack is prepended to the list.
-	// Agents from the first pack come first (deterministic ordering).
-	CityPacks []string `toml:"packs,omitempty"`
 	// GlobalFragments lists named template fragments injected into every
 	// agent's rendered prompt. Applied before per-agent InjectFragments.
 	// Each name must match a {{ define "name" }} block from a pack's

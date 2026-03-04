@@ -425,12 +425,6 @@ func mergeWorkspace(base, fragment *City, fragMeta toml.MetaData, fragPath strin
 		base.Workspace.InstallAgentHooks = append([]string(nil), fragment.Workspace.InstallAgentHooks...)
 		prov.Workspace["install_agent_hooks"] = fragPath
 	}
-	// packs is a []string — additive merge (append, not replace).
-	if fragMeta.IsDefined("workspace", "packs") {
-		base.Workspace.CityPacks = append(
-			base.Workspace.CityPacks, fragment.Workspace.CityPacks...)
-		prov.Workspace["packs"] = fragPath
-	}
 	// includes is a []string — additive merge (append, not replace).
 	if fragMeta.IsDefined("workspace", "includes") {
 		base.Workspace.Includes = append(

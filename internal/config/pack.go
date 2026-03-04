@@ -155,7 +155,7 @@ func ExpandPacks(cfg *City, fs fsys.FS, cityRoot string, rigFormulaDirs map[stri
 	return nil
 }
 
-// ExpandCityPack loads the city-level pack from workspace.pack.
+// ExpandCityPack loads a single city-level pack from workspace.includes.
 // City pack agents are stamped with dir="" (city-scoped) and prepended
 // to the agent list. Returns the resolved formula dir from the pack
 // (empty if none). cityRoot is the city directory.
@@ -172,11 +172,10 @@ func ExpandCityPack(cfg *City, fs fsys.FS, cityRoot string) (string, error) {
 	return dirs[0], nil
 }
 
-// ExpandCityPacks loads all city-level packs (from both
-// workspace.pack and workspace.packs). City pack agents are
-// stamped with dir="" (city-scoped) and prepended to the agent list.
-// Returns the resolved formula dirs (one per pack that has formulas).
-// cityRoot is the city directory.
+// ExpandCityPacks loads all city-level packs from workspace.includes.
+// City pack agents are stamped with dir="" (city-scoped) and prepended
+// to the agent list. Returns the resolved formula dirs (one per pack
+// that has formulas). cityRoot is the city directory.
 func ExpandCityPacks(cfg *City, fs fsys.FS, cityRoot string) ([]string, []PackRequirement, error) {
 	topos := EffectiveCityPacks(cfg.Workspace)
 	if len(topos) == 0 {
@@ -872,26 +871,13 @@ func collectFiles(fs fsys.FS, base, prefix string, out *[]string) {
 }
 
 // resolveNamedPacks translates named pack references to cache paths.
-// Handles all four pack fields: workspace.pack, workspace.packs,
-// rig.pack, and rig.packs. If a reference matches a key in
-// cfg.Packs, it is rewritten to the local cache directory path.
+// If a reference in workspace.includes or rig.includes matches a key
+// in cfg.Packs, it is rewritten to the local cache directory path.
 // Local path references pass through unchanged.
 // Called after merge + patches, before expansion.
 func resolveNamedPacks(cfg *City, cityRoot string) {
 	if len(cfg.Packs) == 0 {
 		return
-	}
-	// City singular.
-	if cfg.Workspace.Pack != "" {
-		if src, ok := cfg.Packs[cfg.Workspace.Pack]; ok {
-			cfg.Workspace.Pack = PackCachePath(cityRoot, cfg.Workspace.Pack, src)
-		}
-	}
-	// City plural.
-	for i, ref := range cfg.Workspace.CityPacks {
-		if src, ok := cfg.Packs[ref]; ok {
-			cfg.Workspace.CityPacks[i] = PackCachePath(cityRoot, ref, src)
-		}
 	}
 	// City includes.
 	for i, ref := range cfg.Workspace.Includes {
@@ -899,18 +885,8 @@ func resolveNamedPacks(cfg *City, cityRoot string) {
 			cfg.Workspace.Includes[i] = PackCachePath(cityRoot, ref, src)
 		}
 	}
-	// Rig singular + plural + includes.
+	// Rig includes.
 	for i := range cfg.Rigs {
-		if cfg.Rigs[i].Pack != "" {
-			if src, ok := cfg.Packs[cfg.Rigs[i].Pack]; ok {
-				cfg.Rigs[i].Pack = PackCachePath(cityRoot, cfg.Rigs[i].Pack, src)
-			}
-		}
-		for j, ref := range cfg.Rigs[i].RigPacks {
-			if src, ok := cfg.Packs[ref]; ok {
-				cfg.Rigs[i].RigPacks[j] = PackCachePath(cityRoot, ref, src)
-			}
-		}
 		for j, ref := range cfg.Rigs[i].Includes {
 			if src, ok := cfg.Packs[ref]; ok {
 				cfg.Rigs[i].Includes[j] = PackCachePath(cityRoot, ref, src)
@@ -920,35 +896,21 @@ func resolveNamedPacks(cfg *City, cityRoot string) {
 }
 
 // EffectiveCityPacks returns the resolved list of city-level pack
-// paths. Composes singular Pack, plural CityPacks, and Includes
-// (in that order). Returns nil if none are set.
+// paths from workspace.includes. Returns nil if none are set.
 func EffectiveCityPacks(ws Workspace) []string {
-	var result []string
-	if ws.Pack != "" {
-		result = append(result, ws.Pack)
-	}
-	result = append(result, ws.CityPacks...)
-	result = append(result, ws.Includes...)
-	return result
+	return ws.Includes
 }
 
 // EffectiveRigPacks returns the resolved list of pack paths for
-// a rig. Composes singular Pack, plural RigPacks, and Includes
-// (in that order). Returns nil if none are set.
+// a rig from rig.includes. Returns nil if none are set.
 func EffectiveRigPacks(rig Rig) []string {
-	var result []string
-	if rig.Pack != "" {
-		result = append(result, rig.Pack)
-	}
-	result = append(result, rig.RigPacks...)
-	result = append(result, rig.Includes...)
-	return result
+	return rig.Includes
 }
 
 // HasPackRigs reports whether any rig in the config uses a pack.
 func HasPackRigs(rigs []Rig) bool {
 	for _, r := range rigs {
-		if r.Pack != "" || len(r.RigPacks) > 0 || len(r.Includes) > 0 {
+		if len(r.Includes) > 0 {
 			return true
 		}
 	}

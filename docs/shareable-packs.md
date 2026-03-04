@@ -134,8 +134,8 @@ min = 0
 max = 5
 ```
 
-When this pack is referenced from both `workspace.pack` and a
-rig's `pack`:
+When this pack is referenced from both `workspace.includes` and a
+rig's `includes`:
 - City expansion keeps only `mayor` and `deacon` (dir="")
 - Rig expansion keeps only `polecat` (dir=rig name)
 
@@ -148,23 +148,23 @@ Reference a pack directory by path in your `city.toml`:
 ```toml
 # City-level (agents get dir="")
 [workspace]
-pack = "packs/base"
+includes = ["packs/base"]
 
 # Or multiple city packs
 [workspace]
-packs = ["packs/base", "packs/monitoring"]
+includes = ["packs/base", "packs/monitoring"]
 
 # Rig-level (agents get dir=rig name)
 [[rigs]]
 name = "my-project"
 path = "/home/user/my-project"
-pack = "packs/gastown"
+includes = ["packs/gastown"]
 
 # Or multiple rig packs
 [[rigs]]
 name = "my-project"
 path = "/home/user/my-project"
-packs = ["packs/base", "packs/review"]
+includes = ["packs/base", "packs/review"]
 ```
 
 Relative paths resolve against the city directory (where `city.toml`
@@ -183,7 +183,7 @@ path = "pack"  # subdirectory within the repo
 [[rigs]]
 name = "my-project"
 path = "/home/user/my-project"
-pack = "gastown"
+includes = ["gastown"]
 ```
 
 Remote packs are fetched once and cached in `.gc/pack-cache/`.
@@ -198,7 +198,7 @@ modifying the pack itself:
 [[rigs]]
 name = "my-project"
 path = "/home/user/my-project"
-pack = "packs/gastown"
+includes = ["packs/gastown"]
 
 [[rigs.overrides]]
 agent = "polecat"
@@ -268,7 +268,7 @@ provider = "claude"
 
 # City-level pack for orchestration
 [workspace]
-pack = "packs/orchestration"
+includes = ["packs/orchestration"]
 
 # Remote pack source
 [packs.code-review]
@@ -286,7 +286,7 @@ start_command = "gemini-cli"
 [[rigs]]
 name = "backend"
 path = "/home/user/backend"
-packs = ["packs/base-agents", "code-review"]
+includes = ["packs/base-agents", "code-review"]
 
 # Override the reviewer to use gemini
 [[rigs.overrides]]
@@ -297,7 +297,7 @@ provider = "gemini"
 [[rigs]]
 name = "frontend"
 path = "/home/user/frontend"
-pack = "packs/base-agents"
+includes = ["packs/base-agents"]
 ```
 
 This city composes:

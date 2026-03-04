@@ -107,7 +107,7 @@ git clone -q https://github.com/julianknutsen/gc-demo-repo "$DEMO_REPO"
 # Register the rig (sets up routes, hooks, pack config).
 # Beads init will fail (no dolt running, auto-start disabled) — that's fine,
 # gc start handles it. The || true catches the expected beads init error.
-(cd "$DEMO_CITY" && gc rig add "$DEMO_REPO" --pack packs/lifecycle) || true
+(cd "$DEMO_CITY" && gc rig add "$DEMO_REPO" --include packs/lifecycle) || true
 
 # Remove partial metadata so gc start's runBdInit re-initializes from scratch
 # on the city dolt (correct data-dir: .gc/dolt-data/).

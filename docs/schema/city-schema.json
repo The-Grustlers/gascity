@@ -1035,17 +1035,6 @@
           "type": "boolean",
           "description": "Suspended prevents the reconciler from spawning agents in this rig. Toggle with gc rig suspend/resume."
         },
-        "pack": {
-          "type": "string",
-          "description": "Pack is the path to a pack directory to stamp agents from.\nRelative paths resolve against the declaring config file's directory."
-        },
-        "packs": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array",
-          "description": "RigPacks lists multiple pack directories for this rig.\nEach is loaded and expanded like Pack. When both Pack and\nRigPacks are set, Pack is prepended to the list."
-        },
         "formulas_dir": {
           "type": "string",
           "description": "FormulasDir is a rig-local formula directory (Layer 4). Overrides\npack formulas for this rig by filename.\nRelative paths resolve against the city directory."
@@ -1189,17 +1178,6 @@
           },
           "type": "array",
           "description": "InstallAgentHooks lists provider names whose hooks should be installed\ninto agent working directories. Agent-level overrides workspace-level\n(replace, not additive). Supported: \"claude\", \"gemini\", \"opencode\", \"copilot\"."
-        },
-        "pack": {
-          "type": "string",
-          "description": "Pack is the path to a city-level pack directory.\nStamps agents with dir=\"\" (city-scoped). Resolved like rig packs.\nCombined with rig-level packs — city pack agents get dir=\"\"\nwhile rig pack agents inherit the rig name as their dir."
-        },
-        "packs": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array",
-          "description": "CityPacks lists multiple city-level pack directories.\nEach is loaded and expanded like Pack. When both Pack and\nCityPacks are set, Pack is prepended to the list.\nAgents from the first pack come first (deterministic ordering)."
         },
         "global_fragments": {
           "items": {

@@ -42,8 +42,8 @@ func TestCityTomlParses(t *testing.T) {
 	if cfg.Workspace.Name != "swarm" {
 		t.Errorf("Workspace.Name = %q, want %q", cfg.Workspace.Name, "swarm")
 	}
-	if cfg.Workspace.Pack != "packs/swarm" {
-		t.Errorf("Workspace.Pack = %q, want %q", cfg.Workspace.Pack, "packs/swarm")
+	if len(cfg.Workspace.Includes) != 1 || cfg.Workspace.Includes[0] != "packs/swarm" {
+		t.Errorf("Workspace.Includes = %v, want [packs/swarm]", cfg.Workspace.Includes)
 	}
 }
 

@@ -21,7 +21,7 @@
 [workspace]
 name = "gastown"
 provider = "claude"
-pack = "packs/gastown"
+includes = ["packs/gastown"]
 global_fragments = ["command-glossary", "operational-awareness"]
 
 [daemon]
@@ -34,7 +34,7 @@ shutdown_timeout = "5s"
 # [[rigs]]
 # name = "myproject"
 # path = "/path/to/your/project"
-# pack = "packs/gastown"
+# includes = ["packs/gastown"]
 
 # Crew members are individually named, so they can't be pack-stamped:
 # [[agents]]

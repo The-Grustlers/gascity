@@ -679,7 +679,7 @@ gc daemon run [path] [flags]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `-f`, `--file` | stringArray |  | additional config files to layer (can be repeated) |
-| `--strict` | bool |  | promote config collision warnings to errors |
+| `--no-strict` | bool |  | disable strict config collision checking (strict is on by default) |
 
 ## gc daemon start
 
@@ -1246,7 +1246,7 @@ Register an external project directory as a rig.
 
 Initializes beads database, installs agent hooks if configured,
 generates cross-rig routes, and appends the rig to city.toml.
-If the target directory doesn't exist, it is created. Use --pack
+If the target directory doesn't exist, it is created. Use --include
 to apply a pack directory that defines the rig's agent configuration.
 
 Use --start-suspended to add the rig in a suspended state (dormant-by-default).
@@ -1260,13 +1260,13 @@ gc rig add <path> [flags]
 
 ```
 gc rig add /path/to/project
-  gc rig add ./my-project --pack packs/gastown
-  gc rig add ./my-project --pack packs/gastown --start-suspended
+  gc rig add ./my-project --include packs/gastown
+  gc rig add ./my-project --include packs/gastown --start-suspended
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--pack` | string |  | pack directory for rig agents |
+| `--include` | string |  | pack directory for rig agents |
 | `--start-suspended` | bool |  | add rig in suspended state (dormant-by-default) |
 
 ## gc rig list
@@ -1371,7 +1371,7 @@ gc start [path] [flags]
 gc start
   gc start ~/my-city
   gc start --foreground
-  gc start -f overlay.toml --strict
+  gc start -f overlay.toml --no-strict
 ```
 
 | Flag | Type | Default | Description |
@@ -1379,7 +1379,7 @@ gc start
 | `-n`, `--dry-run` | bool |  | preview what agents would start without starting them |
 | `-f`, `--file` | stringArray |  | additional config files to layer (can be repeated) |
 | `--foreground` | bool |  | run as a persistent controller (reconcile loop) |
-| `--strict` | bool |  | promote config collision warnings to errors |
+| `--no-strict` | bool |  | disable strict config collision checking (strict is on by default) |
 
 ## gc status
 

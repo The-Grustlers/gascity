@@ -13,7 +13,7 @@
 name = "lifecycle-demo"
 start_command = "true"
 # No workspace pack — all agents are rig-scoped.
-# Use: gc rig add <repo> --pack packs/lifecycle
+# Use: gc rig add <repo> --include packs/lifecycle
 
 [daemon]
 patrol_interval = "10s"

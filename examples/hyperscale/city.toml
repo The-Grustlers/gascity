@@ -13,7 +13,7 @@
 [workspace]
 name = "hyperscale"
 provider = "claude"
-pack = "packs/hyperscale"
+includes = ["packs/hyperscale"]
 isolation = "none"
 
 [session]

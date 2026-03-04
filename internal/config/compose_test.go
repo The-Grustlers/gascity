@@ -776,7 +776,7 @@ name = "agent-b"
 	fs.Files["/city/city.toml"] = []byte(`
 [workspace]
 name = "test"
-packs = ["packs/alpha", "packs/beta"]
+includes = ["packs/alpha", "packs/beta"]
 
 [[agents]]
 name = "existing"
@@ -837,7 +837,7 @@ name = "mayor"
 [[rigs]]
 name = "hw"
 path = "/home/user/hw"
-packs = ["packs/alpha", "packs/beta"]
+includes = ["packs/alpha", "packs/beta"]
 `)
 	cfg, prov, err := LoadWithIncludes(fs, "/city/city.toml")
 	if err != nil {
@@ -888,15 +888,14 @@ name = "from-plural"
 	fs.Files["/city/city.toml"] = []byte(`
 [workspace]
 name = "test"
-pack = "packs/singular"
-packs = ["packs/plural"]
+includes = ["packs/singular", "packs/plural"]
 `)
 	cfg, _, err := LoadWithIncludes(fs, "/city/city.toml")
 	if err != nil {
 		t.Fatalf("LoadWithIncludes: %v", err)
 	}
 
-	// Should have 2 agents: from-singular (pack field prepended), then from-plural.
+	// Should have 2 agents: from-singular first, then from-plural.
 	if len(cfg.Agents) != 2 {
 		t.Fatalf("got %d agents, want 2", len(cfg.Agents))
 	}

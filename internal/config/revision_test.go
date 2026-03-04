@@ -92,7 +92,7 @@ schema = 1
 	prov := &Provenance{
 		Sources: []string{filepath.Join(dir, "city.toml")},
 	}
-	cfg := &City{Rigs: []Rig{{Name: "hw", Path: "/hw", Pack: "packs/gt"}}}
+	cfg := &City{Rigs: []Rig{{Name: "hw", Path: "/hw", Includes: []string{"packs/gt"}}}}
 
 	h1 := Revision(fsys.OSFS{}, prov, cfg, dir)
 
@@ -120,7 +120,7 @@ name = "worker"
 	prov := &Provenance{
 		Sources: []string{filepath.Join(dir, "city.toml")},
 	}
-	cfg := &City{Workspace: Workspace{Pack: "packs/shared"}}
+	cfg := &City{Workspace: Workspace{Includes: []string{"packs/shared"}}}
 
 	h1 := Revision(fsys.OSFS{}, prov, cfg, dir)
 
@@ -181,7 +181,7 @@ func TestWatchDirs_WithPack(t *testing.T) {
 	prov := &Provenance{
 		Sources: []string{filepath.Join(dir, "city.toml")},
 	}
-	cfg := &City{Rigs: []Rig{{Name: "hw", Path: "/hw", Pack: "packs/gt"}}}
+	cfg := &City{Rigs: []Rig{{Name: "hw", Path: "/hw", Includes: []string{"packs/gt"}}}}
 
 	dirs := WatchDirs(prov, cfg, dir)
 
@@ -206,7 +206,7 @@ func TestWatchDirs_WithCityPack(t *testing.T) {
 	prov := &Provenance{
 		Sources: []string{filepath.Join(dir, "city.toml")},
 	}
-	cfg := &City{Workspace: Workspace{Pack: "packs/shared"}}
+	cfg := &City{Workspace: Workspace{Includes: []string{"packs/shared"}}}
 
 	dirs := WatchDirs(prov, cfg, dir)
 

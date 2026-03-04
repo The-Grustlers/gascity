@@ -48,7 +48,7 @@ stdout 'City stopped.'
 [workspace]
 name = "testcity"
 provider = "claude"
-pack = "packs/main"
+includes = ["packs/main"]
 
 [daemon]
 patrol_interval = "30s"

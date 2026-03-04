@@ -6,7 +6,7 @@
 #
 # Usage in city.toml:
 #   [workspace]
-#   packs = ["packs/wasteland-feeder"]
+#   includes = ["packs/wasteland-feeder"]
 #
 # Required env vars (set before `gc start`):
 #   WL_BIN          — path to the `wl` CLI (default: "wl")

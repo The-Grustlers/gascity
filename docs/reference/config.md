@@ -314,8 +314,6 @@ Rig defines an external project registered in the city.
 | `path` | string | **yes** |  | Path is the absolute filesystem path to the rig's repository. |
 | `prefix` | string |  |  | Prefix overrides the auto-derived bead ID prefix for this rig. |
 | `suspended` | boolean |  |  | Suspended prevents the reconciler from spawning agents in this rig. Toggle with gc rig suspend/resume. |
-| `pack` | string |  |  | Pack is the path to a pack directory to stamp agents from. Relative paths resolve against the declaring config file's directory. |
-| `packs` | []string |  |  | RigPacks lists multiple pack directories for this rig. Each is loaded and expanded like Pack. When both Pack and RigPacks are set, Pack is prepended to the list. |
 | `formulas_dir` | string |  |  | FormulasDir is a rig-local formula directory (Layer 4). Overrides pack formulas for this rig by filename. Relative paths resolve against the city directory. |
 | `includes` | []string |  |  | Includes lists pack directories or URLs for this rig. Replaces the older pack/packs fields. Each entry is a local path, a git source//sub#ref URL, or a GitHub tree URL. |
 | `overrides` | []AgentOverride |  |  | Overrides are per-agent patches applied after pack expansion. |
@@ -362,8 +360,6 @@ Workspace holds city-level metadata and optional defaults that apply to all agen
 | `suspended` | boolean |  |  | Suspended controls whether the city is suspended. When true, all agents are effectively suspended: the reconciler won't spawn them, and gc hook/prime return empty. Inherits downward — individual agent/rig suspended fields are checked independently. |
 | `session_template` | string |  |  | SessionTemplate is a template string supporting placeholders: {{.City}}, {{.Agent}} (sanitized), {{.Dir}}, {{.Name}}. Controls tmux session naming. Default (empty): "{{.Agent}}" — just the sanitized agent name. Per-city tmux socket isolation makes a city prefix unnecessary. |
 | `install_agent_hooks` | []string |  |  | InstallAgentHooks lists provider names whose hooks should be installed into agent working directories. Agent-level overrides workspace-level (replace, not additive). Supported: "claude", "gemini", "opencode", "copilot". |
-| `pack` | string |  |  | Pack is the path to a city-level pack directory. Stamps agents with dir="" (city-scoped). Resolved like rig packs. Combined with rig-level packs — city pack agents get dir="" while rig pack agents inherit the rig name as their dir. |
-| `packs` | []string |  |  | CityPacks lists multiple city-level pack directories. Each is loaded and expanded like Pack. When both Pack and CityPacks are set, Pack is prepended to the list. Agents from the first pack come first (deterministic ordering). |
 | `global_fragments` | []string |  |  | GlobalFragments lists named template fragments injected into every agent's rendered prompt. Applied before per-agent InjectFragments. Each name must match a {{ define "name" }} block from a pack's prompts/shared/ directory. |
 | `includes` | []string |  |  | Includes lists pack directories or URLs to compose into this workspace. Replaces the older pack/packs fields. Each entry is a local path, a git source//sub#ref URL, or a GitHub tree URL. |
 

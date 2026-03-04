@@ -41,7 +41,7 @@ name = "refinery"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hello-world", Path: "/home/user/hello-world", Pack: "packs/gastown"},
+			{Name: "hello-world", Path: "/home/user/hello-world", Includes: []string{"packs/gastown"}},
 		},
 	}
 
@@ -81,8 +81,8 @@ max = 3
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "proj-a", Path: "/a", Pack: "packs/gastown"},
-			{Name: "proj-b", Path: "/b", Pack: "packs/gastown"},
+			{Name: "proj-a", Path: "/a", Includes: []string{"packs/gastown"}},
+			{Name: "proj-b", Path: "/b", Includes: []string{"packs/gastown"}},
 		},
 	}
 
@@ -135,7 +135,7 @@ name = "worker"
 	cfg := &City{
 		Agents: []Agent{{Name: "mayor"}},
 		Rigs: []Rig{
-			{Name: "with-topo", Path: "/a", Pack: "packs/basic"},
+			{Name: "with-topo", Path: "/a", Includes: []string{"packs/basic"}},
 			{Name: "no-topo", Path: "/b"},
 		},
 	}
@@ -171,9 +171,9 @@ name = "witness"
 	cfg := &City{
 		Rigs: []Rig{
 			{
-				Name: "monorepo",
-				Path: "/home/user/mono",
-				Pack: "packs/gt",
+				Name:     "monorepo",
+				Path:     "/home/user/mono",
+				Includes: []string{"packs/gt"},
 				Overrides: []AgentOverride{
 					{Agent: "witness", Dir: &dirOverride},
 				},
@@ -209,9 +209,9 @@ max = 3
 	cfg := &City{
 		Rigs: []Rig{
 			{
-				Name: "big-project",
-				Path: "/big",
-				Pack: "packs/gt",
+				Name:     "big-project",
+				Path:     "/big",
+				Includes: []string{"packs/gt"},
 				Overrides: []AgentOverride{
 					{Agent: "polecat", Pool: &PoolOverride{Max: &maxOverride}},
 				},
@@ -250,9 +250,9 @@ name = "witness"
 	cfg := &City{
 		Rigs: []Rig{
 			{
-				Name: "hw",
-				Path: "/hw",
-				Pack: "packs/gt",
+				Name:     "hw",
+				Path:     "/hw",
+				Includes: []string{"packs/gt"},
 				Overrides: []AgentOverride{
 					{Agent: "witness", Suspended: &suspended},
 				},
@@ -285,9 +285,9 @@ name = "witness"
 	cfg := &City{
 		Rigs: []Rig{
 			{
-				Name: "hw",
-				Path: "/hw",
-				Pack: "packs/gt",
+				Name:     "hw",
+				Path:     "/hw",
+				Includes: []string{"packs/gt"},
 				Overrides: []AgentOverride{
 					{Agent: "nonexistent", Suspended: &suspended},
 				},
@@ -310,7 +310,7 @@ func TestExpandPacks_MissingPackFile(t *testing.T) {
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "packs/empty"},
+			{Name: "hw", Path: "/hw", Includes: []string{"packs/empty"}},
 		},
 	}
 
@@ -331,7 +331,7 @@ schema = 99
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "packs/future"},
+			{Name: "hw", Path: "/hw", Includes: []string{"packs/future"}},
 		},
 	}
 
@@ -354,7 +354,7 @@ schema = 1
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "packs/bad"},
+			{Name: "hw", Path: "/hw", Includes: []string{"packs/bad"}},
 		},
 	}
 
@@ -374,7 +374,7 @@ version = "1.0.0"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "packs/bad"},
+			{Name: "hw", Path: "/hw", Includes: []string{"packs/bad"}},
 		},
 	}
 
@@ -403,7 +403,7 @@ prompt_template = "//prompts/shared.md"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "packs/gt"},
+			{Name: "hw", Path: "/hw", Includes: []string{"packs/gt"}},
 		},
 	}
 
@@ -443,7 +443,7 @@ provider = "codex"
 			"claude": {Command: "claude"},
 		},
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "packs/gt"},
+			{Name: "hw", Path: "/hw", Includes: []string{"packs/gt"}},
 		},
 	}
 
@@ -481,7 +481,7 @@ name = "witness"
 			"claude": {Command: "claude-original"},
 		},
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "packs/gt"},
+			{Name: "hw", Path: "/hw", Includes: []string{"packs/gt"}},
 		},
 	}
 
@@ -586,7 +586,7 @@ name = "mayor"
 [[rigs]]
 name = "hello-world"
 path = "/home/user/hw"
-pack = "packs/gt"
+includes = ["packs/gt"]
 `)
 
 	cfg, prov, err := LoadWithIncludes(fsys.OSFS{}, filepath.Join(dir, "city.toml"))
@@ -634,9 +634,9 @@ DEBUG = "false"
 	cfg := &City{
 		Rigs: []Rig{
 			{
-				Name: "hw",
-				Path: "/hw",
-				Pack: "packs/gt",
+				Name:     "hw",
+				Path:     "/hw",
+				Includes: []string{"packs/gt"},
 				Overrides: []AgentOverride{
 					{
 						Agent:     "witness",
@@ -678,7 +678,7 @@ name = "witness"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "packs/gt"},
+			{Name: "hw", Path: "/hw", Includes: []string{"packs/gt"}},
 			{Name: "simple", Path: "/simple"},
 		},
 	}
@@ -706,15 +706,15 @@ func TestResolveNamedPacks_Basic(t *testing.T) {
 			"gastown": {Source: "https://example.com/gastown.git"},
 		},
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "gastown"},
+			{Name: "hw", Path: "/hw", Includes: []string{"gastown"}},
 		},
 	}
 
 	resolveNamedPacks(cfg, "/city")
 
 	want := "/city/.gc/packs/gastown"
-	if cfg.Rigs[0].Pack != want {
-		t.Errorf("Pack = %q, want %q", cfg.Rigs[0].Pack, want)
+	if cfg.Rigs[0].Includes[0] != want {
+		t.Errorf("Includes[0] = %q, want %q", cfg.Rigs[0].Includes[0], want)
 	}
 }
 
@@ -724,15 +724,15 @@ func TestResolveNamedPacks_WithPath(t *testing.T) {
 			"mono": {Source: "https://example.com/mono.git", Path: "packages/topo"},
 		},
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "mono"},
+			{Name: "hw", Path: "/hw", Includes: []string{"mono"}},
 		},
 	}
 
 	resolveNamedPacks(cfg, "/city")
 
 	want := "/city/.gc/packs/mono/packages/topo"
-	if cfg.Rigs[0].Pack != want {
-		t.Errorf("Pack = %q, want %q", cfg.Rigs[0].Pack, want)
+	if cfg.Rigs[0].Includes[0] != want {
+		t.Errorf("Includes[0] = %q, want %q", cfg.Rigs[0].Includes[0], want)
 	}
 }
 
@@ -742,30 +742,30 @@ func TestResolveNamedPacks_LocalPathUnchanged(t *testing.T) {
 			"gastown": {Source: "https://example.com/gastown.git"},
 		},
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "packs/mine"},
+			{Name: "hw", Path: "/hw", Includes: []string{"packs/mine"}},
 		},
 	}
 
 	resolveNamedPacks(cfg, "/city")
 
 	// "packs/mine" doesn't match any key in Packs, so it stays as-is.
-	if cfg.Rigs[0].Pack != "packs/mine" {
-		t.Errorf("Pack = %q, want %q", cfg.Rigs[0].Pack, "packs/mine")
+	if cfg.Rigs[0].Includes[0] != "packs/mine" {
+		t.Errorf("Includes[0] = %q, want %q", cfg.Rigs[0].Includes[0], "packs/mine")
 	}
 }
 
 func TestResolveNamedPacks_EmptyPacksMap(t *testing.T) {
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "packs/local"},
+			{Name: "hw", Path: "/hw", Includes: []string{"packs/local"}},
 		},
 	}
 
 	resolveNamedPacks(cfg, "/city")
 
 	// No packs map — should be a no-op.
-	if cfg.Rigs[0].Pack != "packs/local" {
-		t.Errorf("Pack = %q, want %q", cfg.Rigs[0].Pack, "packs/local")
+	if cfg.Rigs[0].Includes[0] != "packs/local" {
+		t.Errorf("Includes[0] = %q, want %q", cfg.Rigs[0].Includes[0], "packs/local")
 	}
 }
 
@@ -776,18 +776,15 @@ func TestHasPackRigs(t *testing.T) {
 	if HasPackRigs([]Rig{{Name: "a", Path: "/a"}}) {
 		t.Error("rig without pack should return false")
 	}
-	if !HasPackRigs([]Rig{{Name: "a", Path: "/a", Pack: "topo"}}) {
-		t.Error("rig with pack should return true")
-	}
-	if !HasPackRigs([]Rig{{Name: "a", Path: "/a", RigPacks: []string{"topo"}}}) {
-		t.Error("rig with plural packs should return true")
+	if !HasPackRigs([]Rig{{Name: "a", Path: "/a", Includes: []string{"topo"}}}) {
+		t.Error("rig with includes should return true")
 	}
 }
 
 // --- EffectiveCityPacks tests ---
 
 func TestEffectiveCityPacks_SingularOnly(t *testing.T) {
-	ws := Workspace{Pack: "packs/gastown"}
+	ws := Workspace{Includes: []string{"packs/gastown"}}
 	got := EffectiveCityPacks(ws)
 	if len(got) != 1 || got[0] != "packs/gastown" {
 		t.Errorf("got %v, want [packs/gastown]", got)
@@ -795,21 +792,20 @@ func TestEffectiveCityPacks_SingularOnly(t *testing.T) {
 }
 
 func TestEffectiveCityPacks_PluralOnly(t *testing.T) {
-	ws := Workspace{CityPacks: []string{"packs/a", "packs/b"}}
+	ws := Workspace{Includes: []string{"packs/a", "packs/b"}}
 	got := EffectiveCityPacks(ws)
 	if len(got) != 2 || got[0] != "packs/a" || got[1] != "packs/b" {
 		t.Errorf("got %v, want [packs/a packs/b]", got)
 	}
 }
 
-func TestEffectiveCityPacks_Both(t *testing.T) {
+func TestEffectiveCityPacks_Multiple(t *testing.T) {
 	ws := Workspace{
-		Pack:      "packs/singular",
-		CityPacks: []string{"packs/a", "packs/b"},
+		Includes: []string{"packs/a", "packs/b", "packs/c"},
 	}
 	got := EffectiveCityPacks(ws)
-	if len(got) != 3 || got[0] != "packs/singular" || got[1] != "packs/a" || got[2] != "packs/b" {
-		t.Errorf("got %v, want [packs/singular packs/a packs/b]", got)
+	if len(got) != 3 || got[0] != "packs/a" || got[1] != "packs/b" || got[2] != "packs/c" {
+		t.Errorf("got %v, want [packs/a packs/b packs/c]", got)
 	}
 }
 
@@ -824,7 +820,7 @@ func TestEffectiveCityPacks_Neither(t *testing.T) {
 // --- EffectiveRigPacks tests ---
 
 func TestEffectiveRigPacks_SingularOnly(t *testing.T) {
-	rig := Rig{Pack: "packs/gastown"}
+	rig := Rig{Includes: []string{"packs/gastown"}}
 	got := EffectiveRigPacks(rig)
 	if len(got) != 1 || got[0] != "packs/gastown" {
 		t.Errorf("got %v, want [packs/gastown]", got)
@@ -832,21 +828,20 @@ func TestEffectiveRigPacks_SingularOnly(t *testing.T) {
 }
 
 func TestEffectiveRigPacks_PluralOnly(t *testing.T) {
-	rig := Rig{RigPacks: []string{"packs/a", "packs/b"}}
+	rig := Rig{Includes: []string{"packs/a", "packs/b"}}
 	got := EffectiveRigPacks(rig)
 	if len(got) != 2 || got[0] != "packs/a" || got[1] != "packs/b" {
 		t.Errorf("got %v, want [packs/a packs/b]", got)
 	}
 }
 
-func TestEffectiveRigPacks_Both(t *testing.T) {
+func TestEffectiveRigPacks_Multiple(t *testing.T) {
 	rig := Rig{
-		Pack:     "packs/singular",
-		RigPacks: []string{"packs/a", "packs/b"},
+		Includes: []string{"packs/a", "packs/b", "packs/c"},
 	}
 	got := EffectiveRigPacks(rig)
-	if len(got) != 3 || got[0] != "packs/singular" || got[1] != "packs/a" || got[2] != "packs/b" {
-		t.Errorf("got %v, want [packs/singular packs/a packs/b]", got)
+	if len(got) != 3 || got[0] != "packs/a" || got[1] != "packs/b" || got[2] != "packs/c" {
+		t.Errorf("got %v, want [packs/a packs/b packs/c]", got)
 	}
 }
 
@@ -880,7 +875,7 @@ name = "agent-b"
 `)
 
 	cfg := &City{
-		Workspace: Workspace{CityPacks: []string{
+		Workspace: Workspace{Includes: []string{
 			"packs/alpha", "packs/beta",
 		}},
 		Agents: []Agent{{Name: "existing"}},
@@ -939,7 +934,7 @@ name = "agent-b"
 	writeFile(t, dir, "packs/beta/formulas/mol-b.toml", "test")
 
 	cfg := &City{
-		Workspace: Workspace{CityPacks: []string{
+		Workspace: Workspace{Includes: []string{
 			"packs/alpha", "packs/beta",
 		}},
 	}
@@ -989,7 +984,7 @@ name = "mayor"
 `)
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/gt"},
+		Workspace: Workspace{Includes: []string{"packs/gt"}},
 	}
 
 	dirs, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir)
@@ -1034,7 +1029,7 @@ name = "agent-b"
 `)
 
 	cfg := &City{
-		Workspace: Workspace{CityPacks: []string{
+		Workspace: Workspace{Includes: []string{
 			"packs/alpha", "packs/beta",
 		}},
 		Providers: map[string]ProviderSpec{
@@ -1088,7 +1083,7 @@ name = "worker-b"
 			{
 				Name: "hw",
 				Path: "/hw",
-				RigPacks: []string{
+				Includes: []string{
 					"packs/alpha", "packs/beta",
 				},
 			},
@@ -1145,7 +1140,7 @@ name = "worker-b"
 			{
 				Name: "hw",
 				Path: "/hw",
-				RigPacks: []string{
+				Includes: []string{
 					"packs/alpha", "packs/beta",
 				},
 			},
@@ -1226,9 +1221,9 @@ install_agent_hooks = ["claude"]
 	cfg := &City{
 		Workspace: Workspace{Name: "test"},
 		Rigs: []Rig{{
-			Name: "myrig",
-			Path: "/repo",
-			Pack: "packs/test",
+			Name:     "myrig",
+			Path:     "/repo",
+			Includes: []string{"packs/test"},
 			Overrides: []AgentOverride{{
 				Agent:             "polecat",
 				InstallAgentHooks: []string{"gemini", "copilot"},
@@ -1276,7 +1271,7 @@ name = "deacon"
 	writeFile(t, dir, "packs/gastown/prompts/mayor.md", "you are the mayor")
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/gastown"},
+		Workspace: Workspace{Includes: []string{"packs/gastown"}},
 		Agents:    []Agent{{Name: "existing"}},
 	}
 
@@ -1329,7 +1324,7 @@ name = "mayor"
 	writeFile(t, dir, "packs/gastown/formulas/mol-a.formula.toml", "test formula")
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/gastown"},
+		Workspace: Workspace{Includes: []string{"packs/gastown"}},
 	}
 
 	formulaDir, err := ExpandCityPack(cfg, fsys.OSFS{}, dir)
@@ -1376,7 +1371,7 @@ name = "mayor"
 `)
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/gt"},
+		Workspace: Workspace{Includes: []string{"packs/gt"}},
 		Providers: map[string]ProviderSpec{
 			"claude": {Command: "claude"},
 		},
@@ -1505,7 +1500,7 @@ name = "witness"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hw", Path: "/home/user/hw", Pack: "packs/gt"},
+			{Name: "hw", Path: "/home/user/hw", Includes: []string{"packs/gt"}},
 		},
 	}
 
@@ -1534,7 +1529,7 @@ name = "witness"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "packs/gt"},
+			{Name: "hw", Path: "/hw", Includes: []string{"packs/gt"}},
 		},
 	}
 
@@ -1563,7 +1558,7 @@ session_setup_script = "scripts/setup.sh"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "packs/gt"},
+			{Name: "hw", Path: "/hw", Includes: []string{"packs/gt"}},
 		},
 	}
 
@@ -1591,7 +1586,7 @@ name = "mayor"
 `)
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/gastown"},
+		Workspace: Workspace{Includes: []string{"packs/gastown"}},
 	}
 
 	_, err := ExpandCityPack(cfg, fsys.OSFS{}, dir)
@@ -1620,7 +1615,7 @@ overlay_dir = "overlays/worker"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hw", Path: "/hw", Pack: "packs/gt"},
+			{Name: "hw", Path: "/hw", Includes: []string{"packs/gt"}},
 		},
 	}
 
@@ -1730,7 +1725,7 @@ name = "polecat"
 `)
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/combined"},
+		Workspace: Workspace{Includes: []string{"packs/combined"}},
 	}
 
 	_, err := ExpandCityPack(cfg, fsys.OSFS{}, dir)
@@ -1781,7 +1776,7 @@ name = "polecat"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hw", Path: "/home/user/hw", Pack: "packs/combined"},
+			{Name: "hw", Path: "/home/user/hw", Includes: []string{"packs/combined"}},
 		},
 	}
 
@@ -1824,7 +1819,7 @@ name = "beta"
 `)
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/simple"},
+		Workspace: Workspace{Includes: []string{"packs/simple"}},
 	}
 
 	_, err := ExpandCityPack(cfg, fsys.OSFS{}, dir)
@@ -1862,7 +1857,7 @@ name = "worker"
 		Rigs: []Rig{{
 			Name:     "myrig",
 			Path:     "/tmp/myrig",
-			RigPacks: []string{"packs/base", "packs/extras"},
+			Includes: []string{"packs/base", "packs/extras"},
 		}},
 	}
 
@@ -1908,7 +1903,7 @@ name = "overseer"
 
 	cfg := &City{
 		Workspace: Workspace{
-			CityPacks: []string{"packs/alpha", "packs/beta"},
+			Includes: []string{"packs/alpha", "packs/beta"},
 		},
 	}
 
@@ -1955,7 +1950,7 @@ name = "reviewer"
 		Rigs: []Rig{{
 			Name:     "myrig",
 			Path:     "/tmp/myrig",
-			RigPacks: []string{"packs/base", "packs/extras"},
+			Includes: []string{"packs/base", "packs/extras"},
 		}},
 	}
 
@@ -1982,8 +1977,8 @@ name = "worker"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "rig-a", Path: "/tmp/a", Pack: "packs/shared"},
-			{Name: "rig-b", Path: "/tmp/b", Pack: "packs/shared"},
+			{Name: "rig-a", Path: "/tmp/a", Includes: []string{"packs/shared"}},
+			{Name: "rig-b", Path: "/tmp/b", Includes: []string{"packs/shared"}},
 		},
 	}
 
@@ -2293,7 +2288,7 @@ name = "witness"
 	writeFile(t, dir, "packs/gastown/formulas/.keep", "")
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/gastown"},
+		Workspace: Workspace{Includes: []string{"packs/gastown"}},
 	}
 	formulaDirs, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir)
 	if err != nil {
@@ -2342,7 +2337,7 @@ prompt_template = "prompts/worker.md.tmpl"
 	writeFile(t, tmp, "city.toml", `
 [workspace]
 name = "test"
-pack = "packs/alpha"
+includes = ["packs/alpha"]
 `)
 
 	cfg, _, err := LoadWithIncludes(fsys.OSFS{}, filepath.Join(tmp, "city.toml"))
@@ -2498,7 +2493,7 @@ scope = "rig"
 
 	cfg := &City{
 		Workspace: Workspace{
-			Pack: "packs/test",
+			Includes: []string{"packs/test"},
 		},
 	}
 
@@ -2534,7 +2529,7 @@ scope = "rig"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "myrig", Path: "/tmp/myrig", Pack: "packs/test"},
+			{Name: "myrig", Path: "/tmp/myrig", Includes: []string{"packs/test"}},
 		},
 	}
 
@@ -2565,11 +2560,9 @@ func TestEffectiveCityPacks_Includes(t *testing.T) {
 	}
 }
 
-func TestEffectiveCityPacks_MixedOldAndNew(t *testing.T) {
+func TestEffectiveCityPacks_IncludesOnly(t *testing.T) {
 	ws := Workspace{
-		Pack:      "packs/main",
-		CityPacks: []string{"packs/extra"},
-		Includes:  []string{"packs/new"},
+		Includes: []string{"packs/main", "packs/extra", "packs/new"},
 	}
 	got := EffectiveCityPacks(ws)
 	want := []string{"packs/main", "packs/extra", "packs/new"}
@@ -2691,7 +2684,7 @@ scope = "city"
 `)
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/consumer"},
+		Workspace: Workspace{Includes: []string{"packs/consumer"}},
 	}
 
 	_, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir)
@@ -2727,7 +2720,7 @@ scope = "city"
 	writeFile(t, dir, "city.toml", `
 [workspace]
 name = "test"
-pack = "packs/consumer"
+includes = ["packs/consumer"]
 `)
 	_, _, err := LoadWithIncludes(fsys.OSFS{}, filepath.Join(dir, "city.toml"))
 	if err == nil {
@@ -2772,7 +2765,7 @@ scope = "rig"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "myrig", Path: "/tmp/myrig", Pack: "packs/consumer"},
+			{Name: "myrig", Path: "/tmp/myrig", Includes: []string{"packs/consumer"}},
 		},
 	}
 
@@ -2806,7 +2799,7 @@ scope = "rig"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "myrig", Path: "/tmp/myrig", Pack: "packs/consumer"},
+			{Name: "myrig", Path: "/tmp/myrig", Includes: []string{"packs/consumer"}},
 		},
 	}
 
@@ -2836,7 +2829,7 @@ agent = "dog"
 `)
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/bad"},
+		Workspace: Workspace{Includes: []string{"packs/bad"}},
 	}
 
 	_, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir)
@@ -2862,7 +2855,7 @@ agent = ""
 `)
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/bad"},
+		Workspace: Workspace{Includes: []string{"packs/bad"}},
 	}
 
 	_, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir)
@@ -2906,7 +2899,7 @@ nudge = "fallback dog"
 
 	cfg := &City{
 		Workspace: Workspace{
-			CityPacks: []string{"packs/maintenance", "packs/dolt"},
+			Includes: []string{"packs/maintenance", "packs/dolt"},
 		},
 	}
 
@@ -2958,7 +2951,7 @@ nudge = "beta dog"
 
 	cfg := &City{
 		Workspace: Workspace{
-			CityPacks: []string{"packs/alpha", "packs/beta"},
+			Includes: []string{"packs/alpha", "packs/beta"},
 		},
 	}
 
@@ -3005,7 +2998,7 @@ scope = "city"
 
 	cfg := &City{
 		Workspace: Workspace{
-			CityPacks: []string{"packs/alpha", "packs/beta"},
+			Includes: []string{"packs/alpha", "packs/beta"},
 		},
 	}
 
@@ -3034,7 +3027,7 @@ nudge = "standalone fallback"
 `)
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/health"},
+		Workspace: Workspace{Includes: []string{"packs/health"}},
 	}
 
 	_, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir)
@@ -3069,7 +3062,7 @@ inject_fragments = ["tdd"]
 `)
 	cfg := &City{
 		Rigs: []Rig{{
-			Name: "hw", Path: "/tmp/hw", Pack: "packs/test",
+			Name: "hw", Path: "/tmp/hw", Includes: []string{"packs/test"},
 			Overrides: []AgentOverride{{
 				Agent:                   "polecat",
 				PreStartAppend:          []string{"extra-setup.sh"},
@@ -3114,7 +3107,7 @@ pre_start = ["old-a.sh", "old-b.sh"]
 `)
 	cfg := &City{
 		Rigs: []Rig{{
-			Name: "hw", Path: "/tmp/hw", Pack: "packs/test",
+			Name: "hw", Path: "/tmp/hw", Includes: []string{"packs/test"},
 			Overrides: []AgentOverride{{
 				Agent:          "polecat",
 				PreStart:       []string{"new-base.sh"},
@@ -3143,7 +3136,7 @@ name = "polecat"
 `)
 	cfg := &City{
 		Rigs: []Rig{{
-			Name: "hw", Path: "/tmp/hw", Pack: "packs/test",
+			Name: "hw", Path: "/tmp/hw", Includes: []string{"packs/test"},
 			Overrides: []AgentOverride{{
 				Agent:              "polecat",
 				PreStartAppend:     []string{"setup.sh"},
@@ -3191,7 +3184,7 @@ session_setup_script = "scripts/theme.sh"
 	writeFile(t, dir, "packs/overlay/scripts/theme.sh", "#!/bin/sh\necho themed")
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/overlay"},
+		Workspace: Workspace{Includes: []string{"packs/overlay"}},
 	}
 	_, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir)
 	if err != nil {
@@ -3242,7 +3235,7 @@ overlay_dir = "overlays/custom"
 `)
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/overlay"},
+		Workspace: Workspace{Includes: []string{"packs/overlay"}},
 	}
 	_, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir)
 	if err != nil {
@@ -3287,7 +3280,7 @@ nudge = "boo"
 `)
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/overlay"},
+		Workspace: Workspace{Includes: []string{"packs/overlay"}},
 	}
 	_, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir)
 	if err == nil {
@@ -3327,7 +3320,7 @@ pre_start_append = ["extra.sh"]
 `)
 
 	cfg := &City{
-		Workspace: Workspace{Pack: "packs/overlay"},
+		Workspace: Workspace{Includes: []string{"packs/overlay"}},
 	}
 	_, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir)
 	if err != nil {
@@ -3505,7 +3498,7 @@ name = "worker"
 	writeFile(t, dir, "packs/skills/overlay/.claude/skills/plan/SKILL.md", "plan skill")
 
 	cfg := &City{
-		Workspace: Workspace{CityPacks: []string{"packs/skills"}},
+		Workspace: Workspace{Includes: []string{"packs/skills"}},
 	}
 
 	if _, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir); err != nil {
@@ -3532,7 +3525,7 @@ schema = 1
 name = "worker"
 `)
 	cfg := &City{
-		Workspace: Workspace{CityPacks: []string{"packs/bare"}},
+		Workspace: Workspace{Includes: []string{"packs/bare"}},
 	}
 
 	if _, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir); err != nil {
@@ -3567,7 +3560,7 @@ schema = 1
 	writeFile(t, dir, "packs/beta/overlay/b.txt", "from beta")
 
 	cfg := &City{
-		Workspace: Workspace{CityPacks: []string{"packs/alpha", "packs/beta"}},
+		Workspace: Workspace{Includes: []string{"packs/alpha", "packs/beta"}},
 	}
 
 	if _, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir); err != nil {
@@ -3596,7 +3589,7 @@ name = "coder"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "my-project", Path: "/tmp/project", Pack: "packs/rig-skills"},
+			{Name: "my-project", Path: "/tmp/project", Includes: []string{"packs/rig-skills"}},
 		},
 	}
 
@@ -3630,7 +3623,7 @@ name = "worker"
 
 	cfg := &City{
 		Rigs: []Rig{
-			{Name: "hw", Path: "/tmp/hw", Pack: "packs/bare"},
+			{Name: "hw", Path: "/tmp/hw", Includes: []string{"packs/bare"}},
 		},
 	}
 
@@ -3670,7 +3663,7 @@ includes = ["../child"]
 	writeFile(t, dir, "packs/parent/overlay/parent.txt", "from parent")
 
 	cfg := &City{
-		Workspace: Workspace{CityPacks: []string{"packs/parent"}},
+		Workspace: Workspace{Includes: []string{"packs/parent"}},
 	}
 
 	if _, _, err := ExpandCityPacks(cfg, fsys.OSFS{}, dir); err != nil {

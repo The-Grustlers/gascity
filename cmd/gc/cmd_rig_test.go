@@ -484,11 +484,11 @@ func TestDoRigAdd_WithPack(t *testing.T) {
 	}
 
 	output := stdout.String()
-	if !strings.Contains(output, "Pack: packs/gastown") {
-		t.Errorf("output missing pack: %s", output)
+	if !strings.Contains(output, "Include: packs/gastown") {
+		t.Errorf("output missing include: %s", output)
 	}
 
-	// Verify city.toml has pack field.
+	// Verify city.toml has includes field.
 	data, err := os.ReadFile(filepath.Join(cityPath, "city.toml"))
 	if err != nil {
 		t.Fatal(err)
@@ -500,8 +500,8 @@ func TestDoRigAdd_WithPack(t *testing.T) {
 	if len(cfg.Rigs) != 1 {
 		t.Fatalf("expected 1 rig, got %d", len(cfg.Rigs))
 	}
-	if cfg.Rigs[0].Pack != "packs/gastown" {
-		t.Errorf("rig pack = %q, want %q; city.toml:\n%s", cfg.Rigs[0].Pack, "packs/gastown", data)
+	if len(cfg.Rigs[0].Includes) != 1 || cfg.Rigs[0].Includes[0] != "packs/gastown" {
+		t.Errorf("rig includes = %v, want [packs/gastown]; city.toml:\n%s", cfg.Rigs[0].Includes, data)
 	}
 }
 
@@ -530,8 +530,8 @@ func TestDoRigAdd_WithoutPack(t *testing.T) {
 	}
 
 	output := stdout.String()
-	if strings.Contains(output, "Pack:") {
-		t.Errorf("output should not contain pack line when not set: %s", output)
+	if strings.Contains(output, "Include:") {
+		t.Errorf("output should not contain include line when not set: %s", output)
 	}
 
 	cfg, err := config.Load(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
@@ -541,8 +541,8 @@ func TestDoRigAdd_WithoutPack(t *testing.T) {
 	if len(cfg.Rigs) != 1 {
 		t.Fatalf("expected 1 rig, got %d", len(cfg.Rigs))
 	}
-	if cfg.Rigs[0].Pack != "" {
-		t.Errorf("rig pack should be empty, got %q", cfg.Rigs[0].Pack)
+	if len(cfg.Rigs[0].Includes) != 0 {
+		t.Errorf("rig includes should be empty, got %v", cfg.Rigs[0].Includes)
 	}
 }
 

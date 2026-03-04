@@ -13,7 +13,7 @@
 name = "swarm-lifecycle"
 start_command = "true"
 # No workspace pack — all agents are rig-scoped.
-# Use: gc rig add <repo> --pack packs/swarm-lifecycle
+# Use: gc rig add <repo> --include packs/swarm-lifecycle
 
 [daemon]
 patrol_interval = "10s"

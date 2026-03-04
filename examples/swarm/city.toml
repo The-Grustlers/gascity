@@ -14,7 +14,7 @@
 [workspace]
 name = "swarm"
 provider = "claude"
-pack = "packs/swarm"
+includes = ["packs/swarm"]
 
 [daemon]
 patrol_interval = "30s"
@@ -26,4 +26,4 @@ shutdown_timeout = "5s"
 # [[rigs]]
 # name = "myproject"
 # path = "/path/to/your/project"
-# pack = "packs/swarm"
+# includes = ["packs/swarm"]
