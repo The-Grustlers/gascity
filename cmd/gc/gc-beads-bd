@@ -599,6 +599,9 @@ op_init() {
     if [ -f "$dir/.beads/metadata.json" ]; then
         ensure_database_registered "$prefix" || true
         ensure_metadata "$dir/.beads/metadata.json" "$prefix"
+        # Ensure issue_prefix is set (may be missing if bd init was run
+        # manually or metadata was created without full initialization).
+        bd config set issue_prefix "$prefix" --dir "$dir" 2>/dev/null || true
         exit 0
     fi
 
