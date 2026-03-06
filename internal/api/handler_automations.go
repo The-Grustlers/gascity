@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gastownhall/gascity/internal/automations"
 )
@@ -44,6 +45,62 @@ func (s *Server) handleAutomationGet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeError(w, http.StatusNotFound, "not_found", "automation "+name+" not found")
+}
+
+func (s *Server) handleAutomationEnable(w http.ResponseWriter, r *http.Request) {
+	s.setAutomationEnabled(w, r, true)
+}
+
+func (s *Server) handleAutomationDisable(w http.ResponseWriter, r *http.Request) {
+	s.setAutomationEnabled(w, r, false)
+}
+
+func (s *Server) setAutomationEnabled(w http.ResponseWriter, r *http.Request, enabled bool) {
+	sm, ok := s.state.(StateMutator)
+	if !ok {
+		writeError(w, http.StatusNotImplemented, "internal", "mutations not supported")
+		return
+	}
+
+	name := r.PathValue("name")
+
+	// Resolve name and rig from the automation list.
+	aa := s.state.Automations()
+	var found bool
+	var autoName, autoRig string
+	for _, a := range aa {
+		if a.Name == name || a.ScopedName() == name {
+			autoName = a.Name
+			autoRig = a.Rig
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "not_found", "automation "+name+" not found")
+		return
+	}
+
+	var err error
+	if enabled {
+		err = sm.EnableAutomation(autoName, autoRig)
+	} else {
+		err = sm.DisableAutomation(autoName, autoRig)
+	}
+	if err != nil {
+		if strings.Contains(err.Error(), "validating") {
+			writeError(w, http.StatusBadRequest, "invalid", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+
+	action := "enabled"
+	if !enabled {
+		action = "disabled"
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": action, "automation": autoName})
 }
 
 func toAutomationResponse(a automations.Automation) automationResponse {

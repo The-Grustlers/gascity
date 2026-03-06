@@ -111,6 +111,31 @@ func (f *fakeMutatorState) KillAgent(name string) error       { f.killed[name] =
 func (f *fakeMutatorState) DrainAgent(name string) error      { f.drained[name] = true; return nil }
 func (f *fakeMutatorState) UndrainAgent(name string) error    { delete(f.drained, name); return nil }
 func (f *fakeMutatorState) NudgeAgent(name, msg string) error { f.nudges[name] = msg; return nil }
+func (f *fakeMutatorState) EnableAutomation(name, rig string) error {
+	enabled := true
+	return f.SetAutomationOverrideEnabled(name, rig, &enabled)
+}
+
+func (f *fakeMutatorState) DisableAutomation(name, rig string) error {
+	enabled := false
+	return f.SetAutomationOverrideEnabled(name, rig, &enabled)
+}
+
+func (f *fakeMutatorState) SetAutomationOverrideEnabled(name, rig string, enabled *bool) error {
+	for i := range f.cfg.Automations.Overrides {
+		if f.cfg.Automations.Overrides[i].Name == name && f.cfg.Automations.Overrides[i].Rig == rig {
+			f.cfg.Automations.Overrides[i].Enabled = enabled
+			return nil
+		}
+	}
+	f.cfg.Automations.Overrides = append(f.cfg.Automations.Overrides, config.AutomationOverride{
+		Name:    name,
+		Rig:     rig,
+		Enabled: enabled,
+	})
+	return nil
+}
+
 func (f *fakeMutatorState) SuspendRig(name string) error {
 	cfg := f.Config()
 	found := false

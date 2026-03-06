@@ -182,3 +182,68 @@ func TestHandleAutomationGet_NotFound(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
 	}
 }
+
+func TestHandleAutomationDisable(t *testing.T) {
+	fs := newFakeMutatorState(t)
+	fs.autos = []automations.Automation{
+		{Name: "health", Exec: "echo ok", Gate: "cooldown"},
+	}
+	srv := New(fs)
+
+	req := newPostRequest("/v0/automation/health/disable", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	// Verify override was written.
+	if len(fs.cfg.Automations.Overrides) != 1 {
+		t.Fatalf("expected 1 override, got %d", len(fs.cfg.Automations.Overrides))
+	}
+	ov := fs.cfg.Automations.Overrides[0]
+	if ov.Name != "health" {
+		t.Errorf("override name = %q, want %q", ov.Name, "health")
+	}
+	if ov.Enabled == nil || *ov.Enabled {
+		t.Error("expected enabled=false")
+	}
+}
+
+func TestHandleAutomationEnable(t *testing.T) {
+	fs := newFakeMutatorState(t)
+	fs.autos = []automations.Automation{
+		{Name: "health", Exec: "echo ok", Gate: "cooldown"},
+	}
+	srv := New(fs)
+
+	req := newPostRequest("/v0/automation/health/enable", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	if len(fs.cfg.Automations.Overrides) != 1 {
+		t.Fatalf("expected 1 override, got %d", len(fs.cfg.Automations.Overrides))
+	}
+	ov := fs.cfg.Automations.Overrides[0]
+	if ov.Enabled == nil || !*ov.Enabled {
+		t.Error("expected enabled=true")
+	}
+}
+
+func TestHandleAutomationDisable_NotFound(t *testing.T) {
+	fs := newFakeMutatorState(t)
+	srv := New(fs)
+
+	req := newPostRequest("/v0/automation/nonexistent/disable", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+}

@@ -111,3 +111,25 @@ func TestHandleHealth(t *testing.T) {
 		t.Error("missing uptime_sec in health response")
 	}
 }
+
+func TestHandleStatus_Suspended(t *testing.T) {
+	state := newFakeState(t)
+	state.cfg.Workspace.Suspended = true
+	srv := New(state)
+
+	req := httptest.NewRequest("GET", "/v0/status", nil)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var resp statusResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Suspended {
+		t.Error("expected suspended=true in status response")
+	}
+}

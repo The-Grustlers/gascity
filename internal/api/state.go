@@ -169,6 +169,14 @@ type StateMutator interface {
 	// DeleteProviderPatch removes a provider patch by name.
 	DeleteProviderPatch(name string) error
 
+	// --- Automation overrides ---
+
+	// EnableAutomation enables an automation via overrides in city.toml.
+	EnableAutomation(name, rig string) error
+
+	// DisableAutomation disables an automation via overrides in city.toml.
+	DisableAutomation(name, rig string) error
+
 	// --- Runtime actions (ephemeral session operations) ---
 
 	// KillAgent force-kills an agent's session (reconciler restarts it).

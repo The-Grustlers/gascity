@@ -160,10 +160,13 @@ func (s *Server) registerRoutes() {
 	// Events
 	s.mux.HandleFunc("GET /v0/events", s.handleEventList)
 	s.mux.HandleFunc("GET /v0/events/stream", s.handleEventStream)
+	s.mux.HandleFunc("POST /v0/events", s.handleEventEmit)
 
 	// Automations
 	s.mux.HandleFunc("GET /v0/automations", s.handleAutomationList)
 	s.mux.HandleFunc("GET /v0/automation/{name}", s.handleAutomationGet)
+	s.mux.HandleFunc("POST /v0/automation/{name}/enable", s.handleAutomationEnable)
+	s.mux.HandleFunc("POST /v0/automation/{name}/disable", s.handleAutomationDisable)
 
 	// Sling (dispatch)
 	s.mux.HandleFunc("POST /v0/sling", s.handleSling)

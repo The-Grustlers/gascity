@@ -7,6 +7,44 @@ import (
 	"github.com/gastownhall/gascity/internal/events"
 )
 
+// eventEmitRequest is the JSON body for POST /v0/events.
+type eventEmitRequest struct {
+	Type    string `json:"type"`
+	Actor   string `json:"actor"`
+	Subject string `json:"subject,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+func (s *Server) handleEventEmit(w http.ResponseWriter, r *http.Request) {
+	ep := s.state.EventProvider()
+	if ep == nil {
+		writeError(w, http.StatusServiceUnavailable, "internal", "events not enabled")
+		return
+	}
+
+	var body eventEmitRequest
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid", err.Error())
+		return
+	}
+	if body.Type == "" {
+		writeError(w, http.StatusBadRequest, "invalid", "type is required")
+		return
+	}
+	if body.Actor == "" {
+		writeError(w, http.StatusBadRequest, "invalid", "actor is required")
+		return
+	}
+
+	ep.Record(events.Event{
+		Type:    body.Type,
+		Actor:   body.Actor,
+		Subject: body.Subject,
+		Message: body.Message,
+	})
+	writeJSON(w, http.StatusCreated, map[string]string{"status": "recorded"})
+}
+
 func (s *Server) handleEventList(w http.ResponseWriter, r *http.Request) {
 	bp := parseBlockingParams(r)
 	if bp.isBlocking() {

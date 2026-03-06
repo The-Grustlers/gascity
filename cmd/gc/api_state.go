@@ -286,6 +286,26 @@ func (cs *controllerState) Automations() []automations.Automation {
 
 // --- api.StateMutator implementation ---
 
+// EnableAutomation creates or updates an override with enabled=true.
+func (cs *controllerState) EnableAutomation(name, rig string) error {
+	enabled := true
+	return cs.editor.SetAutomationOverride(config.AutomationOverride{
+		Name:    name,
+		Rig:     rig,
+		Enabled: &enabled,
+	})
+}
+
+// DisableAutomation creates or updates an override with enabled=false.
+func (cs *controllerState) DisableAutomation(name, rig string) error {
+	enabled := false
+	return cs.editor.SetAutomationOverride(config.AutomationOverride{
+		Name:    name,
+		Rig:     rig,
+		Enabled: &enabled,
+	})
+}
+
 // spAndSession captures the session provider and computes the session name
 // in a single critical section to avoid TOCTOU with config reloads.
 func (cs *controllerState) spAndSession(name string) (session.Provider, string) {
