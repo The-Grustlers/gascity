@@ -272,10 +272,12 @@ func TestBeadReconcileOps_IndexUpdateAfterResync(t *testing.T) {
 	idx2 := syncSessionBeads(store, nil, configuredNames, clk, &stderr)
 	bro.updateIndex(idx2)
 
-	// Mayor bead is now closed — reading returns empty.
+	// Mayor bead is now closed — no index entry, falls back to provider
+	// which has the mirrored "v1" from the earlier write. This is correct:
+	// the provider mirror ensures hash continuity across suspend/resume.
 	hash, _ := bro.configHash("mayor")
-	if hash != "" {
-		t.Errorf("after suspension, configHash = %q, want empty", hash)
+	if hash != "v1" {
+		t.Errorf("after suspension, configHash = %q, want %q (provider mirror)", hash, "v1")
 	}
 
 	// Resume — new bead created.
@@ -283,13 +285,14 @@ func TestBeadReconcileOps_IndexUpdateAfterResync(t *testing.T) {
 	idx3 := syncSessionBeads(store, agents, allConfigured(agents), clk, &stderr)
 	bro.updateIndex(idx3)
 
-	// New bead has no started_config_hash yet.
+	// New bead has no started_config_hash yet — falls back to provider
+	// which still has the mirrored "v1".
 	hash, _ = bro.configHash("mayor")
-	if hash != "" {
-		t.Errorf("after resume, configHash = %q, want empty (fresh bead)", hash)
+	if hash != "v1" {
+		t.Errorf("after resume, configHash = %q, want %q (provider mirror)", hash, "v1")
 	}
 
-	// Store hash on the new bead.
+	// Store hash on the new bead — updates both bead and provider.
 	if err := bro.storeConfigHash("mayor", "v2"); err != nil {
 		t.Fatalf("storeConfigHash after resume: %v", err)
 	}
@@ -299,10 +302,10 @@ func TestBeadReconcileOps_IndexUpdateAfterResync(t *testing.T) {
 	}
 }
 
-func TestBeadReconcileOps_StoreDegradedReturnsEmpty(t *testing.T) {
-	// When store.Get fails, configHash/liveHash should return empty (not
-	// fall back to provider), so the reconciler skips drift rather than
-	// reading stale provider hashes and causing restart loops.
+func TestBeadReconcileOps_StoreDegradedFallsBackToProvider(t *testing.T) {
+	// When store.Get fails, configHash/liveHash should fall back to
+	// provider. This is safe because storeConfigHash/storeLiveHash
+	// mirror every write to the provider, so it always has current data.
 	agents := []agent.Agent{
 		&agent.Fake{
 			FakeName:          "mayor",
@@ -314,7 +317,7 @@ func TestBeadReconcileOps_StoreDegradedReturnsEmpty(t *testing.T) {
 
 	bro, _ := setupBeadReconcileOps(t, agents)
 
-	// Store a hash, then verify it reads back.
+	// Store hashes — these mirror to provider automatically.
 	if err := bro.storeConfigHash("mayor", "v1"); err != nil {
 		t.Fatalf("storeConfigHash: %v", err)
 	}
@@ -322,31 +325,35 @@ func TestBeadReconcileOps_StoreDegradedReturnsEmpty(t *testing.T) {
 		t.Fatalf("storeLiveHash: %v", err)
 	}
 
-	// Set a stale provider hash — should NOT be returned on degradation.
+	// Verify provider received mirrored writes.
 	provider := bro.provider.(*fakeReconcileOps)
-	provider.hashes["mayor"] = "stale-provider-hash"
-	provider.liveHashes["mayor"] = "stale-provider-live"
+	if provider.hashes["mayor"] != "v1" {
+		t.Fatalf("provider config hash = %q, want %q (mirror write)", provider.hashes["mayor"], "v1")
+	}
+	if provider.liveHashes["mayor"] != "live1" {
+		t.Fatalf("provider live hash = %q, want %q (mirror write)", provider.liveHashes["mayor"], "live1")
+	}
 
 	// Simulate store degradation: swap storeFunc to a fresh empty store
 	// so Get(id) returns "not found" for the existing bead ID.
 	bro.storeFunc = func() beads.Store { return beads.NewMemStore() }
 
-	// configHash should return empty (not provider's stale hash).
+	// configHash should fall back to provider's mirrored hash.
 	hash, err := bro.configHash("mayor")
 	if err != nil {
 		t.Fatalf("configHash during degradation: %v", err)
 	}
-	if hash != "" {
-		t.Errorf("configHash = %q, want empty on store degradation", hash)
+	if hash != "v1" {
+		t.Errorf("configHash = %q, want %q (provider fallback)", hash, "v1")
 	}
 
-	// liveHash should also return empty.
+	// liveHash should also fall back to provider's mirrored hash.
 	lhash, err := bro.liveHash("mayor")
 	if err != nil {
 		t.Fatalf("liveHash during degradation: %v", err)
 	}
-	if lhash != "" {
-		t.Errorf("liveHash = %q, want empty on store degradation", lhash)
+	if lhash != "live1" {
+		t.Errorf("liveHash = %q, want %q (provider fallback)", lhash, "live1")
 	}
 }
 
@@ -394,5 +401,57 @@ func TestBeadReconcileOps_UpgradePathFallsBackToProvider(t *testing.T) {
 	hash, _ = bro.configHash("mayor")
 	if hash != "v1" {
 		t.Errorf("after store, configHash = %q, want %q", hash, "v1")
+	}
+}
+
+func TestBeadReconcileOps_NilStoreFallsBackToProvider(t *testing.T) {
+	// When storeFunc returns nil, all operations should fall back to
+	// provider without panicking.
+	agents := []agent.Agent{
+		&agent.Fake{
+			FakeName:          "mayor",
+			FakeSessionName:   "mayor",
+			Running:           true,
+			FakeSessionConfig: runtime.Config{Command: "claude"},
+		},
+	}
+
+	bro, _ := setupBeadReconcileOps(t, agents)
+
+	// Set storeFunc to return nil.
+	bro.storeFunc = func() beads.Store { return nil }
+
+	// Writes should not panic and should mirror to provider.
+	if err := bro.storeConfigHash("mayor", "v1"); err != nil {
+		t.Fatalf("storeConfigHash with nil store: %v", err)
+	}
+	if err := bro.storeLiveHash("mayor", "live1"); err != nil {
+		t.Fatalf("storeLiveHash with nil store: %v", err)
+	}
+
+	// Provider should have the mirrored values.
+	provider := bro.provider.(*fakeReconcileOps)
+	if provider.hashes["mayor"] != "v1" {
+		t.Errorf("provider config hash = %q, want %q", provider.hashes["mayor"], "v1")
+	}
+	if provider.liveHashes["mayor"] != "live1" {
+		t.Errorf("provider live hash = %q, want %q", provider.liveHashes["mayor"], "live1")
+	}
+
+	// Reads should fall back to provider.
+	hash, err := bro.configHash("mayor")
+	if err != nil {
+		t.Fatalf("configHash with nil store: %v", err)
+	}
+	if hash != "v1" {
+		t.Errorf("configHash = %q, want %q (provider fallback)", hash, "v1")
+	}
+
+	lhash, err := bro.liveHash("mayor")
+	if err != nil {
+		t.Fatalf("liveHash with nil store: %v", err)
+	}
+	if lhash != "live1" {
+		t.Errorf("liveHash = %q, want %q (provider fallback)", lhash, "live1")
 	}
 }

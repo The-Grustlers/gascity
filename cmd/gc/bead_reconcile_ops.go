@@ -20,13 +20,17 @@ import (
 // reconciler detects drift by comparing started_config_hash to the
 // current config's fingerprint.
 //
-// Read methods fall back to the provider when the bead is missing or
-// the started_* key is empty. This ensures drift detection survives
-// the upgrade from provider-based hashes (Phase 2) to bead-based
-// hashes (Phase 3) without requiring a restart. When the store is
-// degraded (Get error), reads return empty — the reconciler treats
-// empty as "no hash yet" and skips drift, avoiding destructive
-// restarts when state cannot be reliably read.
+// Write methods mirror hashes to the underlying provider in addition
+// to the bead store. This ensures the provider always has current data,
+// making the read-side provider fallback safe in all cases: upgrade
+// path (started_* empty), store degradation (Get error), and store
+// unavailable (storeFunc returns nil).
+//
+// Read methods fall back to the provider when the bead is missing,
+// the started_* key is empty, or the store is degraded/unavailable.
+// This ensures drift detection survives the upgrade from provider-based
+// hashes (Phase 2) to bead-based hashes (Phase 3) without requiring
+// a restart.
 //
 // The store is resolved dynamically via storeFunc to handle standalone
 // store replacement on config reload.
@@ -73,7 +77,14 @@ func (o *beadReconcileOps) storeConfigHash(name, hash string) error {
 		// No bead for this session — fall back to provider.
 		return o.provider.storeConfigHash(name, hash)
 	}
-	return o.storeFunc().SetMetadata(id, "started_config_hash", hash)
+	// Mirror to provider so the upgrade-path fallback (hash == "" → provider)
+	// always returns the current hash, even if the bead write fails.
+	_ = o.provider.storeConfigHash(name, hash)
+	s := o.storeFunc()
+	if s == nil {
+		return nil // store not available; provider mirror is sufficient
+	}
+	return s.SetMetadata(id, "started_config_hash", hash)
 }
 
 func (o *beadReconcileOps) configHash(name string) (string, error) {
@@ -82,14 +93,16 @@ func (o *beadReconcileOps) configHash(name string) (string, error) {
 		// No bead — fall back to provider (preserves pre-upgrade hashes).
 		return o.provider.configHash(name)
 	}
-	b, err := o.storeFunc().Get(id)
+	s := o.storeFunc()
+	if s == nil {
+		// Store not available — fall back to provider (which has mirrored writes).
+		return o.provider.configHash(name)
+	}
+	b, err := s.Get(id)
 	if err != nil {
-		// Store degraded — return empty so reconciler skips drift
-		// (reconcile.go:329 treats "" as graceful-upgrade). Falling back
-		// to provider here would be asymmetric with storeConfigHash
-		// (which doesn't fall back on write failure), creating an
-		// infinite restart loop when the store is degraded.
-		return "", nil
+		// Store degraded — fall back to provider (which has mirrored writes).
+		// Safe because storeConfigHash now mirrors to provider on every write.
+		return o.provider.configHash(name)
 	}
 	hash := b.Metadata["started_config_hash"]
 	if hash == "" {
@@ -104,7 +117,13 @@ func (o *beadReconcileOps) storeLiveHash(name, hash string) error {
 	if !ok {
 		return o.provider.storeLiveHash(name, hash)
 	}
-	return o.storeFunc().SetMetadata(id, "started_live_hash", hash)
+	// Mirror to provider (same rationale as storeConfigHash).
+	_ = o.provider.storeLiveHash(name, hash)
+	s := o.storeFunc()
+	if s == nil {
+		return nil
+	}
+	return s.SetMetadata(id, "started_live_hash", hash)
 }
 
 func (o *beadReconcileOps) liveHash(name string) (string, error) {
@@ -112,10 +131,14 @@ func (o *beadReconcileOps) liveHash(name string) (string, error) {
 	if !ok {
 		return o.provider.liveHash(name)
 	}
-	b, err := o.storeFunc().Get(id)
+	s := o.storeFunc()
+	if s == nil {
+		return o.provider.liveHash(name)
+	}
+	b, err := s.Get(id)
 	if err != nil {
-		// Store degraded — return empty (symmetric with configHash).
-		return "", nil
+		// Store degraded — fall back to provider (which has mirrored writes).
+		return o.provider.liveHash(name)
 	}
 	hash := b.Metadata["started_live_hash"]
 	if hash == "" {

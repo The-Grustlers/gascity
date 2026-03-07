@@ -402,13 +402,18 @@ func (cr *CityRuntime) reloadConfig(
 		cr.cs.update(cr.cfg, cr.sp)
 		// Upgrade rops if store recovered from nil → non-nil.
 		cr.upgradeToBeadReconcileOps()
-	} else if cr.standaloneCityStore != nil {
+	} else {
 		// Refresh standalone city store for auto-suspend.
+		// Also recovers from nil → non-nil when bd becomes available after startup.
 		if s, err := openCityStoreAt(cityRoot); err != nil {
-			fmt.Fprintf(cr.stderr, "%s: city bead store reload: %v\n", cr.logPrefix, err) //nolint:errcheck
+			if cr.standaloneCityStore != nil {
+				fmt.Fprintf(cr.stderr, "%s: city bead store reload: %v\n", cr.logPrefix, err) //nolint:errcheck
+			}
 		} else {
 			cr.standaloneCityStore = s
 		}
+		// Upgrade rops if store recovered from nil → non-nil.
+		cr.upgradeToBeadReconcileOps()
 	}
 
 	fmt.Fprintf(cr.stdout, "Config reloaded: %s (rev %s)\n", //nolint:errcheck
