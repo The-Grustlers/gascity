@@ -382,7 +382,7 @@ func cmdRigSuspend(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "Suspended rig '%s'\n", args[0]) //nolint:errcheck // best-effort stdout
 			return 0
 		}
-		if !api.IsConnError(err) {
+		if !api.ShouldFallback(err) {
 			fmt.Fprintf(stderr, "gc rig suspend: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
@@ -462,7 +462,7 @@ func cmdRigResume(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "Resumed rig '%s'\n", args[0]) //nolint:errcheck // best-effort stdout
 			return 0
 		}
-		if !api.IsConnError(err) {
+		if !api.ShouldFallback(err) {
 			fmt.Fprintf(stderr, "gc rig resume: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}

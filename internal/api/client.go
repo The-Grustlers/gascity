@@ -21,11 +21,29 @@ func (e *connError) Unwrap() error { return e.err }
 
 // IsConnError reports whether err is a transport-level connection failure
 // (e.g., connection refused, timeout) rather than an API-level error response.
-// CLI commands use this to fall back to direct file mutation when the
-// controller's API listener is unavailable.
 func IsConnError(err error) bool {
 	var ce *connError
 	return errors.As(err, &ce)
+}
+
+// readOnlyError indicates the API server rejected a mutation because it's
+// running in read-only mode (non-localhost bind).
+type readOnlyError struct {
+	msg string
+}
+
+func (e *readOnlyError) Error() string { return e.msg }
+
+// ShouldFallback reports whether err indicates the CLI should fall back to
+// direct file mutation. This is true for transport-level failures (connection
+// refused, timeout) and for read-only API rejections (server bound to
+// non-localhost, mutations disabled).
+func ShouldFallback(err error) bool {
+	if IsConnError(err) {
+		return true
+	}
+	var ro *readOnlyError
+	return errors.As(err, &ro)
 }
 
 // Client is an HTTP client for the Gas City API server.
@@ -122,6 +140,17 @@ func (c *Client) doMutation(method, path string, body any) error {
 	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
 		return fmt.Errorf("API returned %d", resp.StatusCode)
 	}
+
+	// Read-only rejection: server is bound non-localhost and rejects mutations.
+	// CLI should fall back to direct file mutation.
+	if apiErr.Error == "read_only" {
+		msg := apiErr.Message
+		if msg == "" {
+			msg = "mutations disabled (read-only server)"
+		}
+		return &readOnlyError{msg: msg}
+	}
+
 	if apiErr.Message != "" {
 		return fmt.Errorf("API error: %s", apiErr.Message)
 	}

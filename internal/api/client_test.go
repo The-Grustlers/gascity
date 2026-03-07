@@ -199,6 +199,64 @@ func TestClientAPIErrorNotConnError(t *testing.T) {
 	}
 }
 
+func TestClientReadOnlyFallback(t *testing.T) {
+	// Server returns 403 with read_only error code — should trigger ShouldFallback.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+			"error":   "read_only",
+			"message": "mutations disabled: server bound to non-localhost address",
+		})
+	}))
+	defer ts.Close()
+
+	c := NewClient(ts.URL)
+	err := c.SuspendCity()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !ShouldFallback(err) {
+		t.Errorf("ShouldFallback = false for read-only rejection: %v", err)
+	}
+	if IsConnError(err) {
+		t.Errorf("IsConnError = true for read-only rejection (should be false)")
+	}
+}
+
+func TestClientConnErrorShouldFallback(t *testing.T) {
+	c := NewClient("http://127.0.0.1:1")
+	err := c.SuspendCity()
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !ShouldFallback(err) {
+		t.Errorf("ShouldFallback = false for connection error: %v", err)
+	}
+}
+
+func TestClientBusinessErrorNoFallback(t *testing.T) {
+	// A 404 not_found is a business error — should NOT trigger fallback.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{ //nolint:errcheck
+			"error":   "not_found",
+			"message": "agent 'nope' not found",
+		})
+	}))
+	defer ts.Close()
+
+	c := NewClient(ts.URL)
+	err := c.SuspendAgent("nope")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if ShouldFallback(err) {
+		t.Errorf("ShouldFallback = true for business error: %v", err)
+	}
+}
+
 func TestClientCSRFHeader(t *testing.T) {
 	var gotHeader string
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

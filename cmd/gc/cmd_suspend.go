@@ -68,7 +68,7 @@ func cmdSuspend(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "City suspended (%s)\n", cityPath) //nolint:errcheck // best-effort stdout
 			return 0
 		}
-		if !api.IsConnError(err) {
+		if !api.ShouldFallback(err) {
 			fmt.Fprintf(stderr, "gc suspend: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}
@@ -90,7 +90,7 @@ func cmdResume(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "City resumed (%s)\n", cityPath) //nolint:errcheck // best-effort stdout
 			return 0
 		}
-		if !api.IsConnError(err) {
+		if !api.ShouldFallback(err) {
 			fmt.Fprintf(stderr, "gc resume: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
 		}

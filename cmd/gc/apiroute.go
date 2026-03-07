@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"net"
 	"path/filepath"
+	"strconv"
 
 	"github.com/gastownhall/gascity/internal/api"
 	"github.com/gastownhall/gascity/internal/config"
@@ -36,7 +38,7 @@ func apiClient(cityPath string) *api.Client {
 		return nil
 	}
 
-	baseURL := fmt.Sprintf("http://%s:%d", bind, cfg.API.Port)
+	baseURL := fmt.Sprintf("http://%s", net.JoinHostPort(bind, strconv.Itoa(cfg.API.Port)))
 	return api.NewClient(baseURL)
 }
 
