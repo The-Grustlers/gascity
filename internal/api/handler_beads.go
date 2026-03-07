@@ -53,6 +53,9 @@ func (s *Server) handleBeadList(w http.ResponseWriter, r *http.Request) {
 		all = []beads.Bead{}
 	}
 	if !pp.IsPaging {
+		if pp.Limit < len(all) {
+			all = all[:pp.Limit]
+		}
 		writeListJSON(w, s.latestIndex(), all, len(all))
 		return
 	}

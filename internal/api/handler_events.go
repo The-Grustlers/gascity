@@ -78,6 +78,9 @@ func (s *Server) handleEventList(w http.ResponseWriter, r *http.Request) {
 	}
 	pp := parsePagination(r, 100)
 	if !pp.IsPaging {
+		if pp.Limit < len(evts) {
+			evts = evts[:pp.Limit]
+		}
 		writeListJSON(w, s.latestIndex(), evts, len(evts))
 		return
 	}

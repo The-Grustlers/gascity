@@ -40,6 +40,9 @@ func (s *Server) handleMailList(w http.ResponseWriter, r *http.Request) {
 				msgs = []mail.Message{}
 			}
 			if !pp.IsPaging {
+				if pp.Limit < len(msgs) {
+					msgs = msgs[:pp.Limit]
+				}
 				writeListJSON(w, s.latestIndex(), msgs, len(msgs))
 				return
 			}
@@ -65,6 +68,9 @@ func (s *Server) handleMailList(w http.ResponseWriter, r *http.Request) {
 			allMsgs = []mail.Message{}
 		}
 		if !pp.IsPaging {
+			if pp.Limit < len(allMsgs) {
+				allMsgs = allMsgs[:pp.Limit]
+			}
 			writeListJSON(w, s.latestIndex(), allMsgs, len(allMsgs))
 			break
 		}

@@ -34,6 +34,9 @@ func (s *Server) handleConvoyList(w http.ResponseWriter, r *http.Request) {
 		convoys = []beads.Bead{}
 	}
 	if !pp.IsPaging {
+		if pp.Limit < len(convoys) {
+			convoys = convoys[:pp.Limit]
+		}
 		writeListJSON(w, s.latestIndex(), convoys, len(convoys))
 		return
 	}

@@ -21,7 +21,7 @@ const maxPaginationLimit = 1000
 // Limit is capped at maxPaginationLimit regardless of the requested value.
 func parsePagination(r *http.Request, defaultLimit int) pageParams {
 	q := r.URL.Query()
-	isPaging := q.Has("cursor") || q.Has("limit")
+	isPaging := q.Has("cursor")
 	limit := defaultLimit
 	if v := q.Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
