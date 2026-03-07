@@ -252,6 +252,9 @@ func (cr *CityRuntime) tick(
 	}
 
 	// Session bead sync BEFORE reconciliation (one-tick state lag; see run()).
+	// Post-reconcile sync was intentionally removed: the daemon's next tick
+	// corrects bead state, and the pre-reconcile sync is sufficient for
+	// beadReconcileOps to read/write hashes during reconciliation.
 	agents := cr.buildFn(cr.cfg, cr.sp)
 	cr.syncBeadsAndUpdateIndex(agents)
 

@@ -482,7 +482,9 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	rops := newReconcileOps(sp)
 	// Upgrade to bead-driven rops so one-shot writes hashes to the same
 	// store as the daemon, preventing false drift on next daemon start.
+	var oneShotStore beads.Store
 	if store, err := openCityStoreAt(cityPath); err == nil {
+		oneShotStore = store
 		cfgNames := configuredSessionNames(cfg, cityName)
 		idx := syncSessionBeads(store, agents, cfgNames, clock.Real{}, stderr)
 		if idx != nil {
@@ -494,6 +496,13 @@ func doStart(args []string, controllerMode bool, stdout, stderr io.Writer) int {
 	suspendedNames := computeSuspendedNames(cfg, cityName, cityPath, multiReg)
 	code := doReconcileAgents(agents, sp, rops, nil, nil, nil, recorder, nil, suspendedNames, 0, cfg.Session.StartupTimeoutDuration(), stdout, stderr, sigCtx)
 	ensureObservers(agents, observeSearchPaths(cfg.Daemon.ObservePaths))
+	// Post-reconcile sync: update bead state to reflect post-start reality.
+	// Without this, beads created pre-reconcile permanently show state=stopped
+	// because one-shot mode has no next tick to correct them.
+	if oneShotStore != nil {
+		cfgNames := configuredSessionNames(cfg, cityName)
+		syncSessionBeads(oneShotStore, buildAgents(cfg, sp), cfgNames, clock.Real{}, stderr)
+	}
 	if code == 0 {
 		fmt.Fprintln(stdout, "City started.") //nolint:errcheck // best-effort stdout
 	}

@@ -33,6 +33,12 @@ import (
 //
 // listRunning and runLive delegate to the underlying provider — these
 // are session-level operations that beads cannot replace.
+//
+// Thread safety: beadReconcileOps is accessed only from the daemon's
+// tick goroutine (syncBeadsAndUpdateIndex → updateIndex, then
+// doReconcileAgents → configHash/storeConfigHash). The API server
+// does not call rops methods. If future code adds concurrent access,
+// the index field must be protected with a mutex.
 type beadReconcileOps struct {
 	provider  reconcileOps       // delegate for listRunning, runLive, hash fallback
 	storeFunc func() beads.Store // dynamic store resolution (handles reload)
