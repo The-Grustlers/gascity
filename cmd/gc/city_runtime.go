@@ -45,6 +45,7 @@ type CityRuntime struct {
 	poolDeathHandlers map[string]poolDeathInfo
 	suspendedNames    map[string]bool
 
+	logPrefix      string // "gc start" or "gc supervisor"
 	stdout, stderr io.Writer
 }
 
@@ -67,6 +68,7 @@ type CityRuntimeParams struct {
 	PoolSessions      map[string]time.Duration
 	PoolDeathHandlers map[string]poolDeathInfo
 
+	LogPrefix      string // "gc start" or "gc supervisor"; defaults to "gc start"
 	Stdout, Stderr io.Writer
 }
 
@@ -93,6 +95,11 @@ func newCityRuntime(p CityRuntimeParams) *CityRuntime {
 
 	suspendedNames := computeSuspendedNames(p.Cfg, p.CityName, p.CityPath)
 
+	logPrefix := p.LogPrefix
+	if logPrefix == "" {
+		logPrefix = "gc start"
+	}
+
 	return &CityRuntime{
 		cityPath:          p.CityPath,
 		cityName:          p.CityName,
@@ -111,6 +118,7 @@ func newCityRuntime(p CityRuntimeParams) *CityRuntime {
 		poolSessions:      p.PoolSessions,
 		poolDeathHandlers: p.PoolDeathHandlers,
 		suspendedNames:    suspendedNames,
+		logPrefix:         logPrefix,
 		stdout:            p.Stdout,
 		stderr:            p.Stderr,
 	}
@@ -227,7 +235,7 @@ func (cr *CityRuntime) tick(
 	if cr.wg != nil && cr.wg.shouldRun(time.Now()) {
 		purged, gcErr := cr.wg.runGC(cityRoot, time.Now())
 		if gcErr != nil {
-			fmt.Fprintf(cr.stderr, "gc start: wisp gc: %v\n", gcErr) //nolint:errcheck // best-effort stderr
+			fmt.Fprintf(cr.stderr, "%s: wisp gc: %v\n", cr.logPrefix, gcErr) //nolint:errcheck // best-effort stderr
 		} else if purged > 0 {
 			fmt.Fprintf(cr.stdout, "Bead GC: purged %d expired bead(s)\n", purged) //nolint:errcheck // best-effort stdout
 		}
@@ -249,7 +257,7 @@ func (cr *CityRuntime) reloadConfig(
 ) {
 	result, err := tryReloadConfig(cr.tomlPath, cr.cityName, cityRoot, cr.stderr)
 	if err != nil {
-		fmt.Fprintf(cr.stderr, "gc start: config reload: %v (keeping old config)\n", err) //nolint:errcheck // best-effort stderr
+		fmt.Fprintf(cr.stderr, "%s: config reload: %v (keeping old config)\n", cr.logPrefix, err) //nolint:errcheck // best-effort stderr
 		telemetry.RecordConfigReload(ctx, "", err)
 		return
 	}
@@ -271,8 +279,8 @@ func (cr *CityRuntime) reloadConfig(
 		}
 		newSp, spErr := newSessionProviderByName(newProviderName, cr.cfg.Session, cr.cityName)
 		if spErr != nil {
-			fmt.Fprintf(cr.stderr, "gc start: new session provider %q: %v (keeping old provider)\n", //nolint:errcheck
-				newProviderName, spErr)
+			fmt.Fprintf(cr.stderr, "%s: new session provider %q: %v (keeping old provider)\n", //nolint:errcheck
+				cr.logPrefix, newProviderName, spErr)
 		} else {
 			cr.sp = newSp
 			cr.rops = newReconcileOps(cr.sp)
@@ -296,21 +304,21 @@ func (cr *CityRuntime) reloadConfig(
 		}
 	}
 	if err := config.ValidateRigs(cr.cfg.Rigs, cr.cityName); err != nil {
-		fmt.Fprintf(cr.stderr, "gc start: config reload: %v\n", err) //nolint:errcheck
+		fmt.Fprintf(cr.stderr, "%s: config reload: %v\n", cr.logPrefix, err) //nolint:errcheck
 	}
 	resolveRigPaths(cityRoot, cr.cfg.Rigs)
 	if err := startBeadsLifecycle(cityRoot, cr.cityName, cr.cfg, cr.stderr); err != nil {
-		fmt.Fprintf(cr.stderr, "gc start: config reload: %v\n", err) //nolint:errcheck
+		fmt.Fprintf(cr.stderr, "%s: config reload: %v\n", cr.logPrefix, err) //nolint:errcheck
 	}
 	if len(cr.cfg.FormulaLayers.City) > 0 {
 		if err := ResolveFormulas(cityRoot, cr.cfg.FormulaLayers.City); err != nil {
-			fmt.Fprintf(cr.stderr, "gc start: config reload: city formulas: %v\n", err) //nolint:errcheck
+			fmt.Fprintf(cr.stderr, "%s: config reload: city formulas: %v\n", cr.logPrefix, err) //nolint:errcheck
 		}
 	}
 	for _, r := range cr.cfg.Rigs {
 		if layers, ok := cr.cfg.FormulaLayers.Rigs[r.Name]; ok && len(layers) > 0 {
 			if err := ResolveFormulas(r.Path, layers); err != nil {
-				fmt.Fprintf(cr.stderr, "gc start: config reload: rig %q formulas: %v\n", r.Name, err) //nolint:errcheck
+				fmt.Fprintf(cr.stderr, "%s: config reload: rig %q formulas: %v\n", cr.logPrefix, r.Name, err) //nolint:errcheck
 			}
 		}
 	}

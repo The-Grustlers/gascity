@@ -210,6 +210,11 @@ func (r *Registry) saveLocked(entries []CityEntry) error {
 		os.Remove(tmp) //nolint:errcheck // best-effort cleanup
 		return fmt.Errorf("encoding registry: %w", err)
 	}
+	if err := f.Sync(); err != nil {
+		f.Close()      //nolint:errcheck // best-effort cleanup
+		os.Remove(tmp) //nolint:errcheck // best-effort cleanup
+		return fmt.Errorf("syncing temp registry file: %w", err)
+	}
 	if err := f.Close(); err != nil {
 		os.Remove(tmp) //nolint:errcheck // best-effort cleanup
 		return fmt.Errorf("closing temp registry file: %w", err)

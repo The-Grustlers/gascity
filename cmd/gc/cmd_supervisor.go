@@ -316,13 +316,24 @@ func runSupervisor(stdout, stderr io.Writer) int {
 	// Panic backoff tracking for crash-loop prevention.
 	panicHistory := make(map[string]*panicRecord)
 
+	// safeReconcile wraps reconcileCities with panic recovery so a bug
+	// in the reconciliation loop doesn't crash the entire supervisor.
+	safeReconcile := func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(stderr, "gc supervisor: reconcile panicked: %v\n", r) //nolint:errcheck
+			}
+		}()
+		reconcileCities(reg, cities, &mu, panicHistory, stdout, stderr)
+	}
+
 	// Initial reconcile.
-	reconcileCities(reg, cities, &mu, panicHistory, stdout, stderr)
+	safeReconcile()
 
 	for {
 		select {
 		case <-ticker.C:
-			reconcileCities(reg, cities, &mu, panicHistory, stdout, stderr)
+			safeReconcile()
 		case <-ctx.Done():
 			// Shutdown all cities. Collect under lock, then stop outside to
 			// avoid blocking API requests during graceful shutdown.
@@ -514,6 +525,7 @@ func reconcileCities(
 			Rec:               rec,
 			PoolSessions:      poolSessions,
 			PoolDeathHandlers: poolDeathHandlers,
+			LogPrefix:         "gc supervisor",
 			Stdout:            stdout,
 			Stderr:            stderr,
 		})
