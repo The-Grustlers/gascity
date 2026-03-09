@@ -13,9 +13,10 @@ import (
 // newAgentStatusCmd is a deprecation shim for "gc agent status".
 func newAgentStatusCmd(_, stderr io.Writer) *cobra.Command {
 	return &cobra.Command{
-		Use:   "status",
-		Short: "Deprecated: use \"gc session list\"",
-		Args:  cobra.ArbitraryArgs,
+		Use:    "status",
+		Short:  "Deprecated: use \"gc session list\"",
+		Hidden: true,
+		Args:   cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			fmt.Fprintln(stderr, "gc agent status: removed, use \"gc session list\" instead") //nolint:errcheck // best-effort stderr
 			return errExit

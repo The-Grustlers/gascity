@@ -50,5 +50,5 @@ gc runtime drain <name>                # Signal agent to wind down gracefully
 gc runtime undrain <name>              # Cancel drain
 gc runtime drain-check <name>          # Check if agent has been drained
 gc runtime drain-ack <name>            # Acknowledge drain (agent confirms exit)
-gc runtime request-restart <name>      # Request graceful restart
+gc runtime request-restart             # Request graceful restart (reads GC_AGENT env)
 ```
