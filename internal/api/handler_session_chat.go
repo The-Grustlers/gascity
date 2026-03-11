@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
@@ -21,7 +22,18 @@ import (
 var errSessionTemplateNotFound = errors.New("session template not found")
 
 type sessionCreateRequest struct {
-	Template string `json:"template"`
+	// Kind discriminates the session target: "agent" or "provider".
+	// When empty and Template is set, backward-compat mode: try agent, then provider.
+	Kind    string            `json:"kind,omitempty"`
+	Name    string            `json:"name,omitempty"`
+	Message string            `json:"message,omitempty"`
+	Options map[string]string `json:"options,omitempty"`
+	// ProjectID is an opaque identifier for the MC project context.
+	// Stored in bead metadata for session-to-project association.
+	ProjectID string `json:"project_id,omitempty"`
+
+	// Legacy field — used when Kind is empty for backward compatibility.
+	Template string `json:"template,omitempty"`
 	Title    string `json:"title,omitempty"`
 }
 
@@ -110,14 +122,58 @@ func (s *Server) resolveSessionTemplate(template string) (*config.ResolvedProvid
 
 func (s *Server) buildSessionResume(info session.Info) (string, runtime.Config) {
 	cmd := session.BuildResumeCommand(info)
-	resolved, workDir, _, _, err := s.resolveSessionTemplate(info.Template)
+
+	// Check persisted kind to avoid agent/provider name collisions.
+	// If kind is "provider", skip the agent template lookup entirely.
+	kind := s.sessionKind(info.ID)
+
+	if kind != "provider" {
+		resolved, workDir, _, _, err := s.resolveSessionTemplate(info.Template)
+		if err == nil {
+			if info.WorkDir != "" {
+				workDir = info.WorkDir
+			}
+			return cmd, sessionResumeHints(resolved, workDir)
+		}
+	}
+
+	// Provider path (explicit kind=provider, or agent template not found).
+	resolved, err := s.resolveBareProvider(info.Template)
 	if err != nil {
 		return cmd, runtime.Config{WorkDir: info.WorkDir}
 	}
-	if info.WorkDir != "" {
-		workDir = info.WorkDir
+	workDir := info.WorkDir
+	if workDir == "" {
+		workDir = s.state.CityPath()
 	}
 	return cmd, sessionResumeHints(resolved, workDir)
+}
+
+// sessionKind reads the persisted mc_session_kind from bead metadata.
+func (s *Server) sessionKind(sessionID string) string {
+	store := s.state.CityBeadStore()
+	if store == nil {
+		return ""
+	}
+	b, err := store.Get(sessionID)
+	if err != nil {
+		return ""
+	}
+	return b.Metadata["mc_session_kind"]
+}
+
+// resolveBareProvider resolves a provider by name without an agent template.
+func (s *Server) resolveBareProvider(providerName string) (*config.ResolvedProvider, error) {
+	cfg := s.state.Config()
+	if cfg == nil {
+		return nil, errors.New("no city config loaded")
+	}
+	return config.ResolveProvider(
+		&config.Agent{Provider: providerName},
+		&cfg.Workspace,
+		cfg.Providers,
+		exec.LookPath,
+	)
 }
 
 func writeSessionManagerError(w http.ResponseWriter, err error) {
@@ -153,8 +209,21 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid", err.Error())
 		return
 	}
-	if body.Template == "" {
-		writeError(w, http.StatusBadRequest, "invalid", "template is required")
+
+	// Normalize: support both new (kind+name) and legacy (template) fields.
+	kind := body.Kind
+	name := body.Name
+	if kind == "" && body.Template != "" {
+		// Legacy mode: try agent first, fall back to provider.
+		kind = "agent"
+		name = body.Template
+	}
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "invalid", "name (or template) is required")
+		return
+	}
+	if kind != "agent" && kind != "provider" {
+		writeError(w, http.StatusBadRequest, "invalid_kind", "kind must be 'agent' or 'provider'")
 		return
 	}
 
@@ -167,14 +236,40 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resolved, workDir, transport, template, err := s.resolveSessionTemplate(body.Template)
-	if err != nil {
-		s.idem.unreserve(idemKey)
-		if errors.Is(err, errSessionTemplateNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "template "+body.Template+" not found")
+	var resolved *config.ResolvedProvider
+	var workDir, transport, template string
+	var extraArgs []string
+	var optMeta map[string]string
+
+	switch kind {
+	case "agent":
+		if len(body.Options) > 0 {
+			s.idem.unreserve(idemKey)
+			writeError(w, http.StatusBadRequest, "invalid", "options are not supported for agent sessions; use kind=provider to specify options")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		var err error
+		resolved, workDir, transport, template, err = s.resolveSessionTemplate(name)
+		if err != nil {
+			if errors.Is(err, errSessionTemplateNotFound) {
+				// Legacy fallback: keep idempotency reservation alive through the fallback.
+				if body.Kind == "" && body.Template != "" {
+					s.createProviderSession(w, r, store, body, name, idemKey, bodyHash)
+					return
+				}
+				s.idem.unreserve(idemKey)
+				writeError(w, http.StatusNotFound, "agent_not_found", "agent '"+name+"' not found")
+				return
+			}
+			s.idem.unreserve(idemKey)
+			writeError(w, http.StatusInternalServerError, "internal", err.Error())
+			return
+		}
+		// Agent track: command comes from the agent config as-is.
+		// Do NOT inject OptionsSchema defaults — agents encode their own CLI flags.
+
+	case "provider":
+		s.createProviderSession(w, r, store, body, name, idemKey, bodyHash)
 		return
 	}
 
@@ -189,14 +284,19 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 		SessionIDFlag: resolved.SessionIDFlag,
 	}
 
-	mgr := s.sessionManager(store)
+	// Merge extra args from options into the command string.
+	command := resolved.CommandString()
+	if len(extraArgs) > 0 {
+		command = command + " " + shellJoinArgs(extraArgs)
+	}
 
+	mgr := s.sessionManager(store)
 	hints := sessionCreateHints(resolved)
 	info, err := mgr.CreateWithTransport(
 		r.Context(),
 		template,
 		title,
-		resolved.CommandString(),
+		command,
 		workDir,
 		resolved.Name,
 		transport,
@@ -210,10 +310,144 @@ func (s *Server) handleSessionCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Persist kind, option metadata, and project_id on the bead.
+	s.persistSessionMeta(store, info.ID, "agent", body.ProjectID, optMeta)
+
+	// Deliver initial message if provided.
+	if msg := strings.TrimSpace(body.Message); msg != "" {
+		resumeCommand, nudgeHints := s.buildSessionResume(info)
+		if sendErr := mgr.Send(r.Context(), info.ID, msg, resumeCommand, nudgeHints); sendErr != nil {
+			log.Printf("session %s: initial message delivery failed: %v", info.ID, sendErr)
+		}
+	}
+
 	resp := sessionToResponse(info, s.state.Config())
+	resp.Kind = "agent"
 	s.enrichSessionResponse(&resp, info, s.state.Config(), s.state.SessionProvider(), false)
 	s.idem.storeResponse(idemKey, bodyHash, http.StatusCreated, resp)
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// createProviderSession handles the "provider" kind session creation.
+// Resolves a bare provider (not an agent template) and creates a session.
+func (s *Server) createProviderSession(w http.ResponseWriter, r *http.Request, store beads.Store, body sessionCreateRequest, providerName, idemKey, bodyHash string) {
+	cfg := s.state.Config()
+	resolved, err := config.ResolveProvider(
+		&config.Agent{Provider: providerName},
+		&cfg.Workspace,
+		cfg.Providers,
+		exec.LookPath,
+	)
+	if err != nil {
+		s.idem.unreserve(idemKey)
+		if errors.Is(err, config.ErrProviderNotInPATH) {
+			writeError(w, http.StatusServiceUnavailable, "provider_unavailable", err.Error())
+			return
+		}
+		if errors.Is(err, config.ErrProviderNotFound) {
+			writeError(w, http.StatusNotFound, "provider_not_found", "provider '"+providerName+"' not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+
+	// Resolve options against the provider's schema.
+	var extraArgs []string
+	var optMeta map[string]string
+	if len(body.Options) > 0 && len(resolved.OptionsSchema) == 0 {
+		s.idem.unreserve(idemKey)
+		writeError(w, http.StatusBadRequest, "unknown_option", "provider '"+providerName+"' does not accept options")
+		return
+	}
+	if len(resolved.OptionsSchema) > 0 {
+		var optErr error
+		extraArgs, optMeta, optErr = config.ResolveOptions(resolved.OptionsSchema, body.Options)
+		if optErr != nil {
+			s.idem.unreserve(idemKey)
+			if errors.Is(optErr, config.ErrUnknownOption) {
+				writeError(w, http.StatusBadRequest, "unknown_option", optErr.Error())
+				return
+			}
+			writeError(w, http.StatusBadRequest, "invalid_option_value", optErr.Error())
+			return
+		}
+	}
+
+	template := providerName
+	title := body.Title
+	if title == "" {
+		title = resolved.Name
+	}
+
+	workDir := s.state.CityPath()
+
+	resume := session.ProviderResume{
+		ResumeFlag:    resolved.ResumeFlag,
+		ResumeStyle:   resolved.ResumeStyle,
+		SessionIDFlag: resolved.SessionIDFlag,
+	}
+
+	command := resolved.CommandString()
+	if len(extraArgs) > 0 {
+		command = command + " " + shellJoinArgs(extraArgs)
+	}
+
+	mgr := s.sessionManager(store)
+	hints := sessionCreateHints(resolved)
+	info, err := mgr.CreateWithTransport(
+		r.Context(),
+		template,
+		title,
+		command,
+		workDir,
+		resolved.Name,
+		"", // no transport override for bare provider
+		resolved.Env,
+		resume,
+		hints,
+	)
+	if err != nil {
+		s.idem.unreserve(idemKey)
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+
+	// Persist kind, option metadata, and project_id on the bead.
+	s.persistSessionMeta(store, info.ID, "provider", body.ProjectID, optMeta)
+
+	// Deliver initial message if provided.
+	if msg := strings.TrimSpace(body.Message); msg != "" {
+		resumeCommand, nudgeHints := s.buildSessionResume(info)
+		if sendErr := mgr.Send(r.Context(), info.ID, msg, resumeCommand, nudgeHints); sendErr != nil {
+			log.Printf("session %s: initial message delivery failed: %v", info.ID, sendErr)
+		}
+	}
+
+	resp := sessionToResponse(info, s.state.Config())
+	resp.Kind = "provider"
+	s.enrichSessionResponse(&resp, info, s.state.Config(), s.state.SessionProvider(), false)
+	s.idem.storeResponse(idemKey, bodyHash, http.StatusCreated, resp)
+	writeJSON(w, http.StatusCreated, resp)
+}
+
+// persistSessionMeta writes kind, option metadata, and project_id to the session bead.
+func (s *Server) persistSessionMeta(store beads.Store, sessionID, kind, projectID string, optMeta map[string]string) {
+	batch := make(map[string]string)
+	for k, v := range optMeta {
+		batch[k] = v
+	}
+	if kind != "" {
+		batch["mc_session_kind"] = kind
+	}
+	if projectID != "" {
+		batch["mc_project_id"] = projectID
+	}
+	if len(batch) > 0 {
+		if err := store.SetMetadataBatch(sessionID, batch); err != nil {
+			log.Printf("persistSessionMeta: session %s: %v", sessionID, err)
+		}
+	}
 }
 
 func (s *Server) handleSessionTranscript(w http.ResponseWriter, r *http.Request) {
@@ -886,4 +1120,21 @@ func (s *Server) streamSessionPeek(ctx context.Context, w http.ResponseWriter, i
 			writeSSEComment(w)
 		}
 	}
+}
+
+// shellJoinArgs quotes arguments that contain shell metacharacters.
+// This prevents injection when extra args are appended to a command string.
+func shellJoinArgs(args []string) string {
+	var parts []string
+	for _, a := range args {
+		if a == "" {
+			parts = append(parts, "''")
+			continue
+		}
+		if strings.ContainsAny(a, " \t\n\"'\\|&;$!(){}[]<>?*~#`") {
+			a = "'" + strings.ReplaceAll(a, "'", "'\"'\"'") + "'"
+		}
+		parts = append(parts, a)
+	}
+	return strings.Join(parts, " ")
 }

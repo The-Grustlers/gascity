@@ -1,8 +1,19 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+)
+
+// Sentinel errors for provider resolution.
+var (
+	// ErrProviderNotFound indicates the provider name is not known.
+	ErrProviderNotFound = errors.New("unknown provider")
+	// ErrProviderNotInPATH indicates the provider binary is not in PATH.
+	ErrProviderNotInPATH = errors.New("provider not found in PATH")
+	// ErrUnknownOption indicates an option key not in the schema.
+	ErrUnknownOption = errors.New("unknown option")
 )
 
 // LookPathFunc is the signature for exec.LookPath (or a test fake).
@@ -82,7 +93,7 @@ func lookupProvider(name string, cityProviders map[string]ProviderSpec, lookPath
 		if spec, ok := cityProviders[name]; ok {
 			if spec.Command != "" {
 				if _, err := lookPath(spec.pathCheckBinary()); err != nil {
-					return nil, fmt.Errorf("provider %q: command %q not found in PATH", name, spec.pathCheckBinary())
+					return nil, fmt.Errorf("%w: provider %q command %q", ErrProviderNotInPATH, name, spec.pathCheckBinary())
 				}
 			}
 			return &spec, nil
@@ -93,12 +104,12 @@ func lookupProvider(name string, cityProviders map[string]ProviderSpec, lookPath
 	builtins := BuiltinProviders()
 	if spec, ok := builtins[name]; ok {
 		if _, err := lookPath(spec.pathCheckBinary()); err != nil {
-			return nil, fmt.Errorf("provider %q not found in PATH", name)
+			return nil, fmt.Errorf("%w: %q", ErrProviderNotInPATH, name)
 		}
 		return &spec, nil
 	}
 
-	return nil, fmt.Errorf("unknown provider %q", name)
+	return nil, fmt.Errorf("%w: %q", ErrProviderNotFound, name)
 }
 
 // detectProviderName scans PATH for known built-in provider binaries.
@@ -131,6 +142,23 @@ func specToResolved(name string, spec *ProviderSpec) *ResolvedProvider {
 		ResumeFlag:             spec.ResumeFlag,
 		ResumeStyle:            spec.ResumeStyle,
 		SessionIDFlag:          spec.SessionIDFlag,
+	}
+	// Deep-copy OptionsSchema to avoid aliasing the spec's slice.
+	if len(spec.OptionsSchema) > 0 {
+		rp.OptionsSchema = make([]ProviderOption, len(spec.OptionsSchema))
+		for i, opt := range spec.OptionsSchema {
+			rp.OptionsSchema[i] = opt
+			if len(opt.Choices) > 0 {
+				rp.OptionsSchema[i].Choices = make([]OptionChoice, len(opt.Choices))
+				for j, c := range opt.Choices {
+					rp.OptionsSchema[i].Choices[j] = c
+					if len(c.FlagArgs) > 0 {
+						rp.OptionsSchema[i].Choices[j].FlagArgs = make([]string, len(c.FlagArgs))
+						copy(rp.OptionsSchema[i].Choices[j].FlagArgs, c.FlagArgs)
+					}
+				}
+			}
+		}
 	}
 	// Default InstructionsFile to "AGENTS.md" if unset.
 	if rp.InstructionsFile == "" {
