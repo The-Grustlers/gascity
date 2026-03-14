@@ -24,7 +24,7 @@ bd ready --label pool:$GC_AGENT_TEMPLATE
 bd update <id> --claim
 ```
 
-If nothing is available, exit. Do not loop or wait.
+If nothing is available, run `gc runtime drain-ack` to end your session.
 
 ## Following Your Formula
 
@@ -65,6 +65,7 @@ the bead's title and description directly.
 - `bd mol progress <molecule-id>` — show molecule progress summary
 - `bd close <id>` — mark work or a step as done
 - `gc mail inbox` — check for messages
+- `gc runtime drain-ack` — end your session (you are ephemeral)
 
 ## How to Work
 
@@ -73,7 +74,7 @@ the bead's title and description directly.
 3. Check `metadata.molecule_id` — if present, follow steps with `bd mol current <mol-id>`
 4. If no molecule, execute the work directly from the bead description
 5. When done, close the bead: `bd close <id>`
-6. Exit — you are ephemeral, do not loop for more work
+6. Run `gc runtime drain-ack` — you are ephemeral, do not loop for more work
 
 ## Escalation
 
