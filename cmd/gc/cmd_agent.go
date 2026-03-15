@@ -56,6 +56,12 @@ func resolveAgentIdentity(cfg *config.City, input, currentRigDir string) (config
 	if a, ok := findAgentByQualified(cfg, input); ok {
 		return a, true
 	}
+	// Step 1b: qualified pool instance — "rig/polecat-2" matches pool "rig/polecat".
+	if strings.Contains(input, "/") {
+		if a, ok := resolvePoolInstance(cfg, input); ok {
+			return a, true
+		}
+	}
 	// Step 2: contextual (bare name + rig context).
 	if !strings.Contains(input, "/") && currentRigDir != "" {
 		if a, ok := findAgentByQualified(cfg, currentRigDir+"/"+input); ok {
@@ -72,17 +78,8 @@ func resolveAgentIdentity(cfg *config.City, input, currentRigDir string) (config
 				continue
 			}
 			// Pool instance: "polecat-2" matches pool "polecat" with Max >= 2 (or unlimited).
-			if a.Pool != nil && a.Pool.IsMultiInstance() {
-				prefix := a.Name + "-"
-				if strings.HasPrefix(input, prefix) {
-					suffix := input[len(prefix):]
-					if n, err := strconv.Atoi(suffix); err == nil && n >= 1 && (a.Pool.IsUnlimited() || n <= a.Pool.Max) {
-						instance := a
-						instance.Name = input
-						instance.Pool = nil
-						matches = append(matches, instance)
-					}
-				}
+			if a, ok := matchPoolInstance(a, input); ok {
+				matches = append(matches, a)
 			}
 		}
 		if len(matches) == 1 {
@@ -90,6 +87,57 @@ func resolveAgentIdentity(cfg *config.City, input, currentRigDir string) (config
 		}
 	}
 	return config.Agent{}, false
+}
+
+// resolvePoolInstance handles qualified pool instance names like "rig/polecat-2"
+// by matching against each pool agent's QualifiedName() + instance suffix.
+func resolvePoolInstance(cfg *config.City, input string) (config.Agent, bool) {
+	for _, a := range cfg.Agents {
+		if a.Pool == nil || !a.Pool.IsMultiInstance() {
+			continue
+		}
+		prefix := a.QualifiedName() + "-"
+		if !strings.HasPrefix(input, prefix) {
+			continue
+		}
+		suffix := input[len(prefix):]
+		n, err := strconv.Atoi(suffix)
+		if err != nil || n < 1 {
+			continue
+		}
+		if !a.Pool.IsUnlimited() && n > a.Pool.Max {
+			continue
+		}
+		instance := a
+		instance.Name = a.Name + "-" + suffix
+		instance.Pool = nil
+		return instance, true
+	}
+	return config.Agent{}, false
+}
+
+// matchPoolInstance checks if input matches a pool agent's instance pattern
+// (e.g., "polecat-2" matches pool "polecat"). Returns the synthesized instance.
+func matchPoolInstance(a config.Agent, input string) (config.Agent, bool) {
+	if a.Pool == nil || !a.Pool.IsMultiInstance() {
+		return config.Agent{}, false
+	}
+	prefix := a.Name + "-"
+	if !strings.HasPrefix(input, prefix) {
+		return config.Agent{}, false
+	}
+	suffix := input[len(prefix):]
+	n, err := strconv.Atoi(suffix)
+	if err != nil || n < 1 {
+		return config.Agent{}, false
+	}
+	if !a.Pool.IsUnlimited() && n > a.Pool.Max {
+		return config.Agent{}, false
+	}
+	instance := a
+	instance.Name = input
+	instance.Pool = nil
+	return instance, true
 }
 
 // findAgentByQualified looks up an agent by its qualified identity (dir+name).

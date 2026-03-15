@@ -708,6 +708,12 @@ func TestResolveAgentIdentityUnambiguous(t *testing.T) {
 		{"unlimited pool bare", "coder", true, "backend", "coder"},
 		// Unlimited pool: any instance number resolves.
 		{"unlimited pool instance", "coder-99", true, "backend", "coder-99"},
+		// Qualified pool instance: "frontend/builder-2" resolves via step 1b.
+		{"qualified pool instance", "frontend/builder-2", true, "frontend", "builder-2"},
+		// Qualified pool instance out of range.
+		{"qualified pool instance out of range", "frontend/builder-4", false, "", ""},
+		// Qualified unlimited pool instance.
+		{"qualified unlimited pool instance", "backend/coder-42", true, "backend", "coder-42"},
 	}
 
 	for _, tt := range tests {
