@@ -5,14 +5,17 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/supervisor"
 )
 
+//nolint:unparam // tests override hook behavior but keep fixed timeout/poll values for determinism
 func withSupervisorTestHooks(t *testing.T, ensure func(stdout, stderr io.Writer) int, reload func(stdout, stderr io.Writer) int, alive func() int, running func(string) (bool, bool), timeout, poll time.Duration) {
 	t.Helper()
 
@@ -78,6 +81,114 @@ func TestRegisterCityWithSupervisorRollsBackWhenCityNeverBecomesReady(t *testing
 	}
 	if len(entries) != 0 {
 		t.Fatalf("expected empty registry after rollback, got %v", entries)
+	}
+}
+
+func TestRegisterCityWithSupervisorFetchesRemotePacksBeforeLoadingIncludes(t *testing.T) {
+	gcHome := t.TempDir()
+	t.Setenv("GC_HOME", gcHome)
+
+	cityPath := filepath.Join(t.TempDir(), "bright-lights")
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	remote := initBarePackRepo(t, "remote-pack")
+	configText := strings.Join([]string{
+		"[workspace]",
+		`name = "bright-lights"`,
+		`includes = ["remote-pack"]`,
+		"",
+		"[packs.remote-pack]",
+		`source = "` + remote + `"`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(configText), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := effectiveCityName(cityPath); err == nil {
+		t.Fatal("expected pack-backed config load to fail before packs are fetched")
+	}
+
+	withSupervisorTestHooks(
+		t,
+		func(_, _ io.Writer) int { return 0 },
+		func(_, _ io.Writer) int { return 0 },
+		func() int { return 0 },
+		func(string) (bool, bool) { return false, false },
+		20*time.Millisecond,
+		time.Millisecond,
+	)
+
+	var stdout, stderr bytes.Buffer
+	code := registerCityWithSupervisor(cityPath, &stdout, &stderr, "gc register")
+	if code != 0 {
+		t.Fatalf("registerCityWithSupervisor code = %d, want 0: %s", code, stderr.String())
+	}
+
+	cacheDir := config.PackCachePath(cityPath, "remote-pack", config.PackSource{Source: remote})
+	if _, err := os.Stat(filepath.Join(cacheDir, "pack.toml")); err != nil {
+		t.Fatalf("expected fetched pack cache at %s: %v", cacheDir, err)
+	}
+}
+
+func TestRegisterCityWithSupervisorRejectsStandaloneController(t *testing.T) {
+	gcHome := t.TempDir()
+	t.Setenv("GC_HOME", gcHome)
+
+	root, err := os.MkdirTemp("", "gc-ctl-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(root) }) //nolint:errcheck
+
+	cityPath := filepath.Join(root, "bright-lights")
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte("[workspace]\nname = \"bright-lights\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	sockPath := filepath.Join(cityPath, ".gc", "controller.sock")
+	lis, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lis.Close() //nolint:errcheck // test cleanup
+
+	go func() {
+		conn, acceptErr := lis.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close() //nolint:errcheck // test cleanup
+		buf := make([]byte, 32)
+		n, _ := conn.Read(buf)
+		if strings.Contains(string(buf[:n]), "ping") {
+			conn.Write([]byte("4242\n")) //nolint:errcheck // best-effort reply
+		}
+	}()
+
+	var stdout, stderr bytes.Buffer
+	code := registerCityWithSupervisor(cityPath, &stdout, &stderr, "gc register")
+	if code != 1 {
+		t.Fatalf("registerCityWithSupervisor code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "standalone controller already running") {
+		t.Fatalf("stderr = %q, want standalone-controller error", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "PID 4242") {
+		t.Fatalf("stderr = %q, want controller PID", stderr.String())
+	}
+
+	reg := supervisor.NewRegistry(supervisor.RegistryPath())
+	entries, err := reg.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected empty registry after standalone-controller rejection, got %v", entries)
 	}
 }
 
@@ -238,5 +349,69 @@ func TestCmdStopSupervisorManagedCityStopsLegacyControllerAndBeads(t *testing.T)
 	}
 	if !strings.HasPrefix(ops[0], "stop") || !strings.HasPrefix(ops[1], "shutdown") {
 		t.Fatalf("unexpected bead provider ops: %v", ops)
+	}
+}
+
+var testGitEnvBlacklist = map[string]bool{
+	"GIT_DIR":                          true,
+	"GIT_WORK_TREE":                    true,
+	"GIT_INDEX_FILE":                   true,
+	"GIT_OBJECT_DIRECTORY":             true,
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES": true,
+}
+
+func initBarePackRepo(t *testing.T, name string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "work")
+	bareDir := filepath.Join(root, name+".git")
+
+	mustGit(t, "", "init", workDir)
+	if err := os.MkdirAll(filepath.Join(workDir, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	packToml := strings.Join([]string{
+		"[pack]",
+		`name = "` + name + `"`,
+		`version = "1.0.0"`,
+		"schema = 1",
+		"",
+		"[[agent]]",
+		`name = "worker"`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(workDir, "pack.toml"), []byte(packToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "prompts", "worker.md"), []byte("you are a worker"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, workDir, "add", "-A")
+	mustGit(t, workDir, "commit", "-m", "initial")
+	mustGit(t, workDir, "clone", "--bare", workDir, bareDir)
+	return bareDir
+}
+
+func mustGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+
+	fullArgs := append([]string{"-c", "core.hooksPath="}, args...)
+	cmd := exec.Command("git", fullArgs...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	for _, env := range os.Environ() {
+		if key, _, ok := strings.Cut(env, "="); ok && testGitEnvBlacklist[key] {
+			continue
+		}
+		cmd.Env = append(cmd.Env, env)
+	}
+	cmd.Env = append(cmd.Env,
+		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@test.com",
+		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@test.com",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %s: %v", strings.Join(args, " "), string(out), err)
 	}
 }

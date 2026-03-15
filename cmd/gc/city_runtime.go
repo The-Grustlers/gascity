@@ -61,6 +61,7 @@ type CityRuntime struct {
 	convStoreAdapter *convergenceStoreAdapter // typed reference; avoids type assertions in tick/reconcile
 	convergenceReqCh chan convergenceRequest  // receives CLI commands from controller.sock
 	pokeCh           chan struct{}            // non-blocking signal to trigger immediate reconciler tick
+	onStarted        func()
 
 	shutdownOnce   sync.Once
 	logPrefix      string // "gc start" or "gc supervisor"
@@ -89,6 +90,7 @@ type CityRuntimeParams struct {
 
 	ConvergenceReqCh chan convergenceRequest // may be nil
 	PokeCh           chan struct{}           // may be nil; triggers immediate tick
+	OnStarted        func()                  // called after initial reconciliation succeeds
 
 	LogPrefix      string // "gc start" or "gc supervisor"; defaults to "gc start"
 	Stdout, Stderr io.Writer
@@ -148,6 +150,7 @@ func newCityRuntime(p CityRuntimeParams) *CityRuntime {
 			}
 			return make(chan struct{}, 1)
 		}(),
+		onStarted: p.OnStarted,
 		logPrefix: logPrefix,
 		stdout:    p.Stdout,
 		stderr:    p.Stderr,
@@ -263,6 +266,9 @@ func (cr *CityRuntime) run(ctx context.Context) {
 			cr.stdout, cr.stderr, ctx)
 	}
 
+	if cr.onStarted != nil {
+		cr.onStarted()
+	}
 	fmt.Fprintln(cr.stdout, "City started.") //nolint:errcheck // best-effort stdout
 
 	interval := cr.cfg.Daemon.PatrolIntervalDuration()

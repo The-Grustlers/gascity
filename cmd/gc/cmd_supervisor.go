@@ -301,11 +301,12 @@ func reloadSupervisor(stdout, stderr io.Writer) int {
 
 // managedCity tracks a running CityRuntime inside the supervisor.
 type managedCity struct {
-	cr     *CityRuntime
-	name   string // city name at launch — used for name-drift detection
-	cancel context.CancelFunc
-	done   chan struct{} // closed when the city goroutine exits
-	closer io.Closer     // FileRecorder (or nil); closed on city stop
+	cr      *CityRuntime
+	name    string // city name at launch — used for name-drift detection
+	started bool
+	cancel  context.CancelFunc
+	done    chan struct{} // closed when the city goroutine exits
+	closer  io.Closer     // FileRecorder (or nil); closed on city stop
 }
 
 // runSupervisor is the main supervisor loop. It acquires the lock,
@@ -763,6 +764,9 @@ func reconcileCities(
 		poolDeathHandlers := computePoolDeathHandlers(cfg, cityName, path, sp)
 		watchDirs := config.WatchDirs(prov, cfg, path)
 		pokeCh := make(chan struct{}, 1)
+		cityCtx, cityCancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		mc := &managedCity{name: cityName, cancel: cityCancel, done: done, closer: fr}
 
 		cr := newCityRuntime(CityRuntimeParams{
 			CityPath:          path,
@@ -778,10 +782,16 @@ func reconcileCities(
 			PoolSessions:      poolSessions,
 			PoolDeathHandlers: poolDeathHandlers,
 			PokeCh:            pokeCh,
-			LogPrefix:         "gc supervisor",
-			Stdout:            stdout,
-			Stderr:            stderr,
+			OnStarted: func() {
+				mu.Lock()
+				mc.started = true
+				mu.Unlock()
+			},
+			LogPrefix: "gc supervisor",
+			Stdout:    stdout,
+			Stderr:    stderr,
 		})
+		mc.cr = cr
 
 		// Wire API state.
 		cs := newControllerState(cfg, sp, eventProv, cityName, path)
@@ -791,9 +801,6 @@ func reconcileCities(
 
 		// Run pool on_boot hooks (same as runController does).
 		runPoolOnBoot(cfg, path, shellScaleCheck, stderr)
-
-		cityCtx, cityCancel := context.WithCancel(context.Background())
-		done := make(chan struct{})
 
 		// Insert into map BEFORE launching goroutine to prevent races
 		// where an early panic deletes a non-existent entry, leaving a
@@ -806,7 +813,7 @@ func reconcileCities(
 			if _, running := cities[path]; running {
 				return true
 			}
-			cities[path] = &managedCity{cr: cr, name: cityName, cancel: cityCancel, done: done, closer: fr}
+			cities[path] = mc
 			delete(initFailures, path) // clear backoff on successful init
 			return false
 		}()
@@ -875,7 +882,7 @@ func reconcileCities(
 		}(cityName, path, fr)
 
 		rec.Record(events.Event{Type: events.ControllerStarted, Actor: "gc"})
-		fmt.Fprintf(stdout, "Started city '%s' (%s)\n", cityName, path) //nolint:errcheck
+		fmt.Fprintf(stdout, "Launching city '%s' (%s)\n", cityName, path) //nolint:errcheck
 	}
 }
 
@@ -1021,9 +1028,9 @@ func (m *multiCityState) ListCities() []api.CityInfo {
 	out := make([]api.CityInfo, 0, len(m.cities))
 	for path, mc := range m.cities {
 		out = append(out, api.CityInfo{
-			Name:    mc.cr.cityName,
+			Name:    mc.name,
 			Path:    path,
-			Running: mc.cr.cs != nil,
+			Running: mc.started,
 		})
 	}
 	return out
@@ -1034,7 +1041,7 @@ func (m *multiCityState) CityState(name string) api.State {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for _, mc := range m.cities {
-		if mc.cr.cityName == name && mc.cr.cs != nil {
+		if mc.name == name && mc.started && mc.cr.cs != nil {
 			return mc.cr.cs
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/supervisor"
@@ -189,6 +190,35 @@ func TestSupervisorCityAPIClientRequiresRunning(t *testing.T) {
 	}
 }
 
+func TestMultiCityStateReportsRunningOnlyAfterStartup(t *testing.T) {
+	cs := &controllerState{}
+	mc := &managedCity{
+		cr:   &CityRuntime{cityName: "bright-lights", cs: cs},
+		name: "bright-lights",
+	}
+	state := &multiCityState{
+		cities: map[string]*managedCity{"/city": mc},
+		mu:     &sync.RWMutex{},
+	}
+
+	cities := state.ListCities()
+	if len(cities) != 1 || cities[0].Running {
+		t.Fatalf("ListCities before startup = %+v, want one stopped city", cities)
+	}
+	if got := state.CityState("bright-lights"); got != nil {
+		t.Fatalf("CityState before startup = %#v, want nil", got)
+	}
+
+	mc.started = true
+	cities = state.ListCities()
+	if len(cities) != 1 || !cities[0].Running {
+		t.Fatalf("ListCities after startup = %+v, want one running city", cities)
+	}
+	if got := state.CityState("bright-lights"); got != cs {
+		t.Fatalf("CityState after startup = %#v, want controller state", got)
+	}
+}
+
 func TestControllerAliveNoSocket(t *testing.T) {
 	dir := t.TempDir()
 	gcDir := filepath.Join(dir, ".gc")
@@ -257,5 +287,31 @@ func TestDoStartRejectsUnbootstrappedCityConfig(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), `gc init `+dir) {
 		t.Fatalf("stderr = %q, want init guidance", stderr.String())
+	}
+}
+
+func TestDoStartForegroundRejectsSupervisorManagedCity(t *testing.T) {
+	gcHome := t.TempDir()
+	t.Setenv("GC_HOME", gcHome)
+
+	cityPath := filepath.Join(t.TempDir(), "bright-lights")
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte("[workspace]\nname = \"bright-lights\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reg := supervisor.NewRegistry(supervisor.RegistryPath())
+	if err := reg.Register(cityPath, "bright-lights"); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doStart([]string{cityPath}, true, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("doStart code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "registered with the supervisor") {
+		t.Fatalf("stderr = %q, want supervisor registration error", stderr.String())
 	}
 }

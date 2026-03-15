@@ -1,9 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -18,6 +20,16 @@ var (
 	supervisorCityReadyTimeout = 5 * time.Second
 	supervisorCityPollInterval = 100 * time.Millisecond
 )
+
+func fetchCityPacksIfNeeded(cityPath string) error {
+	tomlPath := filepath.Join(cityPath, "city.toml")
+	if quickCfg, qErr := config.Load(fsys.OSFS{}, tomlPath); qErr == nil && len(quickCfg.Packs) > 0 {
+		if err := config.FetchPacks(quickCfg.Packs, cityPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func effectiveCityName(cityPath string) (string, error) {
 	name := filepath.Base(cityPath)
@@ -61,7 +73,47 @@ func registeredCityEntry(cityPath string) (supervisor.CityEntry, bool, error) {
 	return supervisor.CityEntry{}, false, nil
 }
 
+func ensureNoStandaloneController(cityPath string) (int, error) {
+	if pid := controllerAlive(cityPath); pid != 0 {
+		return pid, errControllerAlreadyRunning
+	}
+	gcDir := filepath.Join(cityPath, ".gc")
+	if fi, err := os.Stat(gcDir); err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	} else if !fi.IsDir() {
+		return 0, nil
+	}
+	lock, err := acquireControllerLock(cityPath)
+	if err == nil {
+		lock.Close() //nolint:errcheck // best-effort probe cleanup
+		return 0, nil
+	}
+	if errors.Is(err, errControllerAlreadyRunning) {
+		return 0, err
+	}
+	return 0, err
+}
+
 func registerCityWithSupervisor(cityPath string, stdout, stderr io.Writer, commandName string) int {
+	if pid, err := ensureNoStandaloneController(cityPath); err != nil {
+		if errors.Is(err, errControllerAlreadyRunning) {
+			if pid != 0 {
+				fmt.Fprintf(stderr, "%s: standalone controller already running for %s (PID %d); stop it before registering with the supervisor\n", commandName, cityPath, pid) //nolint:errcheck // best-effort stderr
+			} else {
+				fmt.Fprintf(stderr, "%s: standalone controller already running for %s; stop it before registering with the supervisor\n", commandName, cityPath) //nolint:errcheck // best-effort stderr
+			}
+		} else {
+			fmt.Fprintf(stderr, "%s: probing standalone controller: %v\n", commandName, err) //nolint:errcheck // best-effort stderr
+		}
+		return 1
+	}
+	if err := fetchCityPacksIfNeeded(cityPath); err != nil {
+		fmt.Fprintf(stderr, "%s: fetching packs: %v\n", commandName, err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
 	name, err := effectiveCityName(cityPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", commandName, err) //nolint:errcheck // best-effort stderr

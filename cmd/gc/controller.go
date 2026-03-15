@@ -31,6 +31,8 @@ import (
 	"github.com/gastownhall/gascity/internal/workspacesvc"
 )
 
+var errControllerAlreadyRunning = errors.New("controller already running")
+
 // acquireControllerLock takes an exclusive flock on .gc/controller.lock.
 // Returns the locked file (caller must defer Close) or an error if another
 // controller is already running.
@@ -42,7 +44,7 @@ func acquireControllerLock(cityPath string) (*os.File, error) {
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close() //nolint:errcheck // closing after flock failure
-		return nil, fmt.Errorf("controller already running")
+		return nil, errControllerAlreadyRunning
 	}
 	return f, nil
 }
