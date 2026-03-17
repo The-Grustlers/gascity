@@ -1237,21 +1237,21 @@ the Delta 4 landing work; already-landed Delta 4 parity items are not repeated.
 ## 39. SDK Gaps (Delta 5)
 
 - [x] **1d4ba3f8 + b91fdace + f3183e6a** — Gemini hook compatibility and stale-template auto-upgrade.
-  Landed in Gas City via [0b7e7ec2](../../../internal/hooks/hooks.go): Gemini hooks now render an install-time absolute `gc` path, and the installer upgrades known-stale generated Gemini settings instead of preserving broken `export PATH=... && gc ...` templates indefinitely.
+  Landed in Gas City via `0b7e7ec2` (`internal/hooks/hooks.go`): Gemini hooks now render an install-time absolute `gc` path, and the installer upgrades known-stale generated Gemini settings instead of preserving broken `export PATH=... && gc ...` templates indefinitely.
 
 - [x] **305f9ee0** — Codex workspace trust dialog handling on startup.
-  Landed in Gas City via [2fcb0952](../../../internal/runtime/dialog.go): startup dialog acceptance now recognizes Codex's "Do you trust the contents of this directory?" prompt alongside the existing Claude trust/bypass dialogs, so first-run Codex sessions no longer wedge at trust confirmation.
+  Landed in Gas City via `2fcb0952` (`internal/runtime/dialog.go`): startup dialog acceptance now recognizes Codex's "Do you trust the contents of this directory?" prompt alongside the existing Claude trust/bypass dialogs, so first-run Codex sessions no longer wedge at trust confirmation.
 
 - [x] **894049af + 829c1510** — Shell-quote provider args when building runtime commands.
-  Landed in Gas City via [bdbbf43c](../../../internal/config/provider.go): provider args now use shared shell-quoting before command-string assembly, and the session/dashboard parsing path was updated to round-trip those quoted commands correctly instead of misparsing metacharacters or spaced args.
+  Landed in Gas City via `bdbbf43c` (`internal/config/provider.go`): provider args now use shared shell-quoting before command-string assembly, and the session/dashboard parsing path was updated to round-trip those quoted commands correctly instead of misparsing metacharacters or spaced args.
 
 ## 40. Gastown Example Gaps (Delta 5)
 
 - [x] **aecdc21c + e6516e5c** — Keep worktree ignores local and cover modern runtime files.
-  Landed in Gas City via [f9e7205f](../../../examples/gastown/packs/gastown/scripts/worktree-setup.sh): polecat worktree bootstrap now writes runtime ignore patterns to the git exclude file resolved by `git rev-parse --git-path info/exclude` instead of mutating tracked `.gitignore`, and the local ignore block now covers modern runtime paths including `.claude/`, `.codex/`, `.gemini/`, `.opencode/`, `.runtime/`, `.logs/`, and `state.json`.
+  Landed in Gas City via `f9e7205f` (`examples/gastown/packs/gastown/scripts/worktree-setup.sh`): polecat worktree bootstrap now writes runtime ignore patterns to the git exclude file resolved by `git rev-parse --git-path info/exclude` instead of mutating tracked `.gitignore`, and the local ignore block now covers modern runtime paths including `.claude/`, `.codex/`, `.gemini/`, `.opencode/`, `.runtime/`, `.logs/`, and `state.json`.
 
 - [~] **1916b730** — Polecats should consult repo `CLAUDE.md` / `AGENTS.md` when gate vars are unset.
-  Upstream stopped treating empty `setup_command` / `typecheck_command` / `lint_command` / `build_command` / `test_command` vars as a silent skip and explicitly told polecats to read project `CLAUDE.md` / `AGENTS.md` for the real Definition of Done. Gas City's [cmd/gc/formulas/mol-polecat-base.formula.toml](../../../cmd/gc/formulas/mol-polecat-base.formula.toml) still tells polecats to skip empty commands silently, which can bypass project-specific gates in Gastown rigs that rely on repo instructions instead of pack config.
+  Upstream stopped treating empty `setup_command` / `typecheck_command` / `lint_command` / `build_command` / `test_command` vars as a silent skip and explicitly told polecats to read project `CLAUDE.md` / `AGENTS.md` for the real Definition of Done. Gas City's `cmd/gc/formulas/mol-polecat-base.formula.toml` still tells polecats to skip empty commands silently, which can bypass project-specific gates in Gastown rigs that rely on repo instructions instead of pack config.
 
 ## 41. Not Relevant / Already Covered (Delta 5)
 
@@ -1259,13 +1259,13 @@ the Delta 4 landing work; already-landed Delta 4 parity items are not repeated.
   This was a bug in upstream's `gt crew at` flow. Gas City does not have that same path, and its reconciler already passes config-derived `ProcessNames` directly when checking live sessions.
 
 - [-] **cfa46f61 + 728e5123** — Rig `default_formula` resolution.
-  Gas City uses agent-level `default_sling_formula`, not rig-level workflow settings. Gastown's `polecat` pack entry already sets [default_sling_formula](../../../examples/gastown/packs/gastown/pack.toml).
+  Gas City uses agent-level `default_sling_formula`, not rig-level workflow settings. Gastown's `polecat` pack entry already sets `default_sling_formula` (`examples/gastown/packs/gastown/pack.toml`).
 
 - [-] **f613ef14** — Prior-attempt context injection when re-dispatching to polecat.
   Gas City's direct-bead workflow already preserves `metadata.branch` and `metadata.rejection_reason` on the same work bead, which gives the next polecat the equivalent resume context without separate MR lookup.
 
 - [-] **2d70c434** — Missing refinery worktree auto-repair.
-  Gas City's [worktree-setup.sh](../../../examples/gastown/packs/gastown/scripts/worktree-setup.sh) already recreates missing worktrees on session start. Upstream's corrupted `.git` repair case is narrower, and not a distinct carry-forward parity item yet.
+  Gas City's `worktree-setup.sh` (`examples/gastown/packs/gastown/scripts/worktree-setup.sh`) already recreates missing worktrees on session start. Upstream's corrupted `.git` repair case is narrower, and not a distinct carry-forward parity item yet.
 
 - [-] **6c737acc** — Idle polecat reuse with live sessions.
   Relevant to the open same-session polecat recovery design issue, but Gas City does not yet implement idle-polecat reuse. Keep this bundled with the broader pooled-slot / same-session recovery work rather than treating it as an independent parity item now.
