@@ -12,6 +12,7 @@ import (
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/runtime"
+	"github.com/gastownhall/gascity/internal/shellquote"
 )
 
 // errStore wraps a beads.Store and injects errors into MolCook/MolCookOn.
@@ -2837,9 +2838,9 @@ func TestShellQuote(t *testing.T) {
 		{"hello'world'end", "'hello'\\''world'\\''end'"},
 	}
 	for _, tt := range tests {
-		got := shellQuote(tt.input)
+		got := shellquote.Quote(tt.input)
 		if got != tt.want {
-			t.Errorf("shellQuote(%q) = %q, want %q", tt.input, got, tt.want)
+			t.Errorf("shellquote.Quote(%q) = %q, want %q", tt.input, got, tt.want)
 		}
 	}
 }

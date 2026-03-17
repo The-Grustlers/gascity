@@ -21,6 +21,7 @@ import (
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/convergence"
 	"github.com/gastownhall/gascity/internal/runtime"
+	"github.com/gastownhall/gascity/internal/shellquote"
 )
 
 // TemplateParams holds all resolved values needed to start a session.
@@ -229,7 +230,7 @@ func resolveTemplate(p *agentBuildParams, cfgAgent *config.Agent, qualifiedName 
 func templateParamsToConfig(tp TemplateParams) runtime.Config {
 	var promptSuffix string
 	if tp.Prompt != "" {
-		promptSuffix = shellQuote(tp.Prompt)
+		promptSuffix = shellquote.Quote(tp.Prompt)
 	}
 	return runtime.Config{
 		Command:                tp.Command,

@@ -743,13 +743,7 @@ func resolveSlingEnv(a config.Agent, deps slingDeps) map[string]string {
 // buildSlingCommand replaces {} in the sling query template with the bead ID.
 // The bead ID is shell-quoted to prevent command injection.
 func buildSlingCommand(template, beadID string) string {
-	return strings.ReplaceAll(template, "{}", shellQuote(beadID))
-}
-
-// shellQuote quotes a string for safe use in shell commands.
-// Uses single quotes with embedded single-quote escaping.
-func shellQuote(s string) string {
-	return shellquote.Quote(s)
+	return strings.ReplaceAll(template, "{}", shellquote.Quote(beadID))
 }
 
 // formatBeadLabel formats a bead ID with optional title for display.
