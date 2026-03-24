@@ -40,8 +40,8 @@ type = "expansion"
 version = 2
 
 [vars.design_doc]
-description = "Path to the design document (relative to worktree)"
-required = true
+description = "Optional path to the primary design document (relative to worktree)"
+default = ""
 
 [vars.persona_count]
 description = "Target number of personas to generate"
@@ -59,14 +59,30 @@ default = "false"
 description = "Comma-separated paths to additional context documents"
 default = ""
 
+[vars.reviewer_claude]
+description = "Agent name for Claude-backed design review work"
+default = "polecat"
+
+[vars.reviewer_codex]
+description = "Agent name for Codex-backed design review work"
+default = "polecat"
+
+[vars.reviewer_gemini]
+description = "Agent name for Gemini-backed design review work"
+default = "polecat"
+
 # ── Phase 1: Persona generation fan-out ─────────────────────────────
 
 [[template]]
 id = "{target}.persona-gen-claude"
 title = "Generate reviewer personas (Claude)"
+assignee = "{reviewer_claude}"
 description = """
-Read {{design_doc}} and any {{context_files}}. Propose {{persona_count}}
-reviewer personas across {{review_waves}} priority waves.
+If {{design_doc}} is non-empty, read it first. Also read any
+{{context_files}}. If {{design_doc}} is empty, infer the design under review
+from the assigned issue, current worktree context, and any repo docs that
+capture the plan. Propose {{persona_count}} reviewer personas across
+{{review_waves}} priority waves.
 
 ## Persona Generation Prompt
 
@@ -95,9 +111,14 @@ Guidelines:
 - Think about who would actually review this in a real organization
 """
 
+[template.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"
+
 [[template]]
 id = "{target}.persona-gen-codex"
 title = "Generate reviewer personas (Codex)"
+assignee = "{reviewer_codex}"
 description = """
 Same persona generation prompt as Claude, run independently on Codex
 for maximum divergence. Read {{design_doc}} and propose {{persona_count}}
@@ -107,15 +128,33 @@ personas across {{review_waves}} waves.
 catches blind spots any single model would miss.]
 """
 
+[template.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"
+
 [[template]]
 id = "{target}.persona-gen-gemini"
 title = "Generate reviewer personas (Gemini)"
+assignee = "{reviewer_gemini}"
+condition = "!{{skip_gemini}}"
 description = """
-Skip this step if {{skip_gemini}} is true. Close immediately with
-reason "skipped — dual-model mode".
-
 Same persona generation prompt, run independently on Gemini.
+
+If Gemini is unavailable, rate-limited, or quota exhausted, close the
+attempt failed with a transient classification:
+
+```bash
+bd update $GC_BEAD_ID \
+  --set-metadata gc.outcome=fail \
+  --set-metadata gc.failure_class=transient \
+  --set-metadata gc.failure_reason=rate_limited \
+  --status closed
+```
 """
+
+[template.retry]
+max_attempts = 3
+on_exhausted = "soft_fail"
 
 # ── Phase 2: Persona synthesis ──────────────────────────────────────
 
@@ -123,6 +162,7 @@ Same persona generation prompt, run independently on Gemini.
 id = "{target}.persona-synthesis"
 title = "Merge and deduplicate personas"
 needs = ["{target}.persona-gen-claude", "{target}.persona-gen-codex", "{target}.persona-gen-gemini"]
+assignee = "{reviewer_claude}"
 description = """
 Read all persona sets from the three generators. Merge into a final
 persona set.
@@ -143,20 +183,26 @@ Save the final persona set as a pipe-delimited list (one per line).
 This output is consumed by the persona-reviews step.
 """
 
+[template.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"
+
 # ── Phase 3: Persona reviews ───────────────────────────────────────
 #
-# ASPIRATIONAL: This should be a dynamic fan-out where each persona
-# becomes 3 review beads (claude/codex/gemini). Requires
-# on_complete.for_each with dynamic cardinality from persona-synthesis
-# output. For now, modeled as a single step that runs all reviews.
+# Dynamic per-persona fan-out is still aspirational. For production use we
+# at least keep the model lanes explicit: one Claude batch, one Codex batch,
+# and one Gemini batch. This preserves real targeting and model divergence
+# without requiring dynamic cardinality.
 
 [[template]]
-id = "{target}.persona-reviews"
-title = "Run all persona reviews"
+id = "{target}.persona-reviews-claude"
+title = "Run persona reviews (Claude)"
 needs = ["{target}.persona-synthesis"]
+assignee = "{reviewer_claude}"
 description = """
-For each persona in the final set, build a review prompt and run it
-against Claude, Codex, and Gemini (skip Gemini if {{skip_gemini}}).
+Read the final persona set from persona-synthesis. For each persona, build
+the review prompt below and run it on Claude only. Save all Claude persona
+review outputs for the synthesis step.
 
 ## Per-Persona Review Prompt Template
 
@@ -210,22 +256,68 @@ Typical red flags:
 
 ---
 
-Run all persona × model combinations. With {{persona_count}} personas
-and 3 models (or 2 if skip_gemini), this produces up to
-{{persona_count}} × 3 review outputs.
+Run all persona reviews on Claude only. With {{persona_count}} personas,
+this produces up to {{persona_count}} Claude review outputs.
 
-Consider batching: run 2-3 personas at a time (6-9 concurrent processes)
-to avoid overwhelming agent pools.
+Batch if needed, but preserve one output per persona.
 
-Save all outputs for the synthesis step.
+Save all Claude outputs for the synthesis step.
 """
+
+[template.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"
+
+[[template]]
+id = "{target}.persona-reviews-codex"
+title = "Run persona reviews (Codex)"
+needs = ["{target}.persona-synthesis"]
+assignee = "{reviewer_codex}"
+description = """
+Read the final persona set from persona-synthesis. For each persona, build
+the same review prompt template and run it on Codex only. Save all Codex
+persona review outputs for the synthesis step.
+
+Use the exact per-persona prompt contract from persona-reviews-claude.
+"""
+
+[template.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"
+
+[[template]]
+id = "{target}.persona-reviews-gemini"
+title = "Run persona reviews (Gemini)"
+needs = ["{target}.persona-synthesis"]
+assignee = "{reviewer_gemini}"
+condition = "!{{skip_gemini}}"
+description = """
+Read the final persona set from persona-synthesis. For each persona, build
+the same review prompt template and run it on Gemini only.
+
+If Gemini is unavailable, rate-limited, or quota exhausted, close the
+attempt failed with a transient classification:
+
+```bash
+bd update $GC_BEAD_ID \
+  --set-metadata gc.outcome=fail \
+  --set-metadata gc.failure_class=transient \
+  --set-metadata gc.failure_reason=rate_limited \
+  --status closed
+```
+"""
+
+[template.retry]
+max_attempts = 3
+on_exhausted = "soft_fail"
 
 # ── Phase 4: Review synthesis ───────────────────────────────────────
 
 [[template]]
 id = "{target}.review-synthesis"
 title = "Synthesize all persona reviews"
-needs = ["{target}.persona-reviews"]
+needs = ["{target}.persona-reviews-claude", "{target}.persona-reviews-codex", "{target}.persona-reviews-gemini"]
+assignee = "{reviewer_claude}"
 description = """
 Read all persona review outputs. Merge findings across all reviewers
 and models into a unified synthesis report.
@@ -277,5 +369,9 @@ Your job:
 1. <most critical change>
 2. ...
 """
+
+[template.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"
 
 # The parent formula owns the apply/verdict step — this expansion only analyzes.

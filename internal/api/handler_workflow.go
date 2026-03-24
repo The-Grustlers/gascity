@@ -146,10 +146,14 @@ func (s *Server) buildWorkflowSnapshot(workflowID, fallbackScopeKind, fallbackSc
 	matches := make([]workflowRootMatch, 0)
 	listPartial := false
 	var firstListErr error
+	cityScopeRef := ""
 
 	for _, info := range stores {
 		if info.store == nil {
 			continue
+		}
+		if cityScopeRef == "" && info.scopeKind == "city" {
+			cityScopeRef = info.scopeRef
 		}
 		if !seenStoreRefs[info.ref] {
 			storesScanned = append(storesScanned, info.ref)
@@ -172,7 +176,7 @@ func (s *Server) buildWorkflowSnapshot(workflowID, fallbackScopeKind, fallbackSc
 		}
 	}
 
-	match, ok := selectWorkflowRootMatch(matches, fallbackScopeKind, fallbackScopeRef)
+	match, ok := selectWorkflowRootMatch(matches, fallbackScopeKind, fallbackScopeRef, cityScopeRef)
 	if !ok {
 		if firstListErr != nil {
 			return nil, firstListErr
@@ -180,10 +184,10 @@ func (s *Server) buildWorkflowSnapshot(workflowID, fallbackScopeKind, fallbackSc
 		return nil, errWorkflowNotFound
 	}
 
-	return s.snapshotFromStore(match.info, match.root, fallbackScopeKind, fallbackScopeRef, storesScanned, listPartial, snapshotIndex)
+	return s.snapshotFromStore(match.info, match.root, fallbackScopeKind, fallbackScopeRef, cityScopeRef, storesScanned, listPartial, snapshotIndex)
 }
 
-func (s *Server) snapshotFromStore(info workflowStoreInfo, root beads.Bead, fallbackScopeKind, fallbackScopeRef string, storesScanned []string, listPartial bool, snapshotIndex uint64) (*workflowSnapshotResponse, error) {
+func (s *Server) snapshotFromStore(info workflowStoreInfo, root beads.Bead, fallbackScopeKind, fallbackScopeRef, cityScopeRef string, storesScanned []string, listPartial bool, snapshotIndex uint64) (*workflowSnapshotResponse, error) {
 	all, err := info.store.List()
 	if err != nil {
 		return nil, err
@@ -207,7 +211,7 @@ func (s *Server) snapshotFromStore(info workflowStoreInfo, root beads.Bead, fall
 	sessionIndex := s.workflowSessionIndex()
 	workflowDeps, logicalDeps, logicalNodes, scopeGroups, partial := buildWorkflowGraph(root, workflowBeads, beadIndex, info.store, sessionIndex)
 	partial = partial || listPartial
-	scopeKind, scopeRef := workflowSnapshotScope(info, root, fallbackScopeKind, fallbackScopeRef)
+	scopeKind, scopeRef := workflowSnapshotScope(info, root, fallbackScopeKind, fallbackScopeRef, cityScopeRef)
 
 	beadResponses := make([]workflowBeadResponse, 0, len(workflowBeads))
 	for _, bead := range workflowBeads {
@@ -266,7 +270,7 @@ func matchesWorkflowID(root beads.Bead, workflowID string) bool {
 	return root.ID == workflowID || resolvedWorkflowID(root) == workflowID
 }
 
-func selectWorkflowRootMatch(matches []workflowRootMatch, requestedScopeKind, requestedScopeRef string) (workflowRootMatch, bool) {
+func selectWorkflowRootMatch(matches []workflowRootMatch, requestedScopeKind, requestedScopeRef, cityScopeRef string) (workflowRootMatch, bool) {
 	if len(matches) == 0 {
 		return workflowRootMatch{}, false
 	}
@@ -286,7 +290,7 @@ func selectWorkflowRootMatch(matches []workflowRootMatch, requestedScopeKind, re
 		// scoped workflows can still live in a rig store. Preserve the caller
 		// scope only for that legacy city-on-rig case when the workflow ID is
 		// unique across scanned stores.
-		if len(matches) == 1 && preserveRequestedWorkflowScope(matches[0].info, matches[0].root, requestedScopeKind, requestedScopeRef) {
+		if len(matches) == 1 && preserveRequestedWorkflowScope(matches[0].info, matches[0].root, requestedScopeKind, requestedScopeRef, cityScopeRef) {
 			return matches[0], true
 		}
 		return workflowRootMatch{}, false
@@ -307,21 +311,24 @@ func workflowSelectionScope(info workflowStoreInfo, root beads.Bead) (string, st
 	return info.scopeKind, info.scopeRef
 }
 
-func workflowSnapshotScope(info workflowStoreInfo, root beads.Bead, requestedScopeKind, requestedScopeRef string) (string, string) {
+func workflowSnapshotScope(info workflowStoreInfo, root beads.Bead, requestedScopeKind, requestedScopeRef, cityScopeRef string) (string, string) {
 	if scopeKind, scopeRef := workflowRootScope(root); scopeKind != "" && scopeRef != "" {
 		return scopeKind, scopeRef
 	}
-	if preserveRequestedWorkflowScope(info, root, requestedScopeKind, requestedScopeRef) {
+	if preserveRequestedWorkflowScope(info, root, requestedScopeKind, requestedScopeRef, cityScopeRef) {
 		return requestedScopeKind, requestedScopeRef
 	}
 	return info.scopeKind, info.scopeRef
 }
 
-func preserveRequestedWorkflowScope(info workflowStoreInfo, root beads.Bead, requestedScopeKind, requestedScopeRef string) bool {
+func preserveRequestedWorkflowScope(info workflowStoreInfo, root beads.Bead, requestedScopeKind, requestedScopeRef, cityScopeRef string) bool {
 	if requestedScopeKind != "city" || requestedScopeRef == "" {
 		return false
 	}
 	if info.scopeKind != "rig" {
+		return false
+	}
+	if strings.TrimSpace(cityScopeRef) == "" || requestedScopeRef != strings.TrimSpace(cityScopeRef) {
 		return false
 	}
 	scopeKind, scopeRef := workflowRootScope(root)
@@ -332,7 +339,7 @@ func parseWorkflowRequestScope(rawScopeKind, rawScopeRef string) (string, string
 	scopeKind := strings.TrimSpace(rawScopeKind)
 	scopeRef := strings.TrimSpace(rawScopeRef)
 	if scopeKind == "" && scopeRef == "" {
-		return "", "", ""
+		return "", "", "scope_kind and scope_ref are required"
 	}
 	if scopeKind == "" || scopeRef == "" {
 		return "", "", "scope_kind and scope_ref must be provided together"

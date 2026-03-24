@@ -151,6 +151,11 @@ End with:
 - Search the codebase to back up claims. Do not guess.
 - Do NOT list pre-existing bugs the PR fixes as "findings."
 """
+
+[template.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"
+
 [[template]]
 id = "{target}.review-codex"
 title = "Code review: Codex (evidence-first)"
@@ -239,24 +244,31 @@ End with:
 - Do NOT list pre-existing bugs the PR fixes as "findings."
 """
 
+[template.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"
+
 [[template]]
 id = "{target}.review-gemini"
 title = "Code review: Gemini (cross-file consistency)"
 assignee = "{reviewer_gemini}"
 condition = "!{{skip_gemini}}"
 description = """
-IMPORTANT: This step is soft-fail. If you encounter rate limit errors,
-quota exhaustion, or model unavailability, close this step successfully
-with a note explaining the skip:
+IMPORTANT: This step is retry-managed and optional. If you encounter
+rate limit errors, quota exhaustion, or Gemini unavailability, close the
+attempt failed with a transient classification:
 
 ```bash
-bd update $GC_BEAD_ID --set-metadata review.gemini_status=skipped
-bd update $GC_BEAD_ID --set-metadata review.gemini_reason="rate_limited"
-gc mol step done
+bd update $GC_BEAD_ID \
+  --set-metadata gc.outcome=fail \
+  --set-metadata gc.failure_class=transient \
+  --set-metadata gc.failure_reason=rate_limited \
+  --status closed
 ```
 
-Do NOT let the step fail — the synthesis step will proceed with
-Claude + Codex output only.
+Do NOT close pass on provider unavailability. Runtime retries this leg up
+to 3 attempts and, if all transient attempts fail, converts the logical
+step to a soft-fail so synthesis can continue with Claude + Codex only.
 
 ---
 
@@ -342,6 +354,10 @@ End with:
 - Do NOT list pre-existing bugs the PR fixes as "findings."
 """
 
+[template.retry]
+max_attempts = 3
+on_exhausted = "soft_fail"
+
 # ── Synthesis (gather) ──────────────────────────────────────────────
 
 [[template]]
@@ -351,12 +367,10 @@ needs = ["{target}.review-claude", "{target}.review-codex", "{target}.review-gem
 description = """
 Merge all reviewer outputs into a single maintainer-grade decision report.
 
-Read the outputs from all completed reviewer steps. If Gemini was skipped
-(rate-limited or condition-filtered), synthesize from Claude + Codex only
-and note reduced cross-file coverage in the report.
-
-Check Gemini's bead metadata for `review.gemini_status=skipped` to detect
-graceful degradation vs actual failure.
+Read the outputs from all completed reviewer steps. If the Gemini logical
+step closed with `gc.final_disposition=soft_fail` or was condition-filtered,
+synthesize from Claude + Codex only and note reduced cross-file coverage in
+the report.
 
 ## Role: review-synthesizer
 
@@ -425,3 +439,7 @@ severity-calibrated, action-oriented.
 - Concise, concrete, evidence-linked.
 - The output is for a human maintainer making a merge decision.
 """
+
+[template.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"

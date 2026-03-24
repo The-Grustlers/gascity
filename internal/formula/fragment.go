@@ -100,7 +100,10 @@ func CompileExpansionFragment(_ context.Context, name string, searchPaths []stri
 
 	ApplyFragmentGraphControls(resolved)
 
-	recipe := toRecipe(resolved)
+	recipe, err := toRecipe(resolved)
+	if err != nil {
+		return nil, fmt.Errorf("flattening expansion %q: %w", name, err)
+	}
 	fragment := stripFragmentRecipe(recipe)
 	fragment.Entries = fragmentEntryStepIDs(fragment)
 	fragment.Sinks = fragmentSinkStepIDs(fragment)

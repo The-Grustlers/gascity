@@ -68,6 +68,10 @@ git status --short
 """
 metadata = { "gc.scope_ref" = "body", "gc.scope_role" = "setup", "gc.on_fail" = "abort_scope" }
 
+[steps.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"
+
 [[steps]]
 id = "rebase-check"
 title = "Create worktree and verify rebaseability"
@@ -93,6 +97,10 @@ git rebase --autostash {{remote_name}}/{{base_branch}} --dry-run
 ```
 """
 metadata = { "gc.scope_ref" = "body", "gc.scope_role" = "setup", "gc.on_fail" = "abort_scope" }
+
+[steps.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"
 
 # ── Ralph review/fix loop ───────────────────────────────────────────
 # The review-loop is a Ralph step with nested children.
@@ -145,6 +153,10 @@ bd update $GC_BEAD_ID --set-metadata review.verdict=iterate
 ```
 """
 
+[steps.children.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"
+
 [compose]
 [[compose.expand]]
 target = "review-pipeline"
@@ -175,6 +187,10 @@ git push --force-with-lease {{remote_name}} HEAD
 """
 metadata = { "gc.scope_ref" = "body", "gc.scope_role" = "member", "gc.on_fail" = "abort_scope" }
 
+[steps.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"
+
 # ── Teardown (always runs) ──────────────────────────────────────────
 
 [[steps]]
@@ -193,3 +209,7 @@ bd update {{issue}} --unset-metadata work_dir
 ```
 """
 metadata = { "gc.kind" = "cleanup", "gc.scope_ref" = "body", "gc.scope_role" = "teardown" }
+
+[steps.retry]
+max_attempts = 3
+on_exhausted = "hard_fail"

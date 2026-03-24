@@ -437,6 +437,9 @@ func appendRalphRetryViaGraphApply(store beads.Store, applier beads.GraphApplySt
 	if err != nil {
 		return nil, err
 	}
+	if err := beads.ValidateGraphApplyResult(plan, applied); err != nil {
+		return nil, err
+	}
 	tracef("ralph retry-graph-apply-done logical=%s next=%d nodes=%d", logicalID, nextAttempt, len(applied.IDs))
 
 	mapping := make(map[string]string, len(applied.IDs))

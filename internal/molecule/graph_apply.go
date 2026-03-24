@@ -37,6 +37,10 @@ func instantiateViaGraphApply(ctx context.Context, applier beads.GraphApplyStore
 		graphApplyTracef("graph-apply apply-error recipe=%s err=%v", recipe.Name, err)
 		return nil, err
 	}
+	if err := beads.ValidateGraphApplyResult(plan, applied); err != nil {
+		graphApplyTracef("graph-apply validate-error recipe=%s err=%v", recipe.Name, err)
+		return nil, err
+	}
 	graphApplyTracef("graph-apply applied recipe=%s nodes=%d", recipe.Name, len(applied.IDs))
 	rootID := applied.IDs[rootKey]
 	if rootID == "" {
@@ -60,6 +64,10 @@ func instantiateFragmentViaGraphApply(ctx context.Context, store beads.Store, ap
 	applied, err := applier.ApplyGraphPlan(ctx, plan)
 	if err != nil {
 		graphApplyTracef("graph-apply fragment-apply-error root=%s err=%v", opts.RootID, err)
+		return nil, err
+	}
+	if err := beads.ValidateGraphApplyResult(plan, applied); err != nil {
+		graphApplyTracef("graph-apply fragment-validate-error root=%s err=%v", opts.RootID, err)
 		return nil, err
 	}
 	graphApplyTracef("graph-apply fragment-applied root=%s nodes=%d", opts.RootID, len(applied.IDs))

@@ -137,12 +137,12 @@ func Compile(_ context.Context, name string, searchPaths []string, vars map[stri
 	ApplyGraphControls(resolved)
 
 	// Stage 13: Flatten to Recipe
-	return toRecipe(resolved), nil
+	return toRecipe(resolved)
 }
 
 // toRecipe converts a resolved Formula into a Recipe by flattening the
 // step tree into an ordered list with namespaced IDs and dependency edges.
-func toRecipe(f *Formula) *Recipe {
+func toRecipe(f *Formula) (*Recipe, error) {
 	r := &Recipe{
 		Name:        f.Formula,
 		Description: f.Description,
@@ -202,16 +202,20 @@ func toRecipe(f *Formula) *Recipe {
 	if graphWorkflow {
 		addWorkflowRootDeps(f.Formula, f.Steps, idMapping, &r.Deps)
 		if f.Version >= 2 {
-			r.Steps = orderGraphRecipeSteps(f.Formula, r.Steps, r.Deps)
+			orderedSteps, err := orderGraphRecipeSteps(f.Formula, r.Steps, r.Deps)
+			if err != nil {
+				return nil, err
+			}
+			r.Steps = orderedSteps
 		}
 	}
 
-	return r
+	return r, nil
 }
 
-func orderGraphRecipeSteps(rootID string, steps []RecipeStep, deps []RecipeDep) []RecipeStep {
+func orderGraphRecipeSteps(rootID string, steps []RecipeStep, deps []RecipeDep) ([]RecipeStep, error) {
 	if len(steps) <= 2 {
-		return steps
+		return steps, nil
 	}
 
 	stepByID := make(map[string]RecipeStep, len(steps))
@@ -275,9 +279,9 @@ func orderGraphRecipeSteps(rootID string, steps []RecipeStep, deps []RecipeDep) 
 	}
 
 	if len(result) != len(steps) {
-		return steps
+		return nil, fmt.Errorf("graph.v2 formula %q contains a dependency cycle", rootID)
 	}
-	return result
+	return result, nil
 }
 
 // flattenSteps recursively converts formula Steps into RecipeSteps,

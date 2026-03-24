@@ -271,7 +271,7 @@ func propagateDynamicScopeMetadata(step *formula.RecipeStep, source beads.Bead) 
 	switch step.Metadata["gc.kind"] {
 	case "scope":
 		return
-	case "scope-check", "workflow-finalize", "fanout", "check":
+	case "scope-check", "workflow-finalize", "fanout", "check", "retry-eval":
 		step.Metadata["gc.scope_role"] = "control"
 		return
 	default:

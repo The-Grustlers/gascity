@@ -31,7 +31,7 @@ func processRetryEval(store beads.Store, bead beads.Bead, opts ProcessOptions) (
 		return ControlResult{}, fmt.Errorf("%s: loading logical bead %s: %w", bead.ID, logicalID, err)
 	}
 	if closedBy, _ := strconv.Atoi(logical.Metadata["gc.closed_by_attempt"]); closedBy >= attempt {
-		if err := finalizeRetryEval(store, bead.ID); err != nil {
+		if err := finalizeRetryEval(store, logicalID, bead.ID); err != nil {
 			return ControlResult{}, fmt.Errorf("%s: finalizing stale retry eval: %w", bead.ID, err)
 		}
 		return ControlResult{Processed: true, Action: "noop"}, nil
@@ -186,7 +186,7 @@ func processRetryEval(store beads.Store, bead beads.Bead, opts ProcessOptions) (
 	}); err != nil {
 		return ControlResult{}, fmt.Errorf("%s: recording retry metadata on logical bead: %w", logicalID, err)
 	}
-	if err := finalizeRetryEval(store, bead.ID); err != nil {
+	if err := finalizeRetryEval(store, logicalID, bead.ID); err != nil {
 		return ControlResult{}, fmt.Errorf("%s: finalizing retry eval: %w", bead.ID, err)
 	}
 	return ControlResult{Processed: true, Action: "retry"}, nil
@@ -380,7 +380,12 @@ func retryEvalBead(prev beads.Bead, logicalID, stepRef string, attempt int) bead
 	}
 }
 
-func finalizeRetryEval(store beads.Store, evalID string) error {
+func finalizeRetryEval(store beads.Store, logicalID, evalID string) error {
+	if logicalID != "" {
+		if err := store.DepRemove(logicalID, evalID); err != nil {
+			return err
+		}
+	}
 	eval, err := store.Get(evalID)
 	if err != nil {
 		return err

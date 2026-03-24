@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/beads"
@@ -13,11 +14,15 @@ import (
 
 type graphApplySpyStore struct {
 	*beads.MemStore
-	plan *beads.GraphApplyPlan
+	plan   *beads.GraphApplyPlan
+	result *beads.GraphApplyResult
 }
 
 func (s *graphApplySpyStore) ApplyGraphPlan(_ context.Context, plan *beads.GraphApplyPlan) (*beads.GraphApplyResult, error) {
 	s.plan = plan
+	if s.result != nil {
+		return s.result, nil
+	}
 	ids := make(map[string]string, len(plan.Nodes))
 	for i, node := range plan.Nodes {
 		ids[node.Key] = fmt.Sprintf("bd-%d", i+1)
@@ -165,6 +170,32 @@ func TestInstantiateUsesGraphApplyStoreForRetryLogicalRefs(t *testing.T) {
 	eval := nodesByKey["wf.review.eval.1"]
 	if got := eval.MetadataRefs["gc.logical_bead_id"]; got != "wf.review" {
 		t.Fatalf("eval gc.logical_bead_id ref = %q, want wf.review", got)
+	}
+}
+
+func TestInstantiateRejectsPartialGraphApplyResult(t *testing.T) {
+	store := &graphApplySpyStore{
+		MemStore: beads.NewMemStore(),
+		result: &beads.GraphApplyResult{
+			IDs: map[string]string{
+				"wf": "bd-1",
+			},
+		},
+	}
+	recipe := &formula.Recipe{
+		Name: "wf",
+		Steps: []formula.RecipeStep{
+			{ID: "wf", Title: "Workflow", Type: "task", IsRoot: true},
+			{ID: "wf.step", Title: "Work", Type: "task"},
+		},
+		Deps: []formula.RecipeDep{
+			{StepID: "wf.step", DependsOnID: "wf", Type: "parent-child"},
+		},
+	}
+
+	_, err := Instantiate(context.Background(), store, recipe, Options{})
+	if err == nil || !strings.Contains(err.Error(), "wf.step") {
+		t.Fatalf("Instantiate error = %v, want missing wf.step mapping", err)
 	}
 }
 

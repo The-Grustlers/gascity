@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/beads"
@@ -312,6 +313,35 @@ func TestWorkflowGetPreservesRequestedScopeForUniqueCrossStoreWorkflow(t *testin
 	}
 }
 
+func TestWorkflowGetRejectsMismatchedCityScopeForUniqueCrossStoreWorkflow(t *testing.T) {
+	state := newFakeState(t)
+	state.cityName = "gascity"
+	rigStore := beads.NewMemStore()
+	state.cityBeadStore = beads.NewMemStore()
+	state.stores = map[string]beads.Store{"alpha": rigStore}
+
+	if _, err := rigStore.Create(beads.Bead{
+		Title: "Cross-store workflow",
+		Type:  "task",
+		Metadata: map[string]string{
+			"gc.kind":             "workflow",
+			"gc.formula_contract": "graph.v2",
+			"gc.workflow_id":      "wf_wrong_city_scope",
+		},
+	}); err != nil {
+		t.Fatalf("Create(root): %v", err)
+	}
+
+	server := New(state)
+	req := httptest.NewRequest(http.MethodGet, "/v0/workflow/wf_wrong_city_scope?scope_kind=city&scope_ref=other-city", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestWorkflowGetRejectsInvalidScopeKind(t *testing.T) {
 	state := newFakeState(t)
 	state.cityName = "test-city"
@@ -398,7 +428,7 @@ func TestWorkflowGetMarksSnapshotPartialWhenDepListFails(t *testing.T) {
 	}
 
 	server := New(state)
-	req := httptest.NewRequest(http.MethodGet, "/v0/workflow/wf_partial", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v0/workflow/wf_partial?scope_kind=city&scope_ref=test-city", nil)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -412,6 +442,24 @@ func TestWorkflowGetMarksSnapshotPartialWhenDepListFails(t *testing.T) {
 	}
 	if !snapshot.Partial {
 		t.Fatalf("partial = %v, want true", snapshot.Partial)
+	}
+}
+
+func TestWorkflowGetRequiresScopeFields(t *testing.T) {
+	state := newFakeState(t)
+	state.cityName = "test-city"
+	state.cityBeadStore = beads.NewMemStore()
+
+	server := New(state)
+	req := httptest.NewRequest(http.MethodGet, "/v0/workflow/wf_missing_scope", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "scope_kind and scope_ref are required") {
+		t.Fatalf("body = %s, want scope requirement error", rec.Body.String())
 	}
 }
 
@@ -476,7 +524,7 @@ func TestWorkflowGetUsesSingleSnapshotIndexForHeaderAndBody(t *testing.T) {
 	}
 
 	server := New(state)
-	req := httptest.NewRequest(http.MethodGet, "/v0/workflow/wf_index", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v0/workflow/wf_index?scope_kind=city&scope_ref=test-city", nil)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -547,7 +595,7 @@ func TestWorkflowGetNormalizesShortScopeRefs(t *testing.T) {
 	}
 
 	server := New(state)
-	req := httptest.NewRequest(http.MethodGet, "/v0/workflow/"+root.ID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/v0/workflow/"+root.ID+"?scope_kind=city&scope_ref=test-city", nil)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 
@@ -777,7 +825,7 @@ func TestWorkflowGetRejectsNonWorkflowRoot(t *testing.T) {
 	}
 
 	server := New(state)
-	req := httptest.NewRequest(http.MethodGet, "/v0/workflow/"+bead.ID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/v0/workflow/"+bead.ID+"?scope_kind=city&scope_ref=test-city", nil)
 	rec := httptest.NewRecorder()
 	server.ServeHTTP(rec, req)
 

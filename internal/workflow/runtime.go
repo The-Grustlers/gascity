@@ -193,7 +193,7 @@ func processWorkflowFinalize(store beads.Store, bead beads.Bead) (ControlResult,
 	outcome, err := resolveFinalizeOutcome(store, bead.ID)
 	if err != nil {
 		if errors.Is(err, errFinalizePending) {
-			return ControlResult{}, nil
+			return ControlResult{}, ErrControlPending
 		}
 		return ControlResult{}, fmt.Errorf("%s: resolving workflow outcome: %w", bead.ID, err)
 	}

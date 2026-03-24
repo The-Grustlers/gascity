@@ -281,6 +281,67 @@ func TestDecorateDynamicFragmentRecipeUsesSourceRouteRigContextForBareTargets(t 
 	}
 }
 
+func TestDecorateDynamicFragmentRecipeMarksRetryEvalAsScopedControl(t *testing.T) {
+	store := beads.NewMemStore()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Agents: []config.Agent{
+			{Name: "reviewer", Dir: "frontend"},
+		},
+	}
+	config.InjectImplicitAgents(cfg)
+
+	source := beads.Bead{
+		ID:       "gc-source",
+		Title:    "Source",
+		Assignee: "frontend--reviewer",
+		Metadata: map[string]string{
+			"gc.scope_ref": "body",
+			"gc.on_fail":   "abort_scope",
+			"gc.routed_to": "frontend/reviewer",
+		},
+	}
+	fragment := &formula.FragmentRecipe{
+		Name: "expansion-review",
+		Steps: []formula.RecipeStep{
+			{
+				ID:    "expansion-review.review",
+				Title: "Review",
+				Metadata: map[string]string{
+					"gc.kind": "retry-run",
+				},
+			},
+			{
+				ID:    "expansion-review.review-eval",
+				Title: "Evaluate Review",
+				Metadata: map[string]string{
+					"gc.kind": "retry-eval",
+				},
+			},
+		},
+		Deps: []formula.RecipeDep{
+			{StepID: "expansion-review.review-eval", DependsOnID: "expansion-review.review", Type: "blocks"},
+		},
+	}
+
+	if err := decorateDynamicFragmentRecipe(fragment, source, store, cfg.Workspace.Name, cfg); err != nil {
+		t.Fatalf("decorateDynamicFragmentRecipe: %v", err)
+	}
+
+	steps := map[string]formula.RecipeStep{}
+	for _, step := range fragment.Steps {
+		steps[step.ID] = step
+	}
+
+	eval := steps["expansion-review.review-eval"]
+	if eval.Metadata["gc.scope_ref"] != "body" {
+		t.Fatalf("retry-eval gc.scope_ref = %q, want body", eval.Metadata["gc.scope_ref"])
+	}
+	if eval.Metadata["gc.scope_role"] != "control" {
+		t.Fatalf("retry-eval gc.scope_role = %q, want control", eval.Metadata["gc.scope_role"])
+	}
+}
+
 func TestRunWorkflowServeProcessesReadyControlBeadsThenExits(t *testing.T) {
 	cityDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte("[workspace]\nname = \"test-city\"\n"), 0o644); err != nil {

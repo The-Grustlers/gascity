@@ -427,6 +427,13 @@ func TestProcessRetryEvalTransientRetriesAndRecyclesPoolSession(t *testing.T) {
 	if got := eval2.Metadata["gc.retry_from"]; got != eval1.ID {
 		t.Fatalf("eval2 gc.retry_from = %q, want %s", got, eval1.ID)
 	}
+	logicalDeps, err := store.DepList(logical.ID, "down")
+	if err != nil {
+		t.Fatalf("logical deps: %v", err)
+	}
+	if len(logicalDeps) != 1 || logicalDeps[0].DependsOnID != eval2.ID {
+		t.Fatalf("logical deps = %+v, want only current retry eval %s", logicalDeps, eval2.ID)
+	}
 }
 
 func TestProcessRetryEvalSoftFailOnExhaustedTransient(t *testing.T) {
