@@ -126,8 +126,13 @@ func lookupProvider(name string, cityProviders map[string]ProviderSpec, lookPath
 
 // mergeProviderOverBuiltin layers city-level provider fields over a built-in
 // base. Non-zero city fields override; zero-value fields inherit the built-in
-// defaults. Slice fields (Args, ACPArgs, ProcessNames) replace entirely when
-// non-nil. Env merges additively (city keys override base keys).
+// defaults. Slice fields (Args, ProcessNames, OptionsSchema) replace entirely
+// when non-nil. Map fields (Env, PermissionModes) merge additively (city keys
+// override base keys).
+//
+// Note: booleans are one-directional (can enable, not disable) due to TOML
+// zero-value ambiguity — city providers cannot override a built-in's true
+// to false for EmitsPermissionWarning, SupportsACP, or SupportsHooks.
 func mergeProviderOverBuiltin(base, city ProviderSpec) ProviderSpec {
 	result := base
 

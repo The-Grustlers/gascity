@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 )
 
@@ -773,5 +774,64 @@ func TestResolveProviderResumeCommandAgentOverride(t *testing.T) {
 	// ResumeFlag should still be set from builtin (not cleared by ResumeCommand).
 	if rp.ResumeFlag != "--resume" {
 		t.Errorf("ResumeFlag = %q, want %q (builtin preserved)", rp.ResumeFlag, "--resume")
+	}
+}
+
+// --- mergeProviderOverBuiltin field sync ---
+
+// TestMergeProviderOverBuiltinFieldSync uses reflection to verify that
+// mergeProviderOverBuiltin handles every field on ProviderSpec. When a
+// new field is added to ProviderSpec, the merge function must be updated
+// or this test will fail.
+//
+// Approach: set every ProviderSpec field to a non-zero value on the city
+// side, merge over a zero-value base, and verify no field remains at its
+// zero value. This catches fields that were added to the struct but not
+// wired into the merge function.
+func TestMergeProviderOverBuiltinFieldSync(t *testing.T) {
+	city := ProviderSpec{
+		DisplayName:            "Custom",
+		Command:                "custom-cmd",
+		Args:                   []string{"--flag"},
+		PromptMode:             "flag",
+		PromptFlag:             "--prompt",
+		ReadyDelayMs:           5000,
+		ReadyPromptPrefix:      "$ ",
+		ProcessNames:           []string{"custom"},
+		EmitsPermissionWarning: true,
+		Env:                    map[string]string{"K": "V"},
+		PathCheck:              "custom-bin",
+		SupportsACP:            true,
+		SupportsHooks:          true,
+		InstructionsFile:       "CUSTOM.md",
+		ResumeFlag:             "--resume",
+		ResumeStyle:            "flag",
+		ResumeCommand:          "custom-cmd --resume {{.SessionKey}}",
+		SessionIDFlag:          "--session-id",
+		PermissionModes:        map[string]string{"yolo": "--yolo"},
+		OptionsSchema:          []ProviderOption{{Key: "model"}},
+	}
+
+	// Verify every field on city is non-zero (catches new fields not added to test data).
+	cv := reflect.ValueOf(city)
+	ct := cv.Type()
+	for i := 0; i < ct.NumField(); i++ {
+		f := ct.Field(i)
+		if cv.Field(i).IsZero() {
+			t.Errorf("ProviderSpec field %q is zero in test city data — add it to the test", f.Name)
+		}
+	}
+
+	// Merge city over a zero-value base.
+	base := ProviderSpec{}
+	result := mergeProviderOverBuiltin(base, city)
+
+	// Every field on the result should be non-zero (city values should propagate).
+	rv := reflect.ValueOf(result)
+	for i := 0; i < ct.NumField(); i++ {
+		f := ct.Field(i)
+		if rv.Field(i).IsZero() {
+			t.Errorf("mergeProviderOverBuiltin did not propagate field %q from city to result", f.Name)
+		}
 	}
 }
