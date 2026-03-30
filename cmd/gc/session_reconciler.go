@@ -706,6 +706,9 @@ func derivePoolDesired(desiredState map[string]TemplateParams, cfg *config.City)
 	}
 	counts := make(map[string]int)
 	for _, tp := range desiredState {
+		if tp.ConfiguredNamedIdentity != "" {
+			continue // named sessions are not pool-managed
+		}
 		cfgAgent := findAgentByTemplate(cfg, tp.TemplateName)
 		if cfgAgent != nil && isMultiSessionCfgAgent(cfgAgent) && !tp.ManualSession {
 			counts[tp.TemplateName]++
