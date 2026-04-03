@@ -184,10 +184,12 @@ func hasACPAgents(agents []config.Agent) bool {
 // newReadOnlySessionProvider returns a lightweight session provider suitable
 // for read-only operations (e.g. session list) that only need tmux queries
 // (IsAttached, GetLastActivity, Names). It skips the expensive ACP route
-// pre-registration that requires multiple Dolt queries.
+// pre-registration that requires multiple Dolt queries; ACP routing is done
+// lazily per-session if needed.
 func newReadOnlySessionProvider() runtime.Provider {
 	var sc config.SessionConfig
 	var cityName, cityPath string
+	var agents []config.Agent
 	if cp, err := resolveCity(); err == nil {
 		cityPath = cp
 		if cfg, err := loadCityConfig(cp); err == nil {
@@ -196,6 +198,7 @@ func newReadOnlySessionProvider() runtime.Provider {
 			if cityName == "" {
 				cityName = filepath.Base(cp)
 			}
+			agents = cfg.Agents
 		}
 	}
 	provName := sessionProviderName()
@@ -203,6 +206,17 @@ func newReadOnlySessionProvider() runtime.Provider {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err) //nolint:errcheck // best-effort stderr
 		os.Exit(1)
+	}
+	// Wrap in auto provider for mixed setups (default != acp but some agents
+	// use acp). Skip pre-registration — listing only needs tmux state queries
+	// which the auto provider delegates to the base provider for non-ACP sessions.
+	if provName != "acp" && hasACPAgents(agents) {
+		acpSP, acpErr := newSessionProviderByName("acp", sc, cityName, cityPath)
+		if acpErr != nil {
+			fmt.Fprintf(os.Stderr, "acp provider: %v\n", acpErr) //nolint:errcheck // best-effort stderr
+			os.Exit(1)
+		}
+		return sessionauto.New(sp, acpSP)
 	}
 	return sp
 }

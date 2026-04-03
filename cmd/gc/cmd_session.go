@@ -318,7 +318,9 @@ func cmdSessionList(stateFilter, templateFilter string, jsonOutput bool, stdout,
 	sp := newReadOnlySessionProvider()
 	mgr := newSessionManager(store, sp)
 
-	// Launch readyWaitSet and config loading concurrently with ListFull.
+	// Launch readyWaitSet and config loading concurrently with ListFull,
+	// but only on the non-JSON path — JSON output returns early and doesn't
+	// need these, so avoid the extra store/config I/O entirely.
 	type waitResult struct {
 		set map[string]bool
 	}
@@ -326,22 +328,27 @@ func cmdSessionList(stateFilter, templateFilter string, jsonOutput bool, stdout,
 		cfg         *config.City
 		poolDesired map[string]int
 	}
-	waitCh := make(chan waitResult, 1)
-	cfgCh := make(chan cfgResult, 1)
+	var waitCh chan waitResult
+	var cfgCh chan cfgResult
 
-	go func() {
-		waitCh <- waitResult{set: readyWaitSetForList(store)}
-	}()
-	go func() {
-		var r cfgResult
-		if cityPath, err := resolveCity(); err == nil {
-			if c, err := loadCityConfig(cityPath); err == nil {
-				r.cfg = c
-				r.poolDesired = cliPoolDesired(c)
+	if !jsonOutput {
+		waitCh = make(chan waitResult, 1)
+		cfgCh = make(chan cfgResult, 1)
+
+		go func() {
+			waitCh <- waitResult{set: readyWaitSetForList(store)}
+		}()
+		go func() {
+			var r cfgResult
+			if cityPath, err := resolveCity(); err == nil {
+				if c, err := loadCityConfig(cityPath); err == nil {
+					r.cfg = c
+					r.poolDesired = cliPoolDesired(c)
+				}
 			}
-		}
-		cfgCh <- r
-	}()
+			cfgCh <- r
+		}()
+	}
 
 	listResult, err := mgr.ListFull(stateFilter, templateFilter)
 	if err != nil {
@@ -368,15 +375,14 @@ func cmdSessionList(stateFilter, templateFilter string, jsonOutput bool, stdout,
 	cfg := cr.cfg
 	poolDesired := cr.poolDesired
 
-	// Pre-fetch IsAttached for all active sessions. This cache is passed
-	// to wakeReasons via attachmentCachingProvider so it doesn't re-query
-	// tmux for each session.
+	// Build attachment cache from Attached already populated by ListFull,
+	// avoiding redundant tmux subprocess calls per active session.
 	attachedSet := make(map[string]bool)
 	for _, s := range sessions {
-		if s.State == session.StateActive && sp != nil {
+		if s.State == session.StateActive {
 			name := s.SessionName
 			if name != "" {
-				attachedSet[name] = sp.IsAttached(name)
+				attachedSet[name] = s.Attached
 			}
 		}
 	}

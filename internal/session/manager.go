@@ -805,14 +805,14 @@ func (m *Manager) Get(id string) (Info, error) {
 	return m.infoFromBead(b), nil
 }
 
-// List returns all chat sessions, optionally filtered by state and template.
-// ListResult holds the results of a List call, including the raw beads
+// ListResult holds the results of a ListFull call, including the raw beads
 // to avoid redundant store queries.
 type ListResult struct {
 	Sessions []Info
 	Beads    []beads.Bead // All session beads (unfiltered by state/template)
 }
 
+// List returns all chat sessions, optionally filtered by state and template.
 func (m *Manager) List(stateFilter string, templateFilter string) ([]Info, error) {
 	r, err := m.ListFull(stateFilter, templateFilter)
 	if err != nil {
