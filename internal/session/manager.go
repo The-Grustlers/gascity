@@ -25,6 +25,8 @@ type State string
 const (
 	// StateActive means the conversation has a live runtime session.
 	StateActive State = "active"
+	// StateAsleep means the session is dormant with no live runtime.
+	StateAsleep State = "asleep"
 	// StateSuspended means the conversation is paused with no runtime resources.
 	StateSuspended State = "suspended"
 	// StateCreating means the session bead has been written but the runtime
@@ -34,6 +36,9 @@ const (
 	// work completing). The pool routing label has been removed so no new
 	// work is routed to this session.
 	StateDraining State = "draining"
+	// StateAwake is equivalent to StateActive. Written by the reconciler's
+	// healState when a session transitions from asleep to running.
+	StateAwake State = "awake"
 	// StateArchived means the session completed its drain and is retained
 	// for history. Does NOT count against pool occupancy.
 	StateArchived State = "archived"
@@ -67,6 +72,16 @@ type Info struct {
 	CreatedAt     time.Time
 	LastActive    time.Time
 	Attached      bool
+}
+
+func normalizeInfoState(state State) State {
+	switch state {
+	case "awake":
+		return StateActive
+	case "drained":
+		return StateAsleep
+	}
+	return state
 }
 
 // ProviderResume describes a provider's session resume capabilities.
@@ -188,6 +203,16 @@ func (m *Manager) CreateWithTransport(ctx context.Context, template, title, comm
 // CreateAliasedNamedWithTransport creates a new chat session bead with an
 // optional public alias and optional explicit runtime session_name.
 func (m *Manager) CreateAliasedNamedWithTransport(ctx context.Context, alias, explicitName, template, title, command, workDir, provider, transport string, env map[string]string, resume ProviderResume, hints runtime.Config) (Info, error) {
+	return m.createAliasedNamedWithTransport(ctx, alias, explicitName, template, title, command, workDir, provider, transport, env, resume, hints, nil)
+}
+
+// CreateAliasedNamedWithTransportAndMetadata creates a new chat session bead
+// with additional metadata published atomically at bead creation time.
+func (m *Manager) CreateAliasedNamedWithTransportAndMetadata(ctx context.Context, alias, explicitName, template, title, command, workDir, provider, transport string, env map[string]string, resume ProviderResume, hints runtime.Config, extraMeta map[string]string) (Info, error) {
+	return m.createAliasedNamedWithTransport(ctx, alias, explicitName, template, title, command, workDir, provider, transport, env, resume, hints, extraMeta)
+}
+
+func (m *Manager) createAliasedNamedWithTransport(ctx context.Context, alias, explicitName, template, title, command, workDir, provider, transport string, env map[string]string, resume ProviderResume, hints runtime.Config, extraMeta map[string]string) (Info, error) {
 	alias, err := ValidateAlias(alias)
 	if err != nil {
 		return Info{}, err
@@ -195,6 +220,9 @@ func (m *Manager) CreateAliasedNamedWithTransport(ctx context.Context, alias, ex
 	explicitName, err = ValidateExplicitName(explicitName)
 	if err != nil {
 		return Info{}, err
+	}
+	if title == "" {
+		title = template
 	}
 	var info Info
 	err = withSessionIdentifierReservationLocks([]string{alias, explicitName}, func() error {
@@ -242,6 +270,9 @@ func (m *Manager) CreateAliasedNamedWithTransport(ctx context.Context, alias, ex
 		}
 		if explicitName != "" {
 			meta["session_name"] = explicitName
+		}
+		for k, v := range extraMeta {
+			meta[k] = v
 		}
 		createdBead, createErr := m.store.Create(beads.Bead{
 			Title: title,
@@ -378,6 +409,16 @@ func (m *Manager) CreateBeadOnly(template, title, command, workDir, provider, tr
 // runtime process, preserving an optional public alias and explicit runtime
 // session_name for the reconciler.
 func (m *Manager) CreateAliasedBeadOnlyNamed(alias, explicitName, template, title, command, workDir, provider, transport string, _ map[string]string, resume ProviderResume) (Info, error) {
+	return m.createAliasedBeadOnlyNamed(alias, explicitName, template, title, command, workDir, provider, transport, resume, nil)
+}
+
+// CreateAliasedBeadOnlyNamedWithMetadata creates a session bead without
+// starting the runtime process, publishing extra metadata atomically.
+func (m *Manager) CreateAliasedBeadOnlyNamedWithMetadata(alias, explicitName, template, title, command, workDir, provider, transport string, resume ProviderResume, extraMeta map[string]string) (Info, error) {
+	return m.createAliasedBeadOnlyNamed(alias, explicitName, template, title, command, workDir, provider, transport, resume, extraMeta)
+}
+
+func (m *Manager) createAliasedBeadOnlyNamed(alias, explicitName, template, title, command, workDir, provider, transport string, resume ProviderResume, extraMeta map[string]string) (Info, error) {
 	alias, err := ValidateAlias(alias)
 	if err != nil {
 		return Info{}, err
@@ -385,6 +426,9 @@ func (m *Manager) CreateAliasedBeadOnlyNamed(alias, explicitName, template, titl
 	explicitName, err = ValidateExplicitName(explicitName)
 	if err != nil {
 		return Info{}, err
+	}
+	if title == "" {
+		title = template
 	}
 	var info Info
 	err = withSessionIdentifierReservationLocks([]string{alias, explicitName}, func() error {
@@ -427,10 +471,13 @@ func (m *Manager) CreateAliasedBeadOnlyNamed(alias, explicitName, template, titl
 		if sessionKey != "" {
 			meta["session_key"] = sessionKey
 		}
+		meta["pending_create_claim"] = "true"
 		if explicitName != "" {
 			meta["session_name"] = explicitName
 			meta["session_name_explicit"] = "true"
-			meta["pending_create_claim"] = "true"
+		}
+		for k, v := range extraMeta {
+			meta[k] = v
 		}
 		createdBead, createErr := m.store.Create(beads.Bead{
 			Title: title,
@@ -540,9 +587,28 @@ func (m *Manager) Close(id string) error {
 		// to discard stale ACP route entries for suspended sessions as well.
 		_ = m.sp.Stop(sessName)
 		_ = CancelWaits(m.store, id, time.Now().UTC())
+		if err := m.retireConfiguredNamedSessionIdentifiers(id, b); err != nil {
+			return err
+		}
 
 		return m.store.Close(id)
 	})
+}
+
+func (m *Manager) retireConfiguredNamedSessionIdentifiers(id string, b beads.Bead) error {
+	if strings.TrimSpace(b.Metadata["configured_named_session"]) != "true" {
+		return nil
+	}
+	update := beads.UpdateOpts{
+		Metadata: UpdatedAliasMetadata(b.Metadata, ""),
+	}
+	update.Metadata["session_name"] = ""
+	update.Metadata["session_name_explicit"] = ""
+	update.Metadata["pending_create_claim"] = ""
+	if err := m.store.Update(id, update); err != nil {
+		return fmt.Errorf("retiring configured named session identifiers: %w", err)
+	}
+	return nil
 }
 
 // Kill force-kills the runtime process for a session without changing bead
@@ -553,9 +619,17 @@ func (m *Manager) Kill(id string) error {
 	if err != nil {
 		return err
 	}
+	// Accept any state where a runtime process could plausibly exist.
+	// The reconciler uses "awake" as equivalent to "active", and metadata
+	// state can lag behind reality, so also check provider liveness.
 	state := State(b.Metadata["state"])
-	if state != StateActive && state != StateCreating && state != StateDraining {
-		return fmt.Errorf("session %s is not active", id)
+	switch state {
+	case StateActive, StateCreating, StateDraining, StateAwake:
+		// Known live states — proceed.
+	default:
+		if !m.sp.IsRunning(sessName) {
+			return fmt.Errorf("session %s is not active", id)
+		}
 	}
 	return m.sp.Stop(sessName)
 }
@@ -638,6 +712,9 @@ func (m *Manager) UpdatePresentation(id string, title *string, alias *string) er
 				return err
 			}
 			nextAlias = validated
+			if strings.TrimSpace(b.Metadata["configured_named_session"]) == "true" && nextAlias != currentAlias {
+				return fmt.Errorf("configured named session alias is immutable while config-managed")
+			}
 		}
 		update := beads.UpdateOpts{}
 		if title != nil {
@@ -746,7 +823,7 @@ func (m *Manager) List(stateFilter string, templateFilter string) ([]Info, error
 		if b.Type != BeadType {
 			continue
 		}
-		state := State(b.Metadata["state"])
+		state := normalizeInfoState(State(b.Metadata["state"]))
 
 		// Filter by state.
 		if stateFilter != "" && stateFilter != "all" {
@@ -809,9 +886,13 @@ func (m *Manager) infoFromBead(b beads.Bead) Info {
 		_ = m.routeACPIfNeeded(b.Metadata["provider"], transport, sessName)
 	}
 
-	state := State(b.Metadata["state"])
+	state := normalizeInfoState(State(b.Metadata["state"]))
 	if closed {
 		state = "" // closed beads have no runtime state
+	} else if m.sp != nil && state == StateActive && !m.sp.IsRunning(sessName) {
+		// Surface stale "awake" / "active" beads as dormant immediately.
+		// The controller also heals metadata on the next tick.
+		state = StateAsleep
 	}
 
 	info := Info{

@@ -31,15 +31,25 @@ type bindingCleaner interface {
 	ClearForConversation(ctx context.Context, sessionID string, ref ConversationRef) error
 }
 
+type bindingMembershipEnsurer interface {
+	EnsureMembership(ctx context.Context, input EnsureMembershipInput) (ConversationMembershipRecord, error)
+	RemoveMembership(ctx context.Context, input RemoveMembershipInput) error
+	ensureMembershipLocked(input EnsureMembershipInput) (ConversationMembershipRecord, error)
+	removeMembershipLocked(input RemoveMembershipInput) error
+}
+
 type bindingService struct {
 	store         beads.Store
 	delivery      bindingCleaner
+	transcript    bindingMembershipEnsurer
 	touchDebounce time.Duration
 	locks         *bindingLockPool
 }
 
+// BindingServiceOption configures a binding service instance.
 type BindingServiceOption func(*bindingService)
 
+// WithBindingTouchDebounce sets the minimum interval between touch updates.
 func WithBindingTouchDebounce(d time.Duration) BindingServiceOption {
 	return func(s *bindingService) {
 		if d > 0 {
@@ -48,7 +58,7 @@ func WithBindingTouchDebounce(d time.Duration) BindingServiceOption {
 	}
 }
 
-func newBindingService(store beads.Store, delivery bindingCleaner, locks *bindingLockPool, opts ...BindingServiceOption) BindingService {
+func newBindingService(store beads.Store, delivery bindingCleaner, transcript bindingMembershipEnsurer, locks *bindingLockPool, opts ...BindingServiceOption) BindingService {
 	svc := &bindingService{
 		store:         store,
 		touchDebounce: defaultTouchDebounce,
@@ -56,6 +66,9 @@ func newBindingService(store beads.Store, delivery bindingCleaner, locks *bindin
 	}
 	if delivery != nil {
 		svc.delivery = delivery
+	}
+	if transcript != nil {
+		svc.transcript = transcript
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -107,13 +120,25 @@ func (s *bindingService) Bind(ctx context.Context, caller Caller, input BindInpu
 				return err
 			}
 			out = updated
+			if s.transcript != nil {
+				if _, err := s.transcript.ensureMembershipLocked(EnsureMembershipInput{
+					Caller:         caller,
+					Conversation:   ref,
+					SessionID:      sessionID,
+					BackfillPolicy: MembershipBackfillSinceJoin,
+					Owner:          MembershipOwnerBinding,
+					Now:            now,
+				}); err != nil {
+					return wrapTranscriptSyncError("ensure transcript membership after bind", err)
+				}
+			}
 			return nil
 		}
 		nextGeneration := nextBindingGeneration(history)
 		b, err := s.store.Create(beads.Bead{
 			Title:  conversationTitle(ref),
-			Type:   "external_binding",
-			Labels: []string{labelBindingBase, bindingConversationLabel(ref), bindingSessionLabel(sessionID)},
+			Type:   "task",
+			Labels: []string{"gc:extmsg-binding", labelBindingBase, bindingConversationLabel(ref), bindingSessionLabel(sessionID)},
 			Metadata: encodeMetadataFields(input.Metadata, map[string]string{
 				"schema_version":         strconv.Itoa(schemaVersion),
 				"scope_id":               ref.ScopeID,
@@ -135,9 +160,27 @@ func (s *bindingService) Bind(ctx context.Context, caller Caller, input BindInpu
 			return fmt.Errorf("create external binding: %w", err)
 		}
 		out, err = decodeBindingBead(b)
-		return err
+		if err != nil {
+			return err
+		}
+		if s.transcript != nil {
+			if _, err := s.transcript.ensureMembershipLocked(EnsureMembershipInput{
+				Caller:         caller,
+				Conversation:   ref,
+				SessionID:      sessionID,
+				BackfillPolicy: MembershipBackfillSinceJoin,
+				Owner:          MembershipOwnerBinding,
+				Now:            now,
+			}); err != nil {
+				return wrapTranscriptSyncError("ensure transcript membership after bind", err)
+			}
+		}
+		return nil
 	})
-	return out, err
+	if err != nil {
+		return SessionBindingRecord{}, err
+	}
+	return out, nil
 }
 
 func (s *bindingService) ResolveByConversation(ctx context.Context, ref ConversationRef) (*SessionBindingRecord, error) {
@@ -148,7 +191,7 @@ func (s *bindingService) ResolveByConversation(ctx context.Context, ref Conversa
 	if err != nil {
 		return nil, err
 	}
-	return resolveActiveBinding(ctx, s.locks, s.store, s.delivery, ref, timeNow())
+	return resolveActiveBinding(ctx, s.locks, s.store, s.delivery, s.transcript, ref, timeNow())
 }
 
 func (s *bindingService) ListBySession(ctx context.Context, sessionID string) ([]SessionBindingRecord, error) {
@@ -169,7 +212,7 @@ func (s *bindingService) ListBySession(ctx context.Context, sessionID string) ([
 		if err := checkContext(ctx); err != nil {
 			return nil, err
 		}
-		if item.Type != "external_binding" {
+		if !hasLabel(item, "gc:extmsg-binding") {
 			continue
 		}
 		record, err := decodeBindingBead(item)
@@ -184,7 +227,7 @@ func (s *bindingService) ListBySession(ctx context.Context, sessionID string) ([
 			continue
 		}
 		seen[key] = true
-		active, err := resolveActiveBinding(ctx, s.locks, s.store, s.delivery, record.Conversation, timeNow())
+		active, err := resolveActiveBinding(ctx, s.locks, s.store, s.delivery, s.transcript, record.Conversation, timeNow())
 		if err != nil {
 			return nil, err
 		}
@@ -266,7 +309,7 @@ func (s *bindingService) Unbind(ctx context.Context, caller Caller, input Unbind
 			return nil, fmt.Errorf("list bindings by session label: %w", err)
 		}
 		for _, item := range items {
-			if item.Type != "external_binding" {
+			if !hasLabel(item, "gc:extmsg-binding") {
 				continue
 			}
 			record, err := decodeBindingBead(item)
@@ -310,7 +353,28 @@ func (s *bindingService) Unbind(ctx context.Context, caller Caller, input Unbind
 			if err := s.store.SetMetadata(active.ID, "last_touched_at", formatTime(now)); err != nil {
 				return fmt.Errorf("update binding %s metadata: %w", active.ID, err)
 			}
+			if s.transcript != nil {
+				if err := s.transcript.removeMembershipLocked(RemoveMembershipInput{
+					Caller:       caller,
+					Conversation: active.Conversation,
+					SessionID:    active.SessionID,
+					Owner:        MembershipOwnerBinding,
+					Now:          now,
+				}); err != nil {
+					return wrapTranscriptSyncError("remove transcript membership after unbind", err)
+				}
+			}
 			if err := s.store.Close(active.ID); err != nil {
+				if s.transcript != nil {
+					_, _ = s.transcript.ensureMembershipLocked(EnsureMembershipInput{
+						Caller:         caller,
+						Conversation:   active.Conversation,
+						SessionID:      active.SessionID,
+						BackfillPolicy: MembershipBackfillSinceJoin,
+						Owner:          MembershipOwnerBinding,
+						Now:            now,
+					})
+				}
 				return fmt.Errorf("close binding %s: %w", active.ID, err)
 			}
 			active.Status = BindingEnded
@@ -340,7 +404,7 @@ func (s *bindingService) listBindingsForConversation(ref ConversationRef) ([]Ses
 	}
 	out := make([]SessionBindingRecord, 0, len(items))
 	for _, item := range items {
-		if item.Type != "external_binding" {
+		if !hasLabel(item, "gc:extmsg-binding") {
 			continue
 		}
 		record, err := decodeBindingBead(item)
@@ -357,12 +421,33 @@ func (s *bindingService) listBindingsForConversation(ref ConversationRef) ([]Ses
 
 func (s *bindingService) activeBinding(ctx context.Context, history []SessionBindingRecord, now time.Time) (*SessionBindingRecord, error) {
 	return selectActiveBinding(ctx, history, now, func(record SessionBindingRecord) error {
+		if s.transcript != nil {
+			if err := s.transcript.removeMembershipLocked(RemoveMembershipInput{
+				Caller:       Caller{Kind: CallerController, ID: "binding-expiry"},
+				Conversation: record.Conversation,
+				SessionID:    record.SessionID,
+				Owner:        MembershipOwnerBinding,
+				Now:          now,
+			}); err != nil {
+				return wrapTranscriptSyncError("remove transcript membership after binding expiry", err)
+			}
+		}
 		if s.delivery != nil {
 			if err := s.delivery.ClearForConversation(ctx, record.SessionID, record.Conversation); err != nil {
 				return err
 			}
 		}
 		if err := s.store.Close(record.ID); err != nil {
+			if s.transcript != nil {
+				_, _ = s.transcript.ensureMembershipLocked(EnsureMembershipInput{
+					Caller:         Caller{Kind: CallerController, ID: "binding-expiry"},
+					Conversation:   record.Conversation,
+					SessionID:      record.SessionID,
+					BackfillPolicy: MembershipBackfillSinceJoin,
+					Owner:          MembershipOwnerBinding,
+					Now:            now,
+				})
+			}
 			return fmt.Errorf("close expired binding %s: %w", record.ID, err)
 		}
 		return nil
@@ -436,20 +521,20 @@ func bindingExpired(record SessionBindingRecord, now time.Time) bool {
 	return record.ExpiresAt != nil && !record.ExpiresAt.After(now)
 }
 
-func resolveActiveBinding(ctx context.Context, locks *bindingLockPool, store beads.Store, delivery bindingCleaner, ref ConversationRef, now time.Time) (*SessionBindingRecord, error) {
+func resolveActiveBinding(ctx context.Context, locks *bindingLockPool, store beads.Store, delivery bindingCleaner, transcript bindingMembershipEnsurer, ref ConversationRef, now time.Time) (*SessionBindingRecord, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
 	var out *SessionBindingRecord
 	err := withBindingLock(locks, ref, func() error {
 		var err error
-		out, err = resolveActiveBindingLocked(ctx, store, delivery, ref, now)
+		out, err = resolveActiveBindingLocked(ctx, store, delivery, transcript, ref, now)
 		return err
 	})
 	return out, err
 }
 
-func resolveActiveBindingLocked(ctx context.Context, store beads.Store, delivery bindingCleaner, ref ConversationRef, now time.Time) (*SessionBindingRecord, error) {
+func resolveActiveBindingLocked(ctx context.Context, store beads.Store, delivery bindingCleaner, transcript bindingMembershipEnsurer, ref ConversationRef, now time.Time) (*SessionBindingRecord, error) {
 	if err := checkContext(ctx); err != nil {
 		return nil, err
 	}
@@ -462,7 +547,7 @@ func resolveActiveBindingLocked(ctx context.Context, store beads.Store, delivery
 		if err := checkContext(ctx); err != nil {
 			return nil, err
 		}
-		if item.Type != "external_binding" {
+		if !hasLabel(item, "gc:extmsg-binding") {
 			continue
 		}
 		record, err := decodeBindingBead(item)
@@ -475,12 +560,33 @@ func resolveActiveBindingLocked(ctx context.Context, store beads.Store, delivery
 		history = append(history, record)
 	}
 	return selectActiveBinding(ctx, history, now, func(record SessionBindingRecord) error {
+		if transcript != nil {
+			if err := transcript.removeMembershipLocked(RemoveMembershipInput{
+				Caller:       Caller{Kind: CallerController, ID: "binding-expiry"},
+				Conversation: record.Conversation,
+				SessionID:    record.SessionID,
+				Owner:        MembershipOwnerBinding,
+				Now:          now,
+			}); err != nil {
+				return wrapTranscriptSyncError("remove transcript membership after binding expiry", err)
+			}
+		}
 		if delivery != nil {
 			if err := delivery.ClearForConversation(ctx, record.SessionID, record.Conversation); err != nil {
 				return err
 			}
 		}
 		if err := store.Close(record.ID); err != nil {
+			if transcript != nil {
+				_, _ = transcript.ensureMembershipLocked(EnsureMembershipInput{
+					Caller:         Caller{Kind: CallerController, ID: "binding-expiry"},
+					Conversation:   record.Conversation,
+					SessionID:      record.SessionID,
+					BackfillPolicy: MembershipBackfillSinceJoin,
+					Owner:          MembershipOwnerBinding,
+					Now:            now,
+				})
+			}
 			return fmt.Errorf("close expired binding %s: %w", record.ID, err)
 		}
 		return nil
@@ -505,8 +611,8 @@ func selectActiveBinding(ctx context.Context, history []SessionBindingRecord, no
 		if active != nil {
 			return nil, fmt.Errorf("%w: multiple active bindings for %s", ErrInvariantViolation, conversationLockKey(record.Conversation))
 		}
-		copy := record
-		active = &copy
+		rec := record
+		active = &rec
 	}
 	return active, nil
 }

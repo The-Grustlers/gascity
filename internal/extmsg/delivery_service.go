@@ -10,8 +10,9 @@ import (
 )
 
 type deliveryContextService struct {
-	store beads.Store
-	locks *bindingLockPool
+	store      beads.Store
+	locks      *bindingLockPool
+	transcript bindingMembershipEnsurer
 }
 
 type deliveryCleaner struct {
@@ -19,8 +20,8 @@ type deliveryCleaner struct {
 	locks *bindingLockPool
 }
 
-func newDeliveryContextService(store beads.Store, locks *bindingLockPool) DeliveryContextService {
-	return &deliveryContextService{store: store, locks: locks}
+func newDeliveryContextService(store beads.Store, locks *bindingLockPool, transcript bindingMembershipEnsurer) DeliveryContextService {
+	return &deliveryContextService{store: store, locks: locks, transcript: transcript}
 }
 
 func (s *deliveryContextService) Record(ctx context.Context, caller Caller, input DeliveryContextRecord) error {
@@ -58,7 +59,7 @@ func (s *deliveryContextService) Record(ctx context.Context, caller Caller, inpu
 		"source_session_id":      strings.TrimSpace(input.SourceSessionID),
 	})
 	return withBindingLock(s.locks, ref, func() error {
-		activeBinding, err := resolveActiveBindingLocked(ctx, s.store, deliveryCleaner{s.store, s.locks}, ref, timeNow())
+		activeBinding, err := resolveActiveBindingLocked(ctx, s.store, deliveryCleaner{s.store, s.locks}, s.transcript, ref, timeNow())
 		if err != nil {
 			return err
 		}
@@ -74,7 +75,7 @@ func (s *deliveryContextService) Record(ctx context.Context, caller Caller, inpu
 				if err := checkContext(ctx); err != nil {
 					return err
 				}
-				if item.Type != "external_delivery" || item.Status == "closed" {
+				if !hasLabel(item, "gc:extmsg-delivery") || item.Status == "closed" {
 					continue
 				}
 				record, err := decodeDeliveryBead(item)
@@ -94,8 +95,8 @@ func (s *deliveryContextService) Record(ctx context.Context, caller Caller, inpu
 			}
 			_, err = s.store.Create(beads.Bead{
 				Title:    title,
-				Type:     "external_delivery",
-				Labels:   []string{labelDeliveryBase, label, deliverySessionLabel(sessionID)},
+				Type:     "task",
+				Labels:   []string{"gc:extmsg-delivery", labelDeliveryBase, label, deliverySessionLabel(sessionID)},
 				Metadata: fields,
 			})
 			if err != nil {
@@ -121,7 +122,7 @@ func (s *deliveryContextService) Resolve(ctx context.Context, sessionID string, 
 	label := deliveryRouteLabel(ref, sessionID)
 	var out *DeliveryContextRecord
 	err = withBindingLock(s.locks, ref, func() error {
-		activeBinding, err := resolveActiveBindingLocked(ctx, s.store, deliveryCleaner{s.store, s.locks}, ref, timeNow())
+		activeBinding, err := resolveActiveBindingLocked(ctx, s.store, deliveryCleaner{s.store, s.locks}, s.transcript, ref, timeNow())
 		if err != nil {
 			return err
 		}
@@ -134,7 +135,7 @@ func (s *deliveryContextService) Resolve(ctx context.Context, sessionID string, 
 				if err := checkContext(ctx); err != nil {
 					return err
 				}
-				if item.Type != "external_delivery" || item.Status == "closed" {
+				if !hasLabel(item, "gc:extmsg-delivery") || item.Status == "closed" {
 					continue
 				}
 				record, err := decodeDeliveryBead(item)
@@ -148,8 +149,8 @@ func (s *deliveryContextService) Resolve(ctx context.Context, sessionID string, 
 					activeBinding.SessionID == sessionID &&
 					activeBinding.BindingGeneration == record.BindingGeneration {
 					if out == nil {
-						copy := record
-						out = &copy
+						rec := record
+						out = &rec
 						continue
 					}
 					if err := s.store.Close(item.ID); err != nil {
@@ -218,7 +219,7 @@ func (c deliveryCleaner) ClearForConversation(ctx context.Context, sessionID str
 			if err := checkContext(ctx); err != nil {
 				return err
 			}
-			if item.Type != "external_delivery" || item.Status == "closed" {
+			if !hasLabel(item, "gc:extmsg-delivery") || item.Status == "closed" {
 				continue
 			}
 			record, err := decodeDeliveryBead(item)

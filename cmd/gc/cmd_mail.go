@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/events"
 	"github.com/gastownhall/gascity/internal/mail"
 	"github.com/gastownhall/gascity/internal/session"
@@ -220,7 +222,9 @@ func formatInjectOutput(messages []mail.Message) string {
 	sb.WriteString("<system-reminder>\n")
 	fmt.Fprintf(&sb, "You have %d unread message(s).\n\n", len(messages))
 	for _, m := range messages {
-		if m.Subject != "" {
+		subject := strings.TrimSpace(m.Subject)
+		body := strings.TrimSpace(m.Body)
+		if subject != "" && subject != body {
 			fmt.Fprintf(&sb, "- %s from %s [%s]: %s\n", m.ID, m.From, m.Subject, m.Body)
 		} else {
 			fmt.Fprintf(&sb, "- %s from %s: %s\n", m.ID, m.From, m.Body)
@@ -282,8 +286,10 @@ func resolveMailIdentity(store beads.Store, identifier string) (string, error) {
 	}
 	sessionID, err := resolveSessionID(store, identifier)
 	if err != nil {
-		if address, ok := configuredMailboxAddress(identifier); ok {
-			return address, nil
+		if errors.Is(err, session.ErrSessionNotFound) {
+			if address, ok := configuredMailboxAddress(identifier); ok {
+				return address, nil
+			}
 		}
 		return "", err
 	}
@@ -298,8 +304,59 @@ func resolveMailIdentity(store beads.Store, identifier string) (string, error) {
 	return address, nil
 }
 
+func resolveMailIdentityWithConfig(cityPath string, cfg *config.City, store beads.Store, identifier string) (string, error) {
+	if identifier == "" || identifier == "human" {
+		return "human", nil
+	}
+	if store != nil && cfg != nil {
+		sessionID, err := resolveSessionIDWithConfig(cityPath, cfg, store, identifier)
+		if err == nil {
+			b, err := store.Get(sessionID)
+			if err != nil {
+				return "", err
+			}
+			address := sessionMailboxAddress(b)
+			if address == "" {
+				return "", fmt.Errorf("session %q has no mailbox identity", identifier)
+			}
+			return address, nil
+		}
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			return "", err
+		}
+	}
+	if address, ok := configuredMailboxAddressWithConfig(cityPath, cfg, identifier); ok {
+		return address, nil
+	}
+	return resolveMailIdentity(store, identifier)
+}
+
+func resolveMailRecipientIdentity(cityPath string, cfg *config.City, store beads.Store, identifier string) (string, error) {
+	if identifier == "" || identifier == "human" {
+		return "human", nil
+	}
+	if store != nil && cfg != nil {
+		sessionID, err := resolveSessionIDMaterializingNamed(cityPath, cfg, store, identifier)
+		if err == nil {
+			b, err := store.Get(sessionID)
+			if err != nil {
+				return "", err
+			}
+			address := sessionMailboxAddress(b)
+			if address == "" {
+				return "", fmt.Errorf("session %q has no mailbox identity", identifier)
+			}
+			return address, nil
+		}
+		if !errors.Is(err, session.ErrSessionNotFound) {
+			return "", err
+		}
+	}
+	return resolveMailIdentityWithConfig(cityPath, cfg, store, identifier)
+}
+
 func configuredMailboxAddress(identifier string) (string, bool) {
-	identifier = strings.TrimSpace(identifier)
+	identifier = normalizeNamedSessionTarget(identifier)
 	if identifier == "" || identifier == "human" {
 		return "", false
 	}
@@ -311,15 +368,23 @@ func configuredMailboxAddress(identifier string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	for _, agent := range cfg.Agents {
-		if agent.IsPool() {
-			continue
-		}
-		if agent.QualifiedName() == identifier {
-			return identifier, true
-		}
+	return configuredMailboxAddressWithConfig(cityPath, cfg, identifier)
+}
+
+func configuredMailboxAddressWithConfig(cityPath string, cfg *config.City, identifier string) (string, bool) {
+	identifier = normalizeNamedSessionTarget(identifier)
+	if identifier == "" || identifier == "human" || cfg == nil {
+		return "", false
 	}
-	return "", false
+	cityName := cfg.Workspace.Name
+	if cityName == "" {
+		cityName = filepath.Base(cityPath)
+	}
+	spec, ok, err := findNamedSessionSpecForTarget(cfg, cityName, nil, identifier)
+	if err != nil || !ok {
+		return "", false
+	}
+	return spec.Identity, true
 }
 
 func listLiveSessionMailboxes(store beads.Store) (map[string]bool, error) {
@@ -353,8 +418,10 @@ func resolveMailTargets(store beads.Store, identifier string) (resolvedMailTarge
 	}
 	sessionID, err := resolveSessionID(store, identifier)
 	if err != nil {
-		if address, ok := configuredMailboxAddress(identifier); ok {
-			return resolvedMailTarget{display: address, recipients: []string{address}}, nil
+		if errors.Is(err, session.ErrSessionNotFound) {
+			if address, ok := configuredMailboxAddress(identifier); ok {
+				return resolvedMailTarget{display: address, recipients: []string{address}}, nil
+			}
 		}
 		return resolvedMailTarget{}, err
 	}
@@ -697,9 +764,11 @@ func cmdMailSend(args []string, notify bool, all bool, from string, to string, s
 	var (
 		store           beads.Store
 		validRecipients map[string]bool
+		cfg             *config.City
 	)
 	cityPath, err := resolveCity()
 	if err == nil {
+		cfg, _ = loadCityConfig(cityPath)
 		store, err = openCityStoreAt(cityPath)
 	}
 	if err != nil && !strings.HasPrefix(mailProviderName(), "exec:") {
@@ -719,7 +788,7 @@ func cmdMailSend(args []string, notify bool, all bool, from string, to string, s
 		sender = defaultMailIdentity()
 	}
 	if sender != "human" && store != nil {
-		sender, err = resolveMailIdentity(store, sender)
+		sender, err = resolveMailIdentityWithConfig(cityPath, cfg, store, sender)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc mail send: invalid sender %q: %v\n", sender, err) //nolint:errcheck // best-effort stderr
 			return 1
@@ -755,7 +824,7 @@ func cmdMailSend(args []string, notify bool, all bool, from string, to string, s
 		}
 	}
 	if !all && len(args) > 0 && store != nil {
-		canonicalTo, err := resolveMailIdentity(store, args[0])
+		canonicalTo, err := resolveMailRecipientIdentity(cityPath, cfg, store, args[0])
 		if err != nil {
 			fmt.Fprintf(stderr, "gc mail send: unknown recipient %q: %v\n", args[0], err) //nolint:errcheck // best-effort stderr
 			return 1
@@ -1009,7 +1078,13 @@ func cmdMailReply(args []string, subject, message string, notify bool, stdout, s
 			if store == nil {
 				return storeCode
 			}
-			resolved, err := resolveMailIdentity(store, sender)
+			cityPath, err := resolveCity()
+			if err != nil {
+				fmt.Fprintf(stderr, "gc mail reply: %v\n", err) //nolint:errcheck // best-effort stderr
+				return 1
+			}
+			cfg, _ := loadCityConfig(cityPath)
+			resolved, err := resolveMailIdentityWithConfig(cityPath, cfg, store, sender)
 			if err != nil {
 				fmt.Fprintf(stderr, "gc mail reply: invalid sender %q: %v\n", sender, err) //nolint:errcheck // best-effort stderr
 				return 1

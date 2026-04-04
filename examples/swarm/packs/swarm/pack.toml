@@ -22,6 +22,11 @@ nudge = "Check mail and hook status, then act accordingly."
 overlay_dir = "overlays/default"
 idle_timeout = "1h"
 
+[[named_session]]
+template = "mayor"
+scope = "city"
+mode = "on_demand"
+
 # ── DEACON — Daemon beacon / patrol executor. One per city. ────────────
 [[agent]]
 name = "deacon"
@@ -31,7 +36,12 @@ nudge = "Run 'gc prime' to check patrol status and begin heartbeat cycle."
 overlay_dir = "overlays/default"
 idle_timeout = "1h"
 
-# ── DOG — City-level infrastructure workers. Pool. ─────────────────────
+[[named_session]]
+template = "deacon"
+scope = "city"
+mode = "always"
+
+# ── DOG — City-level infrastructure workers. ──────────────────────────
 [[agent]]
 name = "dog"
 scope = "city"
@@ -39,12 +49,10 @@ prompt_template = "prompts/dog.md.tmpl"
 nudge = "Check your hook for work assignments."
 overlay_dir = "overlays/default"
 idle_timeout = "2h"
+min_active_sessions = 0
+max_active_sessions = 3
 
-[agent.pool]
-min = 0
-max = 3
-
-# ── CODER — peer worker. Pool of N. Rig-scoped. ───────────────────────
+# ── CODER — peer worker. Up to 5 concurrent sessions. Rig-scoped. ────
 [[agent]]
 name = "coder"
 scope = "rig"
@@ -52,10 +60,8 @@ prompt_template = "prompts/coder.md.tmpl"
 nudge = "Run bd ready --unassigned, check mail, then claim and work on a task."
 overlay_dir = "overlays/default"
 idle_timeout = "2h"
-
-[agent.pool]
-min = 1
-max = 5
+min_active_sessions = 1
+max_active_sessions = 5
 
 # ── COMMITTER — dedicated commit agent. Singleton. Rig-scoped. ────────
 [[agent]]
@@ -65,3 +71,8 @@ prompt_template = "prompts/committer.md.tmpl"
 nudge = "Check for uncommitted changes and commit them in logical groupings."
 overlay_dir = "overlays/default"
 idle_timeout = "2h"
+
+[[named_session]]
+template = "committer"
+scope = "rig"
+mode = "on_demand"
