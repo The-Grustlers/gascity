@@ -621,13 +621,8 @@ func TestOrphanSessionsCheck_Fix(t *testing.T) {
 
 func TestBeadsStoreCheck_OK(t *testing.T) {
 	dir := t.TempDir()
-	// Create a file store.
-	store, err := beads.OpenFileStore(fsys.OSFS{}, filepath.Join(dir, "beads.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Create a bead so List returns something.
-	if _, err := store.Create(beads.Bead{Title: "test"}); err != nil {
+	// Create a file store so Ping can verify accessibility.
+	if _, err := beads.OpenFileStore(fsys.OSFS{}, filepath.Join(dir, "beads.json")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -650,14 +645,13 @@ func TestBeadsStoreCheck_OpenError(t *testing.T) {
 	}
 }
 
-func TestBeadsStoreCheck_ListPassesOpenFilter(t *testing.T) {
-	// The check should call List(Status:"open") to avoid unbounded queries
-	// that time out on large stores.
-	var gotQuery beads.ListQuery
-	spy := &spyListStore{
-		listFunc: func(query beads.ListQuery) ([]beads.Bead, error) {
-			gotQuery = query
-			return []beads.Bead{{Title: "x", Status: "open"}}, nil
+func TestBeadsStoreCheck_UsesPing(t *testing.T) {
+	// The check should call Ping() to verify accessibility without loading data.
+	pinged := false
+	spy := &spyPingStore{
+		pingFunc: func() error {
+			pinged = true
+			return nil
 		},
 	}
 	c := NewBeadsStoreCheck(t.TempDir(), func(_ string) (beads.Store, error) {
@@ -667,25 +661,22 @@ func TestBeadsStoreCheck_ListPassesOpenFilter(t *testing.T) {
 	if r.Status != StatusOK {
 		t.Fatalf("status = %d, want OK; msg = %s", r.Status, r.Message)
 	}
-	if gotQuery.Status != "open" {
-		t.Errorf("List called with status %q, want %q", gotQuery.Status, "open")
-	}
-	if gotQuery.AllowScan {
-		t.Error("List called with AllowScan=true, want false")
+	if !pinged {
+		t.Error("Ping was not called")
 	}
 }
 
-// spyListStore is a minimal Store that records List calls.
-type spyListStore struct {
+// spyPingStore is a minimal Store that records Ping calls.
+type spyPingStore struct {
 	beads.MemStore
-	listFunc func(query beads.ListQuery) ([]beads.Bead, error)
+	pingFunc func() error
 }
 
-func (s *spyListStore) List(query beads.ListQuery) ([]beads.Bead, error) {
-	if s.listFunc != nil {
-		return s.listFunc(query)
+func (s *spyPingStore) Ping() error {
+	if s.pingFunc != nil {
+		return s.pingFunc()
 	}
-	return s.MemStore.List(query)
+	return nil
 }
 
 // --- DoltServerCheck ---
@@ -820,12 +811,12 @@ func TestRigBeadsCheck_Error(t *testing.T) {
 	}
 }
 
-func TestRigBeadsCheck_ListPassesOpenFilter(t *testing.T) {
-	var gotQuery beads.ListQuery
-	spy := &spyListStore{
-		listFunc: func(query beads.ListQuery) ([]beads.Bead, error) {
-			gotQuery = query
-			return []beads.Bead{{Title: "x", Status: "open"}}, nil
+func TestRigBeadsCheck_UsesPing(t *testing.T) {
+	pinged := false
+	spy := &spyPingStore{
+		pingFunc: func() error {
+			pinged = true
+			return nil
 		},
 	}
 	c := NewRigBeadsCheck(config.Rig{Name: "myrig", Path: t.TempDir()}, func(_ string) (beads.Store, error) {
@@ -835,11 +826,8 @@ func TestRigBeadsCheck_ListPassesOpenFilter(t *testing.T) {
 	if r.Status != StatusOK {
 		t.Fatalf("status = %d, want OK; msg = %s", r.Status, r.Message)
 	}
-	if gotQuery.Status != "open" {
-		t.Errorf("List called with status %q, want %q", gotQuery.Status, "open")
-	}
-	if gotQuery.AllowScan {
-		t.Error("List called with AllowScan=true, want false")
+	if !pinged {
+		t.Error("Ping was not called")
 	}
 }
 
