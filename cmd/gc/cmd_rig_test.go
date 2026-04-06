@@ -1045,6 +1045,130 @@ func TestReadBeadsPrefix(t *testing.T) {
 			t.Errorf("readBeadsPrefix() = (%q, %v), want (\"\", false)", got, ok)
 		}
 	})
+
+	t.Run("dash form only", func(t *testing.T) {
+		dir := t.TempDir()
+		beadsDir := filepath.Join(dir, ".beads")
+		if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(beadsDir, "config.yaml"), []byte("issue-prefix: zz\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, ok := readBeadsPrefix(fsys.OSFS{}, dir)
+		if !ok || got != "zz" {
+			t.Errorf("readBeadsPrefix() = (%q, %v), want (\"zz\", true)", got, ok)
+		}
+	})
+}
+
+func TestDoRigAdd_ReAddWarnsDifferingPrefix(t *testing.T) {
+	cityPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	rigPath := filepath.Join(t.TempDir(), "my-frontend")
+	if err := os.MkdirAll(rigPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agent]]\nname = \"mayor\"\n\n[[rigs]]\nname = \"my-frontend\"\npath = \"" + rigPath + "\"\nprefix = \"mf\"\n"
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GC_DOLT", "skip")
+	t.Setenv("GC_BEADS", "file")
+
+	// Re-add with differing --prefix should warn.
+	var stdout, stderr bytes.Buffer
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, "", "", "xx", false, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigAdd should succeed, got code %d, stderr: %s", code, stderr.String())
+	}
+	errMsg := stderr.String()
+	if !strings.Contains(errMsg, "--prefix=xx ignored") {
+		t.Errorf("stderr should warn about --prefix mismatch: %s", errMsg)
+	}
+}
+
+func TestDoRigAdd_PrefixCanonicalizedToLowercase(t *testing.T) {
+	cityPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	rigPath := filepath.Join(t.TempDir(), "my-rig")
+	if err := os.MkdirAll(rigPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agent]]\nname = \"mayor\"\n"
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GC_DOLT", "skip")
+	t.Setenv("GC_BEADS", "file")
+
+	var stdout, stderr bytes.Buffer
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, "", "", "AB", false, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("doRigAdd should succeed, got code %d, stderr: %s", code, stderr.String())
+	}
+	// Output should show the lowercased prefix.
+	if !strings.Contains(stdout.String(), "Prefix: ab") {
+		t.Errorf("prefix should be lowercased to 'ab', got stdout: %s", stdout.String())
+	}
+
+	// Verify city.toml stores the lowercase prefix (not raw "AB").
+	cfg, err := loadCityConfigFS(fsys.OSFS{}, filepath.Join(cityPath, "city.toml"))
+	if err != nil {
+		t.Fatalf("loading city.toml: %v", err)
+	}
+	for _, r := range cfg.Rigs {
+		if r.Name == "my-rig" {
+			if r.Prefix != "ab" {
+				t.Errorf("city.toml Prefix = %q, want %q", r.Prefix, "ab")
+			}
+			if r.EffectivePrefix() != "ab" {
+				t.Errorf("EffectivePrefix() = %q, want %q", r.EffectivePrefix(), "ab")
+			}
+			break
+		}
+	}
+
+	// Verify re-add succeeds (no false-positive conflict with .beads).
+	var stdout2, stderr2 bytes.Buffer
+	code2 := doRigAdd(fsys.OSFS{}, cityPath, rigPath, "", "", "", false, &stdout2, &stderr2)
+	if code2 != 0 {
+		t.Errorf("re-add should succeed, got code %d, stderr: %s", code2, stderr2.String())
+	}
+}
+
+func TestDoRigAdd_PrefixRejectsHyphens(t *testing.T) {
+	cityPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rigPath := filepath.Join(t.TempDir(), "my-rig")
+	if err := os.MkdirAll(rigPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cityToml := "[workspace]\nname = \"test-city\"\n\n[[agent]]\nname = \"mayor\"\n"
+	if err := os.WriteFile(filepath.Join(cityPath, "city.toml"), []byte(cityToml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doRigAdd(fsys.OSFS{}, cityPath, rigPath, "", "", "my-app", false, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("expected failure for hyphenated prefix, got code %d", code)
+	}
+	if !strings.Contains(stderr.String(), "must not contain hyphens") {
+		t.Errorf("expected hyphen error, got: %s", stderr.String())
+	}
 }
 
 // ---------------------------------------------------------------------------
