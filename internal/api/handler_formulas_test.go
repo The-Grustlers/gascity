@@ -298,6 +298,64 @@ title = "Review PR"
 	}
 }
 
+func TestFormulaFeedReturnsWorkflowRunsOnly(t *testing.T) {
+	state := newFakeState(t)
+	state.cityBeadStore = beads.NewMemStore()
+	store := state.stores["myrig"]
+	if store == nil {
+		t.Fatal("expected rig store")
+	}
+
+	root, err := store.Create(beads.Bead{
+		Title: "Rig workflow run",
+		Ref:   "mol-adopt-pr-v2",
+		Metadata: map[string]string{
+			"gc.kind":             "workflow",
+			"gc.formula_contract": "graph.v2",
+			"gc.workflow_id":      "wf-rig-monitor",
+			"gc.run_target":       "myrig/claude",
+			"gc.scope_kind":       "rig",
+			"gc.scope_ref":        "myrig",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create rig workflow root: %v", err)
+	}
+	inProgress := "in_progress"
+	if err := store.Update(root.ID, beads.UpdateOpts{Status: &inProgress}); err != nil {
+		t.Fatalf("set workflow status: %v", err)
+	}
+
+	if _, err := state.cityBeadStore.Create(beads.Bead{
+		Title:  "order:spawn-storm-detect",
+		Labels: []string{"order-tracking"},
+	}); err != nil {
+		t.Fatalf("create order tracking bead: %v", err)
+	}
+
+	server := New(state)
+	req := httptest.NewRequest(http.MethodGet, "/v0/formulas/feed?scope_kind=city&scope_ref=test-city", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Items []monitorFeedItemResponse `json:"items"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode(feed): %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("items = %+v, want exactly 1 workflow item", resp.Items)
+	}
+	if resp.Items[0].WorkflowID != "wf-rig-monitor" || resp.Items[0].Type != "formula" {
+		t.Fatalf("items[0] = %+v, want rig workflow formula item", resp.Items[0])
+	}
+}
+
 func TestFormulaRunsClampsRequestedLimit(t *testing.T) {
 	state := newFakeState(t)
 	state.cityBeadStore = beads.NewMemStore()
@@ -415,15 +473,78 @@ title = "Review PR"
 	}
 }
 
+func TestFormulaFeedUsesRootOnlyProjectionWithoutChildLookup(t *testing.T) {
+	state := newFakeState(t)
+	baseStore := beads.NewMemStore()
+	// failPerRootChildLookupStore fails on per-root child List calls
+	// (queries with gc.root_bead_id metadata).  The feed endpoint uses
+	// buildWorkflowRunProjectionsRootOnly which never issues those
+	// queries, so this test verifies the fast path is in use.
+	state.cityBeadStore = failPerRootChildLookupStore{Store: baseStore}
+
+	root, err := baseStore.Create(beads.Bead{
+		Title: "Open workflow root",
+		Ref:   "mol-adopt-pr-v2",
+		Metadata: map[string]string{
+			"gc.kind":             "workflow",
+			"gc.formula_contract": "graph.v2",
+			"gc.workflow_id":      "wf-fast-path",
+			"gc.run_target":       "mayor",
+			"gc.scope_kind":       "city",
+			"gc.scope_ref":        "test-city",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create workflow root: %v", err)
+	}
+	inProgress := "in_progress"
+	if err := baseStore.Update(root.ID, beads.UpdateOpts{Status: &inProgress}); err != nil {
+		t.Fatalf("set workflow status: %v", err)
+	}
+
+	server := New(state)
+	req := httptest.NewRequest(http.MethodGet, "/v0/formulas/feed?scope_kind=city&scope_ref=test-city", nil)
+	rec := httptest.NewRecorder()
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Items []monitorFeedItemResponse `json:"items"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("Decode(feed): %v", err)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("items = %+v, want 1 fast-path item", resp.Items)
+	}
+	if resp.Items[0].WorkflowID != "wf-fast-path" {
+		t.Fatalf("items[0] = %+v, want wf-fast-path", resp.Items[0])
+	}
+}
+
 type failWorkflowRootLookupStore struct {
 	beads.Store
 }
 
-func (s failWorkflowRootLookupStore) ListByMetadata(filters map[string]string, limit int, opts ...beads.QueryOpt) ([]beads.Bead, error) {
-	if filters["gc.kind"] == "workflow" && filters["gc.formula_contract"] == "graph.v2" {
+func (s failWorkflowRootLookupStore) List(query beads.ListQuery) ([]beads.Bead, error) {
+	if query.Metadata["gc.kind"] == "workflow" && query.Metadata["gc.formula_contract"] == "graph.v2" {
 		return nil, errors.New("workflow root lookup failed")
 	}
-	return s.Store.ListByMetadata(filters, limit, opts...)
+	return s.Store.List(query)
+}
+
+type failPerRootChildLookupStore struct {
+	beads.Store
+}
+
+func (s failPerRootChildLookupStore) List(query beads.ListQuery) ([]beads.Bead, error) {
+	if query.Metadata["gc.root_bead_id"] != "" {
+		return nil, errors.New("per-root child lookup should not be called on the fast path")
+	}
+	return s.Store.List(query)
 }
 
 func TestFormulaDetailReturnsCompiledPreview(t *testing.T) {
