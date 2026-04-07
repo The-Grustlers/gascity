@@ -366,7 +366,23 @@ func configuredNamedSessionOwnerForSessionName(cfg *config.City, b beads.Bead, r
 
 func ensureConfiguredSessionNameAvailable(store beads.Store, cfg *config.City, name, selfID, selfOwner string) error {
 	if err := ensureSessionNameAvailableForSelf(store, name, selfID); err != nil {
-		return err
+		// When a closed bead blocks the name and the caller is materializing
+		// a configured named session that owns this name, allow it. This
+		// handles legacy beads that predate the configured_named_session flag
+		// and were closed with a terminal reason (orphaned, reconfigured, etc.)
+		// but still hold the session_name. Without this, cold-boot recovery
+		// is permanently blocked by stale closed beads.
+		if !errors.Is(err, ErrSessionNameExists) || cfg == nil || selfOwner == "" {
+			return err
+		}
+		if !isConfiguredNamedSessionRuntimeName(cfg, name, selfOwner) {
+			return err
+		}
+		if !allSessionNameHoldersAreClosed(store, name, selfID) {
+			return err
+		}
+		// All holders are closed and the name belongs to a configured named
+		// session owned by selfOwner — allow reuse.
 	}
 	if cfg == nil || name == "" {
 		return nil
@@ -390,6 +406,42 @@ func ensureConfiguredSessionNameAvailable(store beads.Store, cfg *config.City, n
 		return fmt.Errorf("%w: %q reserved for configured named session %s", ErrSessionNameExists, name, reserved)
 	}
 	return nil
+}
+
+// isConfiguredNamedSessionRuntimeName reports whether name is the runtime
+// session name for a configured named session with the given owner identity.
+func isConfiguredNamedSessionRuntimeName(cfg *config.City, name, owner string) bool {
+	for _, named := range cfg.NamedSessions {
+		reserved := strings.TrimSpace(named.QualifiedName())
+		if reserved == "" || reserved != owner {
+			continue
+		}
+		if config.NamedSessionRuntimeName(cfg.EffectiveCityName(), cfg.Workspace, reserved) == name {
+			return true
+		}
+	}
+	return false
+}
+
+// allSessionNameHoldersAreClosed reports whether every bead that holds the
+// given session_name (excluding selfID) is closed.
+func allSessionNameHoldersAreClosed(store beads.Store, name, selfID string) bool {
+	all, err := store.List(beads.ListQuery{
+		Label:         LabelSession,
+		IncludeClosed: true,
+	})
+	if err != nil {
+		return false
+	}
+	for _, b := range all {
+		if !IsSessionBeadOrRepairable(b) || b.ID == selfID {
+			continue
+		}
+		if strings.TrimSpace(b.Metadata["session_name"]) == name && b.Status != "closed" {
+			return false
+		}
+	}
+	return true
 }
 
 func ensureSessionAliasAvailable(store beads.Store, cfg *config.City, alias, selfID, selfOwner string) error {
