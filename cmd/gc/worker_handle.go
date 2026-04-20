@@ -327,7 +327,8 @@ func resolvedWorkerRuntimeWithConfig(cityPath string, cfg *config.City, info ses
 	}
 
 	command := strings.TrimSpace(info.Command)
-	if !shouldPreserveStoredRuntimeCommand(command, resolved.CommandString()) {
+	if !shouldPreserveStoredRuntimeCommand(command, resolved.CommandString()) &&
+		!shouldPreserveStoredRuntimeCommand(command, resolved.ACPCommandString()) {
 		launchCommand, err := config.BuildProviderLaunchCommand(cityPath, resolved, nil, "")
 		command = resolved.CommandString()
 		if err == nil {

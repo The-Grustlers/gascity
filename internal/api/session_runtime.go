@@ -131,7 +131,8 @@ func (s *Server) buildSessionResume(info session.Info) (string, runtime.Config) 
 }
 
 func (s *Server) resolvedSessionRuntimeCommand(resolved *config.ResolvedProvider, storedCommand string) (string, error) {
-	if command := strings.TrimSpace(storedCommand); shouldPreserveStoredRuntimeCommand(command, resolved.CommandString()) {
+	if command := strings.TrimSpace(storedCommand); shouldPreserveStoredRuntimeCommand(command, resolved.CommandString()) ||
+		shouldPreserveStoredRuntimeCommand(command, resolved.ACPCommandString()) {
 		return command, nil
 	}
 	launchCommand, err := config.BuildProviderLaunchCommand(s.state.CityPath(), resolved, nil, "")
