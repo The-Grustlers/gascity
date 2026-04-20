@@ -36,8 +36,9 @@ type ListQuery struct {
 	Limit         int
 	IncludeClosed bool
 	AllowScan     bool
-	// Live bypasses CachingStore and reads from the backing store. Use it only
-	// for lifecycle gates that must observe external mutations immediately.
+	// Live bypasses CachingStore and reads from the backing store. Other Store
+	// implementations ignore it. Use it only for lifecycle gates that must
+	// observe external mutations immediately.
 	Live bool
 	Sort SortOrder
 }

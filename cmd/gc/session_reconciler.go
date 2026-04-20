@@ -1143,7 +1143,7 @@ func sessionHasOpenAssignedWorkInStore(store beads.Store, session beads.Bead) (b
 				continue
 			}
 			seen[key] = struct{}{}
-			items, err := store.List(beads.ListQuery{Assignee: assignee, Status: status, Live: status == "in_progress"})
+			items, err := store.List(beads.ListQuery{Assignee: assignee, Status: status, Live: true})
 			if err != nil {
 				return false, err
 			}
