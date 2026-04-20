@@ -16,6 +16,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/overlay"
 	"github.com/gastownhall/gascity/internal/runtime"
+	"github.com/gastownhall/gascity/internal/shellquote"
 )
 
 // Provider adapts [Tmux] to the [runtime.Provider] interface.
@@ -837,6 +838,7 @@ const maxInlinePromptLen = 1024
 
 func ensureFreshSession(ops startOps, name string, cfg runtime.Config) error {
 	fullCommand := cfg.Command
+	promptFile := ""
 	if cfg.PromptSuffix != "" {
 		if len(cfg.PromptSuffix) > maxInlinePromptLen {
 			// Large prompt — write to temp file and use $(cat ...) expansion
@@ -844,7 +846,8 @@ func ensureFreshSession(ops startOps, name string, cfg runtime.Config) error {
 			// prevent the quoted prompt from leaking into the exec command
 			// line (which triggers ENAMETOOLONG / exit 126 when the total
 			// command overflows kernel argv/exec buffers).
-			promptFile, err := writePromptFile(cfg.WorkDir, name, cfg.PromptSuffix)
+			var err error
+			promptFile, err = writePromptFile(cfg.WorkDir, name, cfg.PromptSuffix)
 			if err != nil {
 				// No silent fallback: the inline path would produce the
 				// "File name too long" tmux pane death that this helper
@@ -852,13 +855,7 @@ func ensureFreshSession(ops startOps, name string, cfg runtime.Config) error {
 				// records it and the operator can diagnose the cause.
 				return fmt.Errorf("writing prompt temp file for session %q: %w", name, err)
 			}
-			if cfg.PromptFlag != "" {
-				fullCommand = fmt.Sprintf(`sh -c 'exec %s %s "$(cat %q)" && rm -f %q'`,
-					cfg.Command, cfg.PromptFlag, promptFile, promptFile)
-			} else {
-				fullCommand = fmt.Sprintf(`sh -c 'exec %s "$(cat %q)" && rm -f %q'`,
-					cfg.Command, promptFile, promptFile)
-			}
+			fullCommand = longPromptCommand(cfg.Command, cfg.PromptFlag, promptFile)
 		} else {
 			if cfg.PromptFlag != "" {
 				fullCommand = fullCommand + " " + cfg.PromptFlag + " " + cfg.PromptSuffix
@@ -879,17 +876,17 @@ func ensureFreshSession(ops startOps, name string, cfg runtime.Config) error {
 		}
 	}
 	if !errors.Is(err, ErrSessionExists) {
-		return fmt.Errorf("creating session: %w", err)
+		return cleanupPromptFileOnError(promptFile, fmt.Errorf("creating session: %w", err))
 	}
 
 	// Session exists but the pane is already dead (e.g. remain-on-exit corpse).
 	// Safe to recycle even when ProcessNames are unavailable.
 	if !ops.isSessionRunning(name) {
 		if err := ops.killSession(name); err != nil {
-			return fmt.Errorf("killing dead session: %w", err)
+			return cleanupPromptFileOnError(promptFile, fmt.Errorf("killing dead session: %w", err))
 		}
-		if err := recreateSessionAfterCleanup(ops, name, cfg.WorkDir, fullCommand, cfg.Env); err != nil {
-			return fmt.Errorf("creating session after dead-session cleanup: %w", err)
+		if err := recreateSessionAfterCleanup(ops, name, cfg.WorkDir, fullCommand, cfg.Env, promptFile); err != nil {
+			return cleanupPromptFileOnError(promptFile, fmt.Errorf("creating session after dead-session cleanup: %w", err))
 		}
 		return nil
 	}
@@ -897,31 +894,65 @@ func ensureFreshSession(ops startOps, name string, cfg runtime.Config) error {
 	// Session exists — without process names we can't distinguish a zombie
 	// from a healthy session, so treat it as a duplicate.
 	if len(cfg.ProcessNames) == 0 {
-		return fmt.Errorf("%w: session %q", runtime.ErrSessionExists, name)
+		return cleanupPromptFileOnError(promptFile, fmt.Errorf("%w: session %q", runtime.ErrSessionExists, name))
 	}
 
 	// We have process names — check if the agent is alive.
 	if ops.isRuntimeRunning(name, cfg.ProcessNames) {
-		return fmt.Errorf("%w: session %q", runtime.ErrSessionExists, name)
+		return cleanupPromptFileOnError(promptFile, fmt.Errorf("%w: session %q", runtime.ErrSessionExists, name))
 	}
 
 	// Zombie: tmux alive but agent dead. Kill and recreate.
 	if err := ops.killSession(name); err != nil {
-		return fmt.Errorf("killing zombie session: %w", err)
+		return cleanupPromptFileOnError(promptFile, fmt.Errorf("killing zombie session: %w", err))
 	}
-	if err := recreateSessionAfterCleanup(ops, name, cfg.WorkDir, fullCommand, cfg.Env); err != nil {
-		return fmt.Errorf("creating session after zombie cleanup: %w", err)
+	if err := recreateSessionAfterCleanup(ops, name, cfg.WorkDir, fullCommand, cfg.Env, promptFile); err != nil {
+		return cleanupPromptFileOnError(promptFile, fmt.Errorf("creating session after zombie cleanup: %w", err))
 	}
 	return nil
 }
 
-func recreateSessionAfterCleanup(ops startOps, name, workDir, command string, env map[string]string) error {
+func longPromptCommand(command, promptFlag, promptFile string) string {
+	quotedPromptFile := shellquote.Quote(promptFile)
+	var script string
+	if promptFlag != "" {
+		script = fmt.Sprintf(`__gc_prompt="$(cat %s && printf .)"; __gc_status=$?; rm -f %s; [ "$__gc_status" -eq 0 ] || exit "$__gc_status"; __gc_prompt="${__gc_prompt%%.}"; exec %s %s "$__gc_prompt"`,
+			quotedPromptFile, quotedPromptFile, command, promptFlag)
+	} else {
+		script = fmt.Sprintf(`__gc_prompt="$(cat %s && printf .)"; __gc_status=$?; rm -f %s; [ "$__gc_status" -eq 0 ] || exit "$__gc_status"; __gc_prompt="${__gc_prompt%%.}"; exec %s "$__gc_prompt"`,
+			quotedPromptFile, quotedPromptFile, command)
+	}
+	return "sh -c " + shellquote.Quote(script)
+}
+
+func removePromptFile(promptFile string) error {
+	if promptFile == "" {
+		return nil
+	}
+	if err := os.Remove(promptFile); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("removing prompt temp file %q: %w", promptFile, err)
+	}
+	return nil
+}
+
+func cleanupPromptFileOnError(promptFile string, err error) error {
+	if promptFile == "" || err == nil {
+		return err
+	}
+	if removeErr := removePromptFile(promptFile); removeErr != nil {
+		return errors.Join(err, removeErr)
+	}
+	return err
+}
+
+func recreateSessionAfterCleanup(ops startOps, name, workDir, command string, env map[string]string, promptFile string) error {
 	err := ops.createSession(name, workDir, command, env)
 	if errors.Is(err, ErrNoServer) {
 		time.Sleep(50 * time.Millisecond)
 		err = ops.createSession(name, workDir, command, env)
 	}
 	if errors.Is(err, ErrSessionExists) {
+		_ = removePromptFile(promptFile)
 		return nil // race: another process created it
 	}
 	return err
@@ -933,11 +964,12 @@ func recreateSessionAfterCleanup(ops startOps, name, workDir, command string, en
 // element.
 //
 // Preferred location is <workDir>/.gc/tmp (visible from inside the worktree
-// and cleaned up with the agent's scratch space). If that path is unusable
-// — workDir is empty, doesn't exist yet (pre_start hasn't materialized the
-// worktree), or is read-only — falls back to os.TempDir(). The fallback is
-// load-bearing: without it a failed MkdirAll used to trigger a silent
-// "inline the prompt into the tmux command line" path that produced
+// and cleaned up with the agent's scratch space). A non-empty WorkDir must
+// exist and be a directory, because tmux may otherwise start the pane in the
+// wrong checkout. If WorkDir is empty, or WorkDir exists but its .gc/tmp path
+// is unusable, this falls back to a gc-scoped directory under os.TempDir().
+// The fallback is load-bearing: without it a failed MkdirAll used to trigger
+// a silent "inline the prompt into the tmux command line" path that produced
 // "cannot execute: File name too long" pane deaths for large prompts.
 func writePromptFile(workDir, agentName, shellQuotedPrompt string) (string, error) {
 	// Strip surrounding single quotes from shell-quoted string.
@@ -952,18 +984,26 @@ func writePromptFile(workDir, agentName, shellQuotedPrompt string) (string, erro
 	// want a valid argv-via-file path to avoid the inline fallback.
 	var candidateErrs []error
 	if workDir != "" {
-		dir := filepath.Join(workDir, ".gc", "tmp")
-		if path, err := writePromptToDir(dir, agentName, raw); err == nil {
-			return path, nil
-		} else {
-			candidateErrs = append(candidateErrs, fmt.Errorf("workdir tmp: %w", err))
+		info, err := os.Stat(workDir)
+		if err != nil {
+			return "", fmt.Errorf("workdir unavailable: %w", err)
 		}
+		if !info.IsDir() {
+			return "", fmt.Errorf("workdir %q is not a directory", workDir)
+		}
+		dir := filepath.Join(workDir, ".gc", "tmp")
+		path, err := writePromptToDir(dir, agentName, raw)
+		if err == nil {
+			return path, nil
+		}
+		candidateErrs = append(candidateErrs, fmt.Errorf("workdir tmp: %w", err))
 	}
-	if path, err := writePromptToDir(os.TempDir(), agentName, raw); err == nil {
+	osTmpDir := filepath.Join(os.TempDir(), fmt.Sprintf(".gc-%d", os.Getuid()), "tmux-prompts")
+	path, err := writePromptToDir(osTmpDir, agentName, raw)
+	if err == nil {
 		return path, nil
-	} else {
-		candidateErrs = append(candidateErrs, fmt.Errorf("os tmp: %w", err))
 	}
+	candidateErrs = append(candidateErrs, fmt.Errorf("os tmp: %w", err))
 	return "", errors.Join(candidateErrs...)
 }
 
