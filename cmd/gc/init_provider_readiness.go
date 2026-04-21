@@ -57,9 +57,9 @@ func finalizeInit(cityPath string, stdout, stderr io.Writer, opts initFinalizeOp
 
 	if opts.showProgress {
 		if opts.skipProviderReadiness {
-			logInitProgress(stdout, 7, "Skipping provider readiness checks")
+			logInitProgress(stdout, 6, "Skipping provider readiness checks")
 		} else {
-			logInitProgress(stdout, 7, "Checking provider readiness")
+			logInitProgress(stdout, 6, "Checking provider readiness")
 		}
 	}
 	if err := ensureLegacyNamedPacksCached(cityPath); err != nil {
@@ -89,7 +89,7 @@ func finalizeInit(cityPath string, stdout, stderr io.Writer, opts initFinalizeOp
 		return 1
 	}
 	if opts.showProgress {
-		logInitProgress(stdout, 8, "Registering city with supervisor")
+		logInitProgress(stdout, 7, "Registering city with supervisor")
 	}
 	return registerCityWithSupervisor(cityPath, stdout, stderr, opts.commandName, opts.showProgress)
 }

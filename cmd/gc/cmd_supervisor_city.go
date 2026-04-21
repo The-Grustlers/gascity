@@ -55,6 +55,9 @@ func supervisorCityStopTimeout(cityPath string) time.Duration {
 }
 
 func effectiveCityName(cityPath string) (string, error) {
+	if err := MaterializeBuiltinPacks(cityPath); err != nil {
+		return "", fmt.Errorf("materializing builtin packs: %w", err)
+	}
 	tomlPath := filepath.Join(cityPath, "city.toml")
 	cfg, _, err := config.LoadWithIncludes(fsys.OSFS{}, tomlPath)
 	if err != nil {
@@ -164,6 +167,10 @@ func registerCityWithSupervisorNamed(cityPath, nameOverride string, stdout, stde
 		fmt.Fprintf(stderr, "%s: fetching packs: %v\n", commandName, err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	if err := MaterializeBuiltinPacks(cityPath); err != nil {
+		fmt.Fprintf(stderr, "%s: materializing builtin packs: %v\n", commandName, err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
 	name, err := registeredCityName(cityPath, nameOverride)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", commandName, err) //nolint:errcheck // best-effort stderr
@@ -216,7 +223,7 @@ func registerCityWithSupervisorNamed(cityPath, nameOverride string, stdout, stde
 	}
 	if supervisorAliveHook() != 0 {
 		if showProgress {
-			logInitProgress(stdout, 9, "Waiting for supervisor to start city")
+			logInitProgress(stdout, 8, "Waiting for supervisor to start city")
 		} else if stdout != nil {
 			fmt.Fprintln(stdout, "Waiting for supervisor to start city...") //nolint:errcheck // best-effort stdout
 		}
