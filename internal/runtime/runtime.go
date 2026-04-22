@@ -352,6 +352,10 @@ type Config struct {
 	// Env is additional environment variables set in the session.
 	Env map[string]string
 
+	// MCPServers is the effective ACP session/new MCP server list for this
+	// session. Non-ACP providers ignore it.
+	MCPServers []MCPServerConfig
+
 	// Startup reliability hints (all optional — zero values skip).
 
 	// ReadyPromptPrefix is the prompt prefix for readiness detection (e.g. "> ").

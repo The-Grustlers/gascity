@@ -9,6 +9,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/materialize"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
 	"github.com/gastownhall/gascity/internal/worker"
@@ -77,6 +78,40 @@ func workerSessionCreateHints(resolved *config.ResolvedProvider) runtime.Config 
 	}
 }
 
+func resolvedRuntimeMCPServersWithConfig(
+	cityPath string,
+	cfg *config.City,
+	alias, template, provider, workDir string,
+	metadata map[string]string,
+) ([]runtime.MCPServerConfig, error) {
+	if cfg == nil || strings.TrimSpace(workDir) == "" {
+		return nil, nil
+	}
+	identity := strings.TrimSpace(metadata["agent_name"])
+	if identity == "" {
+		identity = strings.TrimSpace(alias)
+	}
+	if identity == "" {
+		identity = strings.TrimSpace(template)
+	}
+	if identity == "" {
+		identity = strings.TrimSpace(provider)
+	}
+	if agentCfg := findAgentByTemplate(cfg, template); agentCfg != nil {
+		catalog, err := materialize.EffectiveMCPForSession(cfg, cityPath, agentCfg, identity, workDir)
+		if err != nil {
+			return nil, fmt.Errorf("loading effective MCP: %w", err)
+		}
+		return materialize.RuntimeMCPServers(catalog.Servers), nil
+	}
+	synthetic := &config.Agent{Provider: provider}
+	catalog, err := materialize.EffectiveMCPForSession(cfg, cityPath, synthetic, identity, workDir)
+	if err != nil {
+		return nil, fmt.Errorf("loading effective MCP: %w", err)
+	}
+	return materialize.RuntimeMCPServers(catalog.Servers), nil
+}
+
 func newWorkerSessionHandleForResolvedRuntimeWithConfig(
 	cityPath string,
 	store beads.Store,
@@ -87,6 +122,10 @@ func newWorkerSessionHandleForResolvedRuntimeWithConfig(
 	metadata map[string]string,
 ) (worker.Handle, error) {
 	factory, err := workerFactoryWithConfig(cityPath, store, sp, cfg)
+	if err != nil {
+		return nil, err
+	}
+	mcpServers, err := resolvedRuntimeMCPServersWithConfig(cityPath, cfg, alias, template, provider, workDir, metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -101,6 +140,7 @@ func newWorkerSessionHandleForResolvedRuntimeWithConfig(
 		transport,
 		resolved,
 		metadata,
+		mcpServers,
 	)
 	if err != nil {
 		return nil, err
@@ -119,6 +159,7 @@ func resolvedWorkerSessionConfigWithConfig(
 	transport string,
 	resolved *config.ResolvedProvider,
 	metadata map[string]string,
+	mcpServers []runtime.MCPServerConfig,
 ) (worker.ResolvedSessionConfig, error) {
 	if resolved == nil {
 		return worker.ResolvedSessionConfig{}, fmt.Errorf("resolved provider is required")
@@ -156,7 +197,11 @@ func resolvedWorkerSessionConfigWithConfig(
 				ResumeCommand: resolved.ResumeCommand,
 				SessionIDFlag: resolved.SessionIDFlag,
 			},
-			Hints: workerSessionCreateHints(resolved),
+			Hints: func() runtime.Config {
+				hints := workerSessionCreateHints(resolved)
+				hints.MCPServers = mcpServers
+				return hints
+			}(),
 		},
 	})
 }
@@ -344,6 +389,15 @@ func resolvedWorkerRuntimeWithConfig(cityPath string, cfg *config.City, info ses
 	if workDir == "" {
 		workDir = cityPath
 	}
+	mcpServers, _ := resolvedRuntimeMCPServersWithConfig(
+		cityPath,
+		cfg,
+		info.Alias,
+		info.Template,
+		firstNonEmptyGCString(info.Provider, resolved.Name, info.Template),
+		workDir,
+		nil,
+	)
 	return &worker.ResolvedRuntime{
 		Command:    command,
 		WorkDir:    workDir,
@@ -355,6 +409,7 @@ func resolvedWorkerRuntimeWithConfig(cityPath string, cfg *config.City, info ses
 			ReadyDelayMs:           resolved.ReadyDelayMs,
 			ProcessNames:           resolved.ProcessNames,
 			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
+			MCPServers:             mcpServers,
 		},
 		Resume: session.ProviderResume{
 			ResumeFlag:    firstNonEmptyGCString(resolved.ResumeFlag, info.ResumeFlag),

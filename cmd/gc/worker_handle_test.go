@@ -218,6 +218,14 @@ supports_acp = true
 acp_command = "/bin/echo"
 acp_args = ["acp"]
 `)
+	writeCatalogFile(t, cityDir, "mcp/filesystem.toml", `
+name = "filesystem"
+command = "/bin/mcp"
+args = ["--stdio"]
+
+[env]
+TOKEN = "abc"
+`)
 
 	cfg, err := loadCityConfig(cityDir)
 	if err != nil {
@@ -235,6 +243,12 @@ acp_args = ["acp"]
 	}
 	if got, want := resolved.Command, "/bin/echo acp"; got != want {
 		t.Fatalf("Command = %q, want %q", got, want)
+	}
+	if len(resolved.Hints.MCPServers) != 1 {
+		t.Fatalf("Hints.MCPServers len = %d, want 1", len(resolved.Hints.MCPServers))
+	}
+	if got, want := resolved.Hints.MCPServers[0].Name, "filesystem"; got != want {
+		t.Fatalf("Hints.MCPServers[0].Name = %q, want %q", got, want)
 	}
 }
 
@@ -625,6 +639,7 @@ func TestResolvedWorkerSessionConfigWithConfigFallsBackToResolvedProviderNameFor
 			Name: "custom-provider",
 		},
 		map[string]string{"session_origin": "test"},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("resolvedWorkerSessionConfigWithConfig: %v", err)
@@ -648,6 +663,7 @@ func TestResolvedWorkerSessionConfigWithConfigFallsBackToProviderArgForCommand(t
 		"Worker",
 		"",
 		&config.ResolvedProvider{},
+		nil,
 		nil,
 	)
 	if err != nil {

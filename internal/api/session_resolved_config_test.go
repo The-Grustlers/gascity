@@ -33,6 +33,7 @@ func TestResolvedSessionConfigForProviderBuildsNormalizedConfig(t *testing.T) {
 		resolved,
 		"",
 		"/tmp/workdir",
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("resolvedSessionConfigForProvider: %v", err)
@@ -78,6 +79,7 @@ func TestResolvedSessionConfigForProviderRejectsNilProvider(t *testing.T) {
 		nil,
 		"",
 		"/tmp/workdir",
+		nil,
 	); err == nil {
 		t.Fatal("resolvedSessionConfigForProvider() error = nil, want error")
 	}

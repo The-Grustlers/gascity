@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/gastownhall/gascity/internal/config"
@@ -132,6 +134,53 @@ func TestResolveWorkerSessionRuntimeUsesResolvedCommandWhenPersistedCommandIsSta
 	}
 	if got, want := runtimeCfg.Hints.ReadyDelayMs, 321; got != want {
 		t.Fatalf("Hints.ReadyDelayMs = %d, want %d", got, want)
+	}
+}
+
+func TestResolveWorkerSessionRuntimeIncludesEffectiveMCPServers(t *testing.T) {
+	fs := newSessionFakeState(t)
+	fs.cfg.Agents[0].Provider = "resolved-worker"
+	fs.cfg.Agents[0].Session = "acp"
+	supportsACP := true
+	fs.cfg.Providers["resolved-worker"] = config.ProviderSpec{
+		DisplayName: "Resolved Worker",
+		Command:     "/bin/echo",
+		SupportsACP: &supportsACP,
+		ACPCommand:  "/bin/echo",
+		ACPArgs:     []string{"acp"},
+	}
+	fs.cfg.PackMCPDir = filepath.Join(fs.cityPath, "mcp")
+	if err := os.MkdirAll(fs.cfg.PackMCPDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(mcp): %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(fs.cfg.PackMCPDir, "filesystem.toml"), []byte(`
+name = "filesystem"
+command = "/bin/mcp"
+args = ["--stdio"]
+`), 0o644); err != nil {
+		t.Fatalf("WriteFile(mcp): %v", err)
+	}
+
+	srv := New(fs)
+	info := session.Info{
+		ID:        "sess-1",
+		Template:  "myrig/worker",
+		Transport: "acp",
+		WorkDir:   t.TempDir(),
+	}
+
+	runtimeCfg, err := srv.resolveWorkerSessionRuntime(info, "")
+	if err != nil {
+		t.Fatalf("resolveWorkerSessionRuntime: %v", err)
+	}
+	if runtimeCfg == nil {
+		t.Fatal("resolveWorkerSessionRuntime() = nil")
+	}
+	if len(runtimeCfg.Hints.MCPServers) != 1 {
+		t.Fatalf("Hints.MCPServers len = %d, want 1", len(runtimeCfg.Hints.MCPServers))
+	}
+	if got, want := runtimeCfg.Hints.MCPServers[0].Name, "filesystem"; got != want {
+		t.Fatalf("Hints.MCPServers[0].Name = %q, want %q", got, want)
 	}
 }
 

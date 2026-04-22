@@ -103,6 +103,9 @@ type TemplateParams struct {
 	// identity-stamped templates (pool workers, dependency floors) from the
 	// resolver's default stamping on ordinary sessions.
 	EnvIdentityStamped bool
+	// MCPServers is the effective ACP session/new MCP server set for this
+	// concrete session context.
+	MCPServers []runtime.MCPServerConfig
 }
 
 // DisplayName returns the name to use for log messages and event subjects.
@@ -473,6 +476,7 @@ func resolveTemplate(p *agentBuildParams, cfgAgent *config.Agent, qualifiedName 
 			)
 		}
 	}
+	mcpServers := materialize.RuntimeMCPServers(mcpCatalog.Servers)
 
 	// Step 12: Build startup hints.
 	hints := agent.StartupHints{
@@ -509,6 +513,7 @@ func resolveTemplate(p *agentBuildParams, cfgAgent *config.Agent, qualifiedName 
 		WakeMode:         cfgAgent.WakeMode,
 		IsACP:            cfgAgent.Session == "acp",
 		HookEnabled:      hasHooks,
+		MCPServers:       mcpServers,
 	}, nil
 }
 
@@ -583,6 +588,7 @@ func templateParamsToConfig(tp TemplateParams) runtime.Config {
 		PromptSuffix:           promptSuffix,
 		PromptFlag:             promptFlag,
 		Env:                    env,
+		MCPServers:             tp.MCPServers,
 		WorkDir:                tp.WorkDir,
 		ReadyPromptPrefix:      tp.Hints.ReadyPromptPrefix,
 		ReadyDelayMs:           tp.Hints.ReadyDelayMs,

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
 	"github.com/gastownhall/gascity/internal/worker"
 )
@@ -13,6 +14,7 @@ func resolvedSessionConfigForProvider(
 	metadata map[string]string,
 	resolved *config.ResolvedProvider,
 	command, workDir string,
+	mcpServers []runtime.MCPServerConfig,
 ) (worker.ResolvedSessionConfig, error) {
 	if resolved == nil {
 		return worker.ResolvedSessionConfig{}, fmt.Errorf("%w: resolved provider is required", worker.ErrHandleConfig)
@@ -41,7 +43,7 @@ func resolvedSessionConfigForProvider(
 				ResumeCommand: resolved.ResumeCommand,
 				SessionIDFlag: resolved.SessionIDFlag,
 			},
-			Hints: sessionCreateHints(resolved),
+			Hints: sessionCreateHints(resolved, mcpServers),
 		},
 	})
 }

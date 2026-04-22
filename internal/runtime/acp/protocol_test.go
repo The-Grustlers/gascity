@@ -271,7 +271,7 @@ func TestInitializeRequest_IncludesProtocolVersion(t *testing.T) {
 }
 
 func TestSessionNewRequest_IncludesCwdAndMcpServers(t *testing.T) {
-	msg, _ := newSessionNewRequest("/home/user/project")
+	msg, _ := newSessionNewRequest("/home/user/project", nil)
 	data, err := json.Marshal(msg)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
@@ -302,6 +302,88 @@ func TestSessionNewRequest_IncludesCwdAndMcpServers(t *testing.T) {
 	// Verify raw JSON has [] not null for mcpServers.
 	if !strings.Contains(string(data), `"mcpServers":[]`) {
 		t.Errorf("raw JSON should contain \"mcpServers\":[], got %s", data)
+	}
+}
+
+func TestSessionNewRequest_SerializesMCPServersByTransport(t *testing.T) {
+	msg, _ := newSessionNewRequest("/home/user/project", []runtime.MCPServerConfig{
+		{
+			Name:      "filesystem",
+			Transport: runtime.MCPTransportStdio,
+			Command:   "/bin/mcp-fs",
+			Args:      []string{"--stdio"},
+			Env: map[string]string{
+				"HOME":  "/tmp/home",
+				"TOKEN": "secret",
+			},
+		},
+		{
+			Name:      "remote",
+			Transport: runtime.MCPTransportHTTP,
+			URL:       "https://mcp.example.test",
+			Headers: map[string]string{
+				"Authorization": "Bearer token",
+			},
+		},
+	})
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	var decoded JSONRPCMessage
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+
+	var params struct {
+		Cwd        string            `json:"cwd"`
+		McpServers []json.RawMessage `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(decoded.Params, &params); err != nil {
+		t.Fatalf("Unmarshal params: %v", err)
+	}
+	if len(params.McpServers) != 2 {
+		t.Fatalf("mcpServers len = %d, want 2", len(params.McpServers))
+	}
+
+	var stdio struct {
+		Type    string                `json:"type"`
+		Name    string                `json:"name"`
+		Command string                `json:"command"`
+		Args    []string              `json:"args"`
+		Env     []runtime.MCPKeyValue `json:"env"`
+	}
+	if err := json.Unmarshal(params.McpServers[0], &stdio); err != nil {
+		t.Fatalf("Unmarshal stdio server: %v", err)
+	}
+	if stdio.Type != "" {
+		t.Fatalf("stdio type = %q, want omitted", stdio.Type)
+	}
+	if stdio.Command != "/bin/mcp-fs" {
+		t.Fatalf("stdio command = %q, want /bin/mcp-fs", stdio.Command)
+	}
+	if len(stdio.Env) != 2 || stdio.Env[0].Name != "HOME" || stdio.Env[1].Name != "TOKEN" {
+		t.Fatalf("stdio env = %#v, want sorted HOME/TOKEN", stdio.Env)
+	}
+
+	var http struct {
+		Type    string                `json:"type"`
+		Name    string                `json:"name"`
+		URL     string                `json:"url"`
+		Headers []runtime.MCPKeyValue `json:"headers"`
+	}
+	if err := json.Unmarshal(params.McpServers[1], &http); err != nil {
+		t.Fatalf("Unmarshal http server: %v", err)
+	}
+	if http.Type != "http" {
+		t.Fatalf("http type = %q, want http", http.Type)
+	}
+	if http.URL != "https://mcp.example.test" {
+		t.Fatalf("http url = %q, want https://mcp.example.test", http.URL)
+	}
+	if len(http.Headers) != 1 || http.Headers[0].Name != "Authorization" {
+		t.Fatalf("http headers = %#v, want Authorization", http.Headers)
 	}
 }
 

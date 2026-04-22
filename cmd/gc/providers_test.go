@@ -384,7 +384,7 @@ func TestNewSessionProvider_PreregistersACPNamedSessionRuntimeName(t *testing.T)
 	}
 }
 
-func TestNewSessionProviderDoesNotWrapUnusedACPDefaultProvidersWithoutACPAgents(t *testing.T) {
+func TestNewSessionProviderWrapsACPProvidersWithoutACPAgents(t *testing.T) {
 	ctx := sessionProviderContextForCity(&config.City{
 		Workspace: config.Workspace{
 			Name:     "test-city",
@@ -402,8 +402,8 @@ func TestNewSessionProviderDoesNotWrapUnusedACPDefaultProvidersWithoutACPAgents(
 	}, t.TempDir(), "fake")
 
 	sp := newSessionProviderFromContext(ctx, nil)
-	if _, ok := sp.(interface{ RouteACP(string) }); ok {
-		t.Fatalf("provider = %T, want plain provider without ACP routing", sp)
+	if _, ok := sp.(interface{ RouteACP(string) }); !ok {
+		t.Fatalf("provider = %T, want ACP-routing wrapper", sp)
 	}
 }
 

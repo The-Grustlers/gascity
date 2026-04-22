@@ -238,7 +238,55 @@ func configuredACPSessionNames(snapshot *sessionBeadSnapshot, cityName, sessionT
 }
 
 func needsACPProviderWrapper(snapshot *sessionBeadSnapshot, cfg *config.City) bool {
-	return len(observedACPSessionNames(snapshot)) > 0 || (cfg != nil && hasACPAgents(cfg.Agents))
+	if len(observedACPSessionNames(snapshot)) > 0 {
+		return true
+	}
+	if cfg == nil {
+		return false
+	}
+	return hasACPAgents(cfg.Agents) || hasACPProviderTargets(cfg)
+}
+
+func hasACPProviderTargets(cfg *config.City) bool {
+	if cfg == nil {
+		return false
+	}
+	candidates := map[string]bool{}
+	add := func(name string) {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			candidates[name] = true
+		}
+	}
+	add(cfg.Workspace.Provider)
+	for name := range cfg.Providers {
+		add(name)
+	}
+	for _, agentCfg := range cfg.Agents {
+		add(agentCfg.Provider)
+	}
+	for name := range candidates {
+		if providerSupportsACP(cfg, name) {
+			return true
+		}
+	}
+	return false
+}
+
+func providerSupportsACP(cfg *config.City, providerName string) bool {
+	if cfg == nil || strings.TrimSpace(providerName) == "" {
+		return false
+	}
+	resolved, err := config.ResolveProvider(
+		&config.Agent{Provider: providerName},
+		&cfg.Workspace,
+		cfg.Providers,
+		func(name string) (string, error) { return name, nil },
+	)
+	if err != nil {
+		return false
+	}
+	return resolved.DefaultSessionTransport() == "acp"
 }
 
 func observedACPSessionNames(snapshot *sessionBeadSnapshot) []string {

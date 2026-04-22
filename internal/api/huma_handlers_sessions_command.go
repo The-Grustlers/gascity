@@ -240,9 +240,13 @@ func (s *Server) humaCreateProviderSession(ctx context.Context, store beads.Stor
 		return nil, huma.Error400BadRequest(err.Error())
 	}
 	command := launchCommand.Command
+	mcpServers, err := s.providerSessionMCPServers(resolved.Name, workDir)
+	if err != nil {
+		return nil, huma.Error500InternalServerError(err.Error())
+	}
 
 	mgr := s.sessionManager(store)
-	hints := sessionCreateHints(resolved)
+	hints := sessionCreateHints(resolved, mcpServers)
 	var info session.Info
 	err = session.WithCitySessionAliasLock(s.state.CityPath(), alias, func() error {
 		if aliasErr := session.EnsureAliasAvailableWithConfig(store, s.state.Config(), alias, ""); aliasErr != nil {
