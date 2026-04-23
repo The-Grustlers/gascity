@@ -3459,6 +3459,60 @@ func TestWriteInitFile_PreserveFalseOverwrites(t *testing.T) {
 	}
 }
 
+// TestDoInitPreservesExistingPackToml exercises the wizard-init path
+// (`doInit`, not `cmdInitFromTOMLFileWithOptions`) with `preserveExisting=true`
+// and a pre-seeded pack.toml. Covers the "Preserved existing pack.toml."
+// stdout branch unique to the wizard path.
+func TestDoInitPreservesExistingPackToml(t *testing.T) {
+	f := fsys.NewFake()
+	// Pre-seed pack.toml. No pre-seeded city.toml — that would route
+	// doInit into the separate "bootstrap existing" path above the
+	// preserve branches and never reach the pack.toml write.
+	preExistingPack := []byte("[pack]\nname = \"user-authored\"\nschema = 2\nversion = \"9.9.9\"\n")
+	f.Files["/city/pack.toml"] = preExistingPack
+
+	var stdout, stderr bytes.Buffer
+	code := doInit(f, "/city", defaultWizardConfig(), "", &stdout, &stderr, true)
+	if code != 0 {
+		t.Fatalf("doInit = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	if got := f.Files["/city/pack.toml"]; !bytes.Equal(got, preExistingPack) {
+		t.Errorf("pack.toml was rewritten under preserveExisting=true\n got: %s\nwant: %s", got, preExistingPack)
+	}
+	if !strings.Contains(stdout.String(), "Preserved existing pack.toml.") {
+		t.Errorf("stdout missing preservation log; got:\n%s", stdout.String())
+	}
+}
+
+// TestCmdInitFromFileWithOptionsUsesCWDWhenArgsEmpty covers the wrapper
+// branch that defaults cityPath to the current working directory when no
+// positional arg is supplied. The inner `cmdInitFromTOMLFileWithOptions`
+// call is exercised by the broader preserve-existing test; this case
+// pins the wrapper's default-path behavior itself.
+func TestCmdInitFromFileWithOptionsUsesCWDWhenArgsEmpty(t *testing.T) {
+	configureIsolatedRuntimeEnv(t)
+
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	src := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(src,
+		[]byte("[workspace]\nname = \"from-template\"\nprovider = \"claude\"\n"),
+		0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := cmdInitFromFileWithOptions(src, nil, "", &stdout, &stderr, true, false)
+	if code != 0 {
+		t.Fatalf("cmdInitFromFileWithOptions = %d, want 0; stderr: %s", code, stderr.String())
+	}
+	// Init should have written city.toml into the CWD.
+	if _, err := os.Stat(filepath.Join(dir, "city.toml")); err != nil {
+		t.Errorf("city.toml not written to CWD: %v", err)
+	}
+}
+
 func TestRunInitFromFileAlreadyInitializedPropagatesExitCode(t *testing.T) {
 	configureIsolatedRuntimeEnv(t)
 
