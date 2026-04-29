@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -2701,6 +2702,83 @@ func TestSyncSessionBeads_OrphansLegacyPoolBaseSession(t *testing.T) {
 	}
 	if openPool.Metadata["alias"] != "repo/polecat/polecat-ci-1jb" {
 		t.Fatalf("new pool bead alias = %q, want repo/polecat/polecat-ci-1jb", openPool.Metadata["alias"])
+	}
+}
+
+func TestSyncSessionBeads_RepairsManagedPoolAgentNameDrift(t *testing.T) {
+	store := beads.NewMemStore()
+	clk := &clock.Fake{Time: time.Date(2026, 4, 29, 17, 0, 0, 0, time.UTC)}
+	sp := runtime.NewFake()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Agents: []config.Agent{{
+			Name:              "polecat",
+			Dir:               "repo",
+			MinActiveSessions: intPtr(0),
+			MaxActiveSessions: intPtr(3),
+		}},
+	}
+
+	existing, err := store.Create(beads.Bead{
+		Title:  "repo/polecat",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel, "agent:repo/polecat-1"},
+		Metadata: map[string]string{
+			"template":               "repo/polecat",
+			"agent_name":             "repo/polecat-1",
+			"session_name":           "polecat-ci-3",
+			"alias":                  "repo/polecat-3",
+			"pool_slot":              "3",
+			"state":                  "active",
+			"session_origin":         "ephemeral",
+			poolManagedMetadataKey:   boolMetadata(true),
+			"pending_create_claim":   "",
+			"session_name_explicit":  "",
+			namedSessionMetadataKey:  "",
+			namedSessionModeMetadata: "",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	desired := map[string]TemplateParams{}
+	for slot := 1; slot <= 3; slot++ {
+		name := "repo/polecat-" + strconv.Itoa(slot)
+		desired["polecat-ci-"+strconv.Itoa(slot)] = TemplateParams{
+			TemplateName: "repo/polecat",
+			InstanceName: name,
+			Alias:        name,
+			Command:      "claude",
+			PoolSlot:     slot,
+		}
+	}
+
+	var stderr bytes.Buffer
+	syncSessionBeads(
+		"",
+		store,
+		desired,
+		sp,
+		configuredSessionNames(cfg, "", store),
+		cfg,
+		clk,
+		&stderr,
+		false,
+	)
+
+	got, err := store.Get(existing.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Metadata["agent_name"] != "repo/polecat-3" {
+		t.Fatalf("agent_name = %q, want repo/polecat-3", got.Metadata["agent_name"])
+	}
+	if got.Metadata["alias"] != "repo/polecat-3" {
+		t.Fatalf("alias = %q, want repo/polecat-3", got.Metadata["alias"])
+	}
+	if got.Metadata["pool_slot"] != "3" {
+		t.Fatalf("pool_slot = %q, want 3", got.Metadata["pool_slot"])
 	}
 }
 

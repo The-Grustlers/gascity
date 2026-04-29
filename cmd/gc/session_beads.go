@@ -948,6 +948,7 @@ func syncSessionBeadsWithSnapshotAndRigStores(
 			agentName != tp.TemplateName &&
 			(existingAgentName == tp.TemplateName || existingAgentName == targetBasename(tp.TemplateName))
 		legacyNeedsConcreteIdentity := existingAgentName == "" || legacyTemplateIdentity
+		managedPoolAgentNameDrift := isManagedPool && agentName != "" && existingAgentName != agentName
 		if tp.WorkDir != "" {
 			switch {
 			case b.Metadata["work_dir"] == "":
@@ -960,7 +961,7 @@ func syncSessionBeadsWithSnapshotAndRigStores(
 				queueMeta("work_dir", tp.WorkDir)
 			}
 		}
-		if legacyNeedsConcreteIdentity && agentName != "" {
+		if (legacyNeedsConcreteIdentity || managedPoolAgentNameDrift) && agentName != "" {
 			queueMeta("agent_name", agentName)
 		}
 		if b.Metadata["dependency_only"] != boolMetadata(tp.DependencyOnly) {
