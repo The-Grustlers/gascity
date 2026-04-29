@@ -117,13 +117,29 @@ func computePoolDesiredStates(
 
 		// Resume tier: actionable assigned work beads whose assignee resolves
 		// to a non-closed session bead. These sessions must stay alive.
+		// New tier (FIX E): work beads that are routed via metadata
+		// gc.routed_to=<this-template> but have no Assignee. Cross-rig sling
+		// produces this exact shape — without the new-tier emission below,
+		// the supervisor never spawned pool members for slung work and the
+		// user had to run the auto-dispatch.sh workaround to manually nudge.
 		for _, wb := range assignedWorkBeads {
-			routedTo := wb.Metadata["gc.routed_to"]
+			routedTo := strings.TrimSpace(wb.Metadata["gc.routed_to"])
 			if wb.Status != "in_progress" && wb.Status != "open" {
 				continue
 			}
 			assignee := strings.TrimSpace(wb.Assignee)
 			if assignee == "" {
+				// Routed but unassigned — pool needs a fresh member to claim
+				// it. Emit a "new" tier request and continue (no session bead
+				// to resume yet; the new pool slot will pick the work up).
+				if routedTo == template {
+					resumeRequests = append(resumeRequests, SessionRequest{
+						Template:     template,
+						BeadPriority: beadPriority(wb),
+						Tier:         "new",
+						WorkBeadID:   wb.ID,
+					})
+				}
 				continue
 			}
 			sessionBeadID := assigneeToSessionBeadID[assignee]

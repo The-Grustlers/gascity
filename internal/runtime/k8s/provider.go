@@ -312,16 +312,19 @@ func (p *Provider) Interrupt(name string) error {
 	return nil
 }
 
-// IsRunning reports whether the session has a running pod with a live tmux session.
+// IsRunning reports whether the session has a running pod.
+//
+// LOCAL PATCH (not upstream): originally also exec'd `tmux has-session -t main`
+// inside the pod, but `kubectl exec` is flaky (occasional context deadline /
+// network blips on local k3s) — false negatives caused the reaper to close
+// healthy session beads after only 1 minute (staleCreatingStateTimeout), which
+// in turn made pool members recycle every ~10 minutes mid-task and lose work.
+// We trust pod=Running as evidence the session is alive; if claude has
+// crashed inside the pod, the next reconciler tick or the agent's own bead
+// updates will catch it. See ADR-012 + .gc/handoffs/architecture-decisions.md
 func (p *Provider) IsRunning(name string) bool {
 	ctx := context.Background()
-	podName, err := p.findRunningPod(ctx, name)
-	if err != nil {
-		return false
-	}
-	// Pod Running + tmux session alive.
-	_, err = p.ops.execInPod(ctx, podName, "agent",
-		[]string{"tmux", "has-session", "-t", tmuxSession}, nil)
+	_, err := p.findRunningPod(ctx, name)
 	return err == nil
 }
 

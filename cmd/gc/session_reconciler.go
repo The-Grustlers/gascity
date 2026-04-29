@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +29,21 @@ import (
 )
 
 const maxIdleSleepProbesPerTick = 3
+
+// Orphan auto-close: phantom pool session beads (those that get stuck in
+// "alive runtime + no assigned work" → orphan-drain) accumulate strikes on
+// each reconciler tick they hit the orphan branch. After orphanStrikeCloseAt
+// strikes, the reconciler force-closes the bead AND kills the runtime,
+// short-circuiting the slow drain timeout that otherwise loops the
+// "Draining session X: orphaned" message every ~5 min.
+//
+// 2 strikes (≈ 30s with the default reconciler tick) gives one tick of
+// grace in case orphan was a transient mis-detection (e.g., assigned work
+// bead briefly invisible due to a store query partial).
+const (
+	orphanStrikeKey     = "orphan_strikes"
+	orphanStrikeCloseAt = 2
+)
 
 type wakeTarget struct {
 	session *beads.Bead
@@ -463,6 +479,41 @@ func reconcileSessionBeadsTraced(
 					if configuredNames[name] {
 						reason = "suspended"
 					}
+					// Orphan-strike auto-close: a phantom pool session bead
+					// (no assigned work, alive runtime) gets a strike on each
+					// tick it appears in this branch. After orphanStrikeCloseAt
+					// strikes, force-close the bead AND kill the runtime —
+					// rather than waiting out the full drain timeout, which
+					// otherwise causes the visible "Draining session 'X':
+					// orphaned" cycle every 5 min that the user sees.
+					// Suspended sessions (still configured but not runnable)
+					// continue through normal drain; only orphans get
+					// strike-forced.
+					if reason == "orphaned" {
+						strikes, _ := strconv.Atoi(session.Metadata[orphanStrikeKey])
+						strikes++
+						if strikes >= orphanStrikeCloseAt {
+							template := normalizedSessionTemplate(*session, cfg)
+							if template == "" {
+								template = session.Metadata["template"]
+							}
+							if trace != nil {
+								trace.recordDecision("reconciler.session.orphan_force_close", template, name, reason, "force_close", traceRecordPayload{
+									"strikes": strikes,
+								}, nil, "")
+							}
+							if err := workerKillSessionTargetWithConfig("", store, sp, cfg, name); err != nil {
+								fmt.Fprintf(stderr, "session reconciler: force-killing orphan %s: %v\n", name, err) //nolint:errcheck
+							}
+							if !storeQueryPartial {
+								closeSessionBeadIfUnassigned(store, rigStores, *session, reason+"-stuck", clk.Now().UTC(), stderr)
+							}
+							fmt.Fprintf(stdout, "Force-closed orphan session '%s' after %d strikes\n", name, strikes) //nolint:errcheck
+							continue
+						}
+						_ = store.SetMetadata(session.ID, orphanStrikeKey, strconv.Itoa(strikes))
+						session.Metadata[orphanStrikeKey] = strconv.Itoa(strikes)
+					}
 					if beginSessionDrain(*session, sp, dt, reason, clk, defaultDrainTimeout) {
 						if trace != nil {
 							template := normalizedSessionTemplate(*session, cfg)
@@ -683,9 +734,19 @@ func reconcileSessionBeadsTraced(
 				// resolveSessionCommand. Clearing last_woke_at masks the
 				// intentional death from crash and churn trackers (both
 				// check last_woke_at first).
-				newSessionKey, hasCapability := freshRestartSessionKey(tp, session.Metadata)
+				// Preserve session_key when wake_mode=resume and the prior
+				// .jsonl still exists. RestartRequestPatch otherwise generates
+				// a fresh UUID, orphaning the on-disk conversation. The user
+				// may have triggered restart-requested for legitimate reasons
+				// (config update, runtime hang) but for resume-style sessions
+				// they expect to come back to the same conversation.
+				preserveKey := shouldPreserveConversationKey(session.Metadata)
+				newSessionKey, hasCapability := "", false
+				if !preserveKey {
+					newSessionKey, hasCapability = freshRestartSessionKey(tp, session.Metadata)
+				}
 				batch := sessionpkg.RestartRequestPatch(newSessionKey)
-				if hasCapability && newSessionKey == "" {
+				if !preserveKey && hasCapability && newSessionKey == "" {
 					batch["session_key"] = ""
 				}
 				_ = store.SetMetadataBatch(session.ID, batch)
@@ -1405,9 +1466,20 @@ func resetConfiguredNamedSessionForConfigDrift(
 			fmt.Fprintf(stderr, "session reconciler: stopping config-drift named session %s: %v\n", sessionName, err) //nolint:errcheck
 		}
 	}
+	// Preserve session_key when wake_mode=resume and the prior conversation
+	// .jsonl still exists on disk. ConfigDriftResetPatch otherwise rotates the
+	// key, orphaning the prior conversation file under the old UUID — even
+	// though the on-disk .jsonl is still recoverable. Pass an empty
+	// newSessionKey to preserve the existing one (ConfigDriftResetPatch only
+	// touches session_key when sessionKey != ""). started_config_hash still
+	// gets cleared (via applyFreshWakeConversationReset), but the companion
+	// effectiveFirstStart() patch in session_lifecycle_parallel.go will check
+	// the .jsonl on disk and pick --resume on the next launch.
 	newSessionKey := ""
-	if newKey, err := sessionpkg.GenerateSessionKey(); err == nil {
-		newSessionKey = newKey
+	if !shouldPreserveConversationKey(session.Metadata) {
+		if newKey, err := sessionpkg.GenerateSessionKey(); err == nil {
+			newSessionKey = newKey
+		}
 	}
 	batch := sessionpkg.ConfigDriftResetPatch(sessionpkg.State(nextState), newSessionKey)
 	batch[namedSessionConfigDriftDeferredAtMetadata] = ""
@@ -1642,4 +1714,35 @@ func resolveResumeCommand(command, sessionKey string, rp *config.ResolvedProvide
 	default: // "flag"
 		return command + " " + rp.ResumeFlag + " " + sessionKey
 	}
+}
+
+// shouldPreserveConversationKey returns true when a session_key rotation
+// would orphan a recoverable conversation. Two requirements:
+//   1. wake_mode is NOT "fresh" — i.e., the user expects --resume semantics.
+//      Pool worker templates explicitly opt into fresh-on-wake; their session
+//      beads should rotate normally.
+//   2. The Claude conversation .jsonl exists on disk for the current
+//      session_key under the session's work_dir.
+//
+// Used at all session_key rotation callsites (ConfigDriftReset and
+// RestartRequest paths) to skip the rotation when both conditions hold.
+// Companion to the effectiveFirstStart() launch-time patch — between them,
+// a director-style session never loses its conversation across config
+// drift or operator-requested restart.
+func shouldPreserveConversationKey(meta map[string]string) bool {
+	if meta == nil {
+		return false
+	}
+	if strings.TrimSpace(meta["wake_mode"]) == "fresh" {
+		return false
+	}
+	sk := strings.TrimSpace(meta["session_key"])
+	if sk == "" {
+		return false
+	}
+	workDir := strings.TrimSpace(meta["work_dir"])
+	if workDir == "" {
+		return false
+	}
+	return claudeConversationFileExists(workDir, sk)
 }

@@ -850,14 +850,14 @@ The message will continue to appear in inbox results.`,
 func newMailReplyCmd(stdout, stderr io.Writer) *cobra.Command {
 	var subject string
 	var message string
-	var notify bool
+	notify := true
 	cmd := &cobra.Command{
 		Use:   "reply <id> [-s subject] [-m body]",
 		Short: "Reply to a message",
 		Long: `Reply to a message. The reply is addressed to the original sender.
 
 Inherits the thread ID from the original message for conversation tracking.
-Use --notify to nudge the recipient after replying.
+Replies nudge live session recipients by default; pass --notify=false for quiet inbox-only replies.
 Use -s/--subject for the reply subject and -m/--message for the reply body.`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
@@ -869,8 +869,8 @@ Use -s/--subject for the reply subject and -m/--message for the reply body.`,
 	}
 	cmd.Flags().StringVarP(&subject, "subject", "s", "", "reply subject line")
 	cmd.Flags().StringVarP(&message, "message", "m", "", "reply body text")
-	cmd.Flags().BoolVar(&notify, "notify", false, "nudge the recipient after replying")
-	cmd.Flags().BoolVar(&notify, "nudge", false, "alias for --notify")
+	cmd.Flags().BoolVar(&notify, "notify", true, "nudge the recipient after replying (default: true)")
+	cmd.Flags().BoolVar(&notify, "nudge", true, "alias for --notify")
 	_ = cmd.Flags().MarkHidden("nudge")
 	return cmd
 }
