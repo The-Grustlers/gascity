@@ -3,6 +3,7 @@ package k8s
 import (
 	"encoding/base64"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -30,9 +31,23 @@ func controllerCityPath(cfgEnv map[string]string) string {
 }
 
 func remapControllerPathToPod(val, ctrlCity string) string {
+	return remapHostPathToPod(val, ctrlCity, "", "")
+}
+
+func remapHostPathToPod(val, ctrlCity, hostWorkDir, podWorkDir string) string {
 	val = strings.TrimSpace(val)
 	ctrlCity = strings.TrimSpace(ctrlCity)
-	if val == "" || ctrlCity == "" {
+	hostWorkDir = strings.TrimSpace(hostWorkDir)
+	podWorkDir = strings.TrimSpace(podWorkDir)
+	if val == "" {
+		return val
+	}
+	if hostWorkDir != "" && podWorkDir != "" {
+		if val == hostWorkDir || strings.HasPrefix(val, hostWorkDir+"/") {
+			return podWorkDir + val[len(hostWorkDir):]
+		}
+	}
+	if ctrlCity == "" {
 		return val
 	}
 	if val == ctrlCity || strings.HasPrefix(val, ctrlCity+"/") {
@@ -43,6 +58,12 @@ func remapControllerPathToPod(val, ctrlCity string) string {
 
 func projectedPodWorkDir(cfg runtime.Config) string {
 	podWorkDir := "/workspace"
+	rigRoot := strings.TrimSpace(cfg.Env["GC_RIG_ROOT"])
+	if rigRoot != "" && cfg.WorkDir != "" {
+		if cfg.WorkDir == rigRoot || strings.Contains(filepath.ToSlash(cfg.WorkDir), "/.gc/worktrees/") {
+			return "/workspace/" + filepath.Base(rigRoot)
+		}
+	}
 	ctrlCity := controllerCityPath(cfg.Env)
 	if ctrlCity != "" && cfg.WorkDir != "" && cfg.WorkDir != ctrlCity {
 		if rel, ok := strings.CutPrefix(cfg.WorkDir, ctrlCity+"/"); ok {
@@ -50,6 +71,10 @@ func projectedPodWorkDir(cfg runtime.Config) string {
 		}
 	}
 	return podWorkDir
+}
+
+func projectedHostWorkDir(cfgEnv map[string]string) string {
+	return strings.TrimSpace(cfgEnv["GC_DIR"])
 }
 
 func projectedPodStoreRoot(cfg runtime.Config, podWorkDir string) string {
@@ -244,6 +269,36 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 		})
 	}
 
+	if p.prebaked && p.hostPathRig && cfg.WorkDir != "" && filepath.IsAbs(cfg.WorkDir) {
+		hostPathType := corev1.HostPathDirectoryOrCreate
+		mainVolMounts = append(mainVolMounts, corev1.VolumeMount{
+			Name: "rig-workdir", MountPath: podWorkDir,
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: "rig-workdir",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: cfg.WorkDir,
+					Type: &hostPathType,
+				},
+			},
+		})
+		if rigRoot := strings.TrimSpace(cfg.Env["GC_RIG_ROOT"]); rigRoot != "" && filepath.IsAbs(rigRoot) {
+			mainVolMounts = append(mainVolMounts, corev1.VolumeMount{
+				Name: "rig-beads", MountPath: filepath.ToSlash(filepath.Join(podWorkDir, ".beads")),
+			})
+			volumes = append(volumes, corev1.Volume{
+				Name: "rig-beads",
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: filepath.Join(rigRoot, ".beads"),
+						Type: &hostPathType,
+					},
+				},
+			})
+		}
+	}
+
 	// Resources.
 	resources, err := buildResources(p)
 	if err != nil {
@@ -339,6 +394,7 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir, managedServiceHost, manag
 	}
 
 	ctrlCity := controllerCityPath(cfgEnv)
+	hostWorkDir := projectedHostWorkDir(cfgEnv)
 
 	var env []corev1.EnvVar
 	for k, v := range cfgEnv {
@@ -353,7 +409,16 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir, managedServiceHost, manag
 		case "GC_DIR":
 			val = podWorkDir
 		case "GC_STORE_ROOT", "GC_RIG_ROOT", "BEADS_DIR", "GT_ROOT", "GC_CITY_RUNTIME_DIR", "GC_PACK_STATE_DIR", "GC_PACK_DIR":
-			val = remapControllerPathToPod(val, ctrlCity)
+			if hostWorkDir != "" && cfgEnv["GC_RIG_ROOT"] != "" && hostWorkDir != cfgEnv["GC_RIG_ROOT"] {
+				rigRoot := strings.TrimSpace(cfgEnv["GC_RIG_ROOT"])
+				if val == rigRoot || strings.HasPrefix(val, rigRoot+"/") {
+					val = podWorkDir + val[len(rigRoot):]
+				} else {
+					val = remapHostPathToPod(val, ctrlCity, hostWorkDir, podWorkDir)
+				}
+			} else {
+				val = remapHostPathToPod(val, ctrlCity, hostWorkDir, podWorkDir)
+			}
 		}
 		env = append(env, corev1.EnvVar{Name: k, Value: val})
 	}

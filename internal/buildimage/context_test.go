@@ -124,14 +124,15 @@ name = "test-city"
 		t.Fatalf("AssembleContext: %v", err)
 	}
 
-	// All .gc/ subdirs are now excluded.
-	assertFileNotExists(t, outputDir, filepath.Join("workspace", citylayout.SystemPacksRoot, "bd", "pack.toml"))
-	assertFileNotExists(t, outputDir, filepath.Join("workspace", citylayout.CachePacksRoot, "remote", ".git", "HEAD"))
+	// Runtime state is excluded, while non-runtime .gc content needed by
+	// prebaked cities is preserved.
+	assertFileExists(t, outputDir, filepath.Join("workspace", citylayout.SystemPacksRoot, "bd", "pack.toml"))
+	assertFileExists(t, outputDir, filepath.Join("workspace", citylayout.CachePacksRoot, "remote", ".git", "HEAD"))
 	assertFileNotExists(t, outputDir, filepath.Join("workspace", citylayout.RuntimeRoot, "runtime", "artifact.txt"))
-	assertFileNotExists(t, outputDir, filepath.Join("workspace", ".gc", "prompts", "mayor.md"))
-	assertFileNotExists(t, outputDir, filepath.Join("workspace", ".gc", "formulas", "legacy.formula.toml"))
-	assertFileNotExists(t, outputDir, filepath.Join("workspace", ".gc", "scripts", "setup.sh"))
-	assertFileNotExists(t, outputDir, filepath.Join("workspace", ".gc", "settings.json"))
+	assertFileExists(t, outputDir, filepath.Join("workspace", ".gc", "prompts", "mayor.md"))
+	assertFileExists(t, outputDir, filepath.Join("workspace", ".gc", "formulas", "legacy.formula.toml"))
+	assertFileExists(t, outputDir, filepath.Join("workspace", ".gc", "scripts", "setup.sh"))
+	assertFileExists(t, outputDir, filepath.Join("workspace", ".gc", "settings.json"))
 }
 
 func TestAssembleContextWithRigPaths(t *testing.T) {
@@ -214,13 +215,14 @@ func TestExcludedPath(t *testing.T) {
 		{".gc/controller.sock", true},
 		{".gc/events.jsonl", true},
 		{".gc/agents/mayor.json", true},
-		{".gc/system/packs/bd/pack.toml", true},
-		{".gc/cache/packs/remote/.git/HEAD", true},
+		{".gc/system/packs/bd/pack.toml", false},
+		{".gc/cache/packs/remote/.git/HEAD", false},
 		{".gc/runtime/worktrees/agent/file.txt", true},
-		{".gc/prompts/mayor.md", true},
-		{".gc/formulas/test.toml", true},
-		{".gc/scripts/setup.sh", true},
-		{".gc/settings.json", true},
+		{".gc/prompts/mayor.md", false},
+		{".gc/formulas/test.toml", false},
+		{".gc/scripts/setup.sh", false},
+		{".gc/settings.json", false},
+		{".beads/issues.jsonl", true},
 		{".env", true},
 		{"credentials.json", true},
 		{"path/to/secret.key", true},

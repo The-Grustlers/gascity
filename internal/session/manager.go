@@ -361,7 +361,7 @@ func (m *Manager) createAliasedNamedWithTransport(ctx context.Context, alias, ex
 		// Create the bead first to get the ID.
 		meta := map[string]string{
 			"template":           template,
-			"state":              string(StateActive),
+			"state":              string(StateCreating),
 			"provider":           provider,
 			"work_dir":           workDir,
 			"command":            command,
@@ -375,7 +375,7 @@ func (m *Manager) createAliasedNamedWithTransport(ctx context.Context, alias, ex
 		// provider_kind may be injected via extraMeta when the caller has
 		// resolved the canonical builtin kind for a custom provider alias.
 		if alias != "" {
-			meta["alias"] = alias
+			meta["pending_alias"] = alias
 		}
 		if normalizedTransport := normalizeTransport(provider, transport); normalizedTransport != "" {
 			meta["transport"] = normalizedTransport
@@ -480,6 +480,9 @@ func (m *Manager) createAliasedNamedWithTransport(ctx context.Context, alias, ex
 		// Start the runtime session.
 		if err := m.sp.Start(ctx, sessName, cfg); err != nil {
 			if runtimeSessionMatchesBead(m.sp, sessName, b.ID, meta["instance_token"]) {
+				if err := m.publishStartedSessionMetadata(b.ID, &b, alias); err != nil {
+					return err
+				}
 				info = m.infoFromBead(b)
 				return nil
 			}
@@ -495,6 +498,13 @@ func (m *Manager) createAliasedNamedWithTransport(ctx context.Context, alias, ex
 			return fmt.Errorf("starting session: %w", err)
 		}
 
+		if err := m.publishStartedSessionMetadata(b.ID, &b, alias); err != nil {
+			_ = m.sp.Stop(sessName)
+			if rbErr := rollbackFailedCreate(); rbErr != nil {
+				return errors.Join(fmt.Errorf("publishing session metadata: %w", err), rbErr)
+			}
+			return fmt.Errorf("publishing session metadata: %w", err)
+		}
 		info = m.infoFromBead(b)
 		return nil
 	})
@@ -502,6 +512,27 @@ func (m *Manager) createAliasedNamedWithTransport(ctx context.Context, alias, ex
 		return Info{}, err
 	}
 	return info, nil
+}
+
+func (m *Manager) publishStartedSessionMetadata(id string, b *beads.Bead, alias string) error {
+	if b.Metadata == nil {
+		b.Metadata = make(map[string]string)
+	}
+	if alias != "" {
+		if err := m.store.SetMetadata(id, "alias", alias); err != nil {
+			return fmt.Errorf("publishing alias: %w", err)
+		}
+		b.Metadata["alias"] = alias
+		if err := m.store.SetMetadata(id, "pending_alias", ""); err != nil {
+			return fmt.Errorf("clearing pending alias: %w", err)
+		}
+		delete(b.Metadata, "pending_alias")
+	}
+	if err := m.store.SetMetadata(id, "state", string(StateActive)); err != nil {
+		return fmt.Errorf("publishing active state: %w", err)
+	}
+	b.Metadata["state"] = string(StateActive)
+	return nil
 }
 
 // CreateNamedWithTransport creates a new chat session bead with an optional

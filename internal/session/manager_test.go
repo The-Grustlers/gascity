@@ -21,6 +21,11 @@ type startOverrideProvider struct {
 	startErr error
 }
 
+type observingStartProvider struct {
+	*runtime.Fake
+	onStart func()
+}
+
 type noImmediateProvider struct {
 	runtime.Provider
 }
@@ -28,6 +33,13 @@ type noImmediateProvider struct {
 func (p *startOverrideProvider) Start(ctx context.Context, name string, cfg runtime.Config) error {
 	if p.startErr != nil {
 		return p.startErr
+	}
+	return p.Fake.Start(ctx, name, cfg)
+}
+
+func (p *observingStartProvider) Start(ctx context.Context, name string, cfg runtime.Config) error {
+	if p.onStart != nil {
+		p.onStart()
 	}
 	return p.Fake.Start(ctx, name, cfg)
 }
@@ -720,6 +732,63 @@ func TestClose_ConfiguredNamedSessionRetiresIdentifiers(t *testing.T) {
 	}
 	if got := b.Metadata["alias_history"]; got != "mayor" {
 		t.Fatalf("alias_history = %q, want mayor", got)
+	}
+}
+
+func TestCreatePublishesAliasOnlyAfterProviderStartSucceeds(t *testing.T) {
+	store := beads.NewMemStore()
+	sp := &observingStartProvider{Fake: runtime.NewFake()}
+	mgr := NewManager(store, sp)
+
+	sp.onStart = func() {
+		all, err := store.List(beads.ListQuery{Label: LabelSession})
+		if err != nil {
+			t.Fatalf("listing sessions during start: %v", err)
+		}
+		if len(all) != 1 {
+			t.Fatalf("sessions during start = %d, want 1", len(all))
+		}
+		if got := all[0].Metadata["alias"]; got != "" {
+			t.Fatalf("alias was published before runtime readiness: %q", got)
+		}
+		if got := all[0].Metadata["pending_alias"]; got != "worker-1" {
+			t.Fatalf("pending_alias during start = %q, want worker-1", got)
+		}
+		if got := all[0].Metadata["state"]; got != string(StateCreating) {
+			t.Fatalf("state during start = %q, want creating", got)
+		}
+	}
+
+	info, err := mgr.CreateAliasedNamedWithTransport(
+		context.Background(),
+		"worker-1",
+		"test-city--worker-1",
+		"worker",
+		"Worker",
+		"claude",
+		"/tmp",
+		"claude",
+		"",
+		nil,
+		ProviderResume{},
+		runtime.Config{},
+	)
+	if err != nil {
+		t.Fatalf("CreateAliasedNamedWithTransport: %v", err)
+	}
+
+	b, err := store.Get(info.ID)
+	if err != nil {
+		t.Fatalf("store.Get: %v", err)
+	}
+	if got := b.Metadata["alias"]; got != "worker-1" {
+		t.Fatalf("alias after start = %q, want worker-1", got)
+	}
+	if got := b.Metadata["pending_alias"]; got != "" {
+		t.Fatalf("pending_alias after start = %q, want empty", got)
+	}
+	if got := b.Metadata["state"]; got != string(StateActive) {
+		t.Fatalf("state after start = %q, want active", got)
 	}
 }
 

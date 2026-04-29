@@ -329,7 +329,7 @@ func TestProjectLifecycleRuntimeLivenessProjection(t *testing.T) {
 			wantReconciledState: StateAwake,
 		},
 		{
-			name: "dead active runtime heals to asleep and resets stale resume identity",
+			name: "dead active runtime heals to asleep and preserves unexpected-death resume identity",
 			input: LifecycleInput{
 				Status: "open",
 				Metadata: map[string]string{
@@ -343,7 +343,7 @@ func TestProjectLifecycleRuntimeLivenessProjection(t *testing.T) {
 			},
 			wantRuntime:         RuntimeProjectionMissing,
 			wantReconciledState: StateAsleep,
-			wantReset:           true,
+			wantReset:           false,
 		},
 		{
 			name: "fresh creating state stays creating after restart",
@@ -362,7 +362,7 @@ func TestProjectLifecycleRuntimeLivenessProjection(t *testing.T) {
 			wantReconciledState: StateCreating,
 		},
 		{
-			name: "stale creating state heals to asleep and resets stale resume identity",
+			name: "stale creating state heals to asleep and preserves unexpected-death resume identity",
 			input: LifecycleInput{
 				Status: "open",
 				Metadata: map[string]string{
@@ -377,7 +377,7 @@ func TestProjectLifecycleRuntimeLivenessProjection(t *testing.T) {
 			},
 			wantRuntime:         RuntimeProjectionStaleCreating,
 			wantReconciledState: StateAsleep,
-			wantReset:           true,
+			wantReset:           false,
 		},
 		{
 			name: "pending create claim keeps stale creating state in creating",

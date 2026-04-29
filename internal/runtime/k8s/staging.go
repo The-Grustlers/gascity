@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/gastownhall/gascity/internal/runtime"
@@ -23,12 +22,7 @@ func stageFiles(ctx context.Context, ops k8sOps, podName string, cfg runtime.Con
 	}
 
 	// Copy rig work_dir into the pod.
-	podWorkDir := "/workspace"
-	if ctrlCity != "" && cfg.WorkDir != "" && cfg.WorkDir != ctrlCity {
-		if rel, ok := strings.CutPrefix(cfg.WorkDir, ctrlCity+"/"); ok {
-			podWorkDir = "/workspace/" + rel
-		}
-	}
+	podWorkDir := projectedPodWorkDir(cfg)
 	if cfg.WorkDir != "" && cfg.WorkDir != ctrlCity {
 		if err := copyDirToPod(ctx, ops, podName, "stage", cfg.WorkDir, podWorkDir); err != nil {
 			fmt.Fprintf(warn, "gc: warning: staging workdir %s to %s: %v\n", cfg.WorkDir, podWorkDir, err) //nolint:errcheck

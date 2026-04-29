@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -39,6 +40,7 @@ type Provider struct {
 	memLimit           string
 	serviceAccount     string        // pod service account name (GC_K8S_SERVICE_ACCOUNT)
 	prebaked           bool          // skip staging + init container for prebaked images
+	hostPathRig        bool          // mount host-prepared work_dir into prebaked pods
 	postStartSettle    time.Duration // settle time before post-start liveness check
 	stderr             io.Writer     // warning output (default os.Stderr)
 }
@@ -96,6 +98,7 @@ func NewProvider() (*Provider, error) {
 		memLimit:           envOrDefault("GC_K8S_MEM_LIMIT", "4Gi"),
 		serviceAccount:     os.Getenv("GC_K8S_SERVICE_ACCOUNT"),
 		prebaked:           os.Getenv("GC_K8S_PREBAKED") == "true",
+		hostPathRig:        os.Getenv("GC_K8S_HOSTPATH_RIG") == "true",
 		postStartSettle:    3 * time.Second,
 		stderr:             os.Stderr,
 	}, nil
@@ -124,6 +127,10 @@ func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) e
 	}
 	podName := SanitizeName(name)
 	label := SanitizeLabel(name)
+
+	if err := prepareHostWorkDir(cfg); err != nil {
+		return fmt.Errorf("preparing host workdir for session %q: %w", name, err)
+	}
 
 	// Check for existing pod (any phase).
 	existing, err := p.ops.listPods(ctx, "gc-session="+label, "")
@@ -212,6 +219,15 @@ func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) e
 	if err := waitForTmux(ctx, p.ops, podName, 60*time.Second); err != nil {
 		cleanup("tmux not ready")
 		return fmt.Errorf("waiting for tmux in pod %q: %w", podName, err)
+	}
+	for key, value := range cfg.Env {
+		if key == "" || value == "" {
+			continue
+		}
+		if strings.HasPrefix(key, "GC_") || key == "BEADS_DIR" {
+			_, _ = p.ops.execInPod(ctx, podName, "agent",
+				[]string{"tmux", "set-environment", "-t", tmuxSession, key, value}, nil)
+		}
 	}
 
 	// Enable pane logging for diagnostics.
@@ -503,6 +519,9 @@ func (p *Provider) ListRunning(prefix string) ([]string, error) {
 			continue
 		}
 		if prefix == "" || strings.HasPrefix(name, prefix) {
+			if !p.podRuntimeReady(ctx, pod.Name) {
+				continue
+			}
 			names = append(names, name)
 		}
 	}
@@ -585,7 +604,12 @@ func (p *Provider) findRunningPod(ctx context.Context, name string) (string, err
 	if len(pods) == 0 {
 		return "", fmt.Errorf("no running pod for session %q", name)
 	}
-	return pods[0].Name, nil
+	for i := range pods {
+		if p.podRuntimeReady(ctx, pods[i].Name) {
+			return pods[i].Name, nil
+		}
+	}
+	return "", fmt.Errorf("no ready pod for session %q", name)
 }
 
 // findPod finds a pod by session label (any phase).
@@ -599,6 +623,120 @@ func (p *Provider) findPod(ctx context.Context, name string) (string, error) {
 		return "", fmt.Errorf("no pod for session %q", name)
 	}
 	return pods[0].Name, nil
+}
+
+func (p *Provider) podRuntimeReady(ctx context.Context, podName string) bool {
+	_, err := p.ops.execInPod(ctx, podName, "agent",
+		[]string{"tmux", "has-session", "-t", tmuxSession}, nil)
+	return err == nil
+}
+
+func prepareHostWorkDir(cfg runtime.Config) error {
+	workDir := strings.TrimSpace(cfg.WorkDir)
+	rigRoot := strings.TrimSpace(cfg.Env["GC_RIG_ROOT"])
+	if workDir == "" || rigRoot == "" || workDir == rigRoot {
+		return nil
+	}
+	if !strings.Contains(filepath.ToSlash(workDir), "/.gc/worktrees/") {
+		return nil
+	}
+	if !pathExists(filepath.Join(rigRoot, ".git")) {
+		return nil
+	}
+	if pathExists(filepath.Join(workDir, ".git")) {
+		return ensureBeadsRedirect(workDir, rigRoot)
+	}
+
+	if entries, err := os.ReadDir(workDir); err == nil && len(entries) > 0 {
+		return fmt.Errorf("%s exists but is not a git worktree", workDir)
+	}
+	if err := os.MkdirAll(filepath.Dir(workDir), 0o755); err != nil {
+		return err
+	}
+	_ = exec.Command("git", "-C", rigRoot, "worktree", "prune").Run()
+
+	agentName := strings.TrimSpace(cfg.Env["GC_ALIAS"])
+	if agentName == "" {
+		agentName = strings.TrimSpace(cfg.Env["GC_AGENT"])
+	}
+	if agentName == "" {
+		agentName = filepath.Base(workDir)
+	}
+	branch, err := worktreeBranchName(rigRoot, workDir, agentName)
+	if err != nil {
+		return err
+	}
+
+	args := []string{"-C", rigRoot, "worktree", "add"}
+	if branchExists(rigRoot, branch) {
+		args = append(args, workDir, branch)
+	} else {
+		args = append(args, workDir, "-b", branch)
+	}
+	cmd := exec.Command("git", args...)
+	cmd.Env = append(os.Environ(), "GIT_LFS_SKIP_SMUDGE=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git worktree add: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return ensureBeadsRedirect(workDir, rigRoot)
+}
+
+func pathExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func worktreeBranchName(rigRoot, workDir, agentName string) (string, error) {
+	cmd := exec.Command("git", "-C", rigRoot, "hash-object", "--stdin")
+	cmd.Stdin = strings.NewReader(workDir)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("hashing worktree path: %w", err)
+	}
+	hash := strings.TrimSpace(string(out))
+	if len(hash) > 12 {
+		hash = hash[:12]
+	}
+	return "gc-" + sanitizeBranchComponent(agentName) + "-" + hash, nil
+}
+
+func sanitizeBranchComponent(s string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "agent"
+	}
+	return out
+}
+
+func branchExists(rigRoot, branch string) bool {
+	cmd := exec.Command("git", "-C", rigRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	return cmd.Run() == nil
+}
+
+func ensureBeadsRedirect(workDir, rigRoot string) error {
+	beadsDir := filepath.Join(workDir, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+		return err
+	}
+	redirect := filepath.Join(beadsDir, "redirect")
+	want := filepath.Join(rigRoot, ".beads") + "\n"
+	if data, err := os.ReadFile(redirect); err == nil && string(data) == want {
+		return nil
+	}
+	return os.WriteFile(redirect, []byte(want), 0o644)
 }
 
 // waitForDeletion waits for a pod to be deleted.

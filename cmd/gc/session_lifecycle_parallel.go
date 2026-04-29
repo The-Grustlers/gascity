@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -507,9 +508,9 @@ func buildPreparedStart(
 	coreHash := runtime.CoreFingerprint(agentCfg)
 	coreBreakdown := runtime.CoreFingerprintBreakdown(agentCfg)
 	liveHash := runtime.LiveFingerprint(agentCfg)
-	if wd := resolveTaskWorkDir(store, session.ID, candidate.name(), strings.TrimSpace(session.Metadata["alias"]), candidate.logicalTemplate(cfg)); wd != "" {
+	if wd := resolveTaskWorkDir(store, session.ID, candidate.name(), strings.TrimSpace(session.Metadata["alias"]), candidate.logicalTemplate(cfg)); wd != "" && shouldApplyTaskWorkDir(agentCfg.WorkDir, wd) {
 		agentCfg.WorkDir = wd
-	} else if wd := session.Metadata["work_dir"]; wd != "" {
+	} else if wd := session.Metadata["work_dir"]; wd != "" && shouldApplyTaskWorkDir(agentCfg.WorkDir, wd) {
 		agentCfg.WorkDir = wd
 	}
 	if session.Metadata["session_key"] == "" && tp.ResolvedProvider != nil && tp.ResolvedProvider.SessionIDFlag != "" {
@@ -624,6 +625,21 @@ func buildPreparedStart(
 		coreBreakdown: coreBreakdown,
 		liveHash:      liveHash,
 	}, nil
+}
+
+func shouldApplyTaskWorkDir(configuredWorkDir, taskWorkDir string) bool {
+	if !isManagedWorktreeDir(configuredWorkDir) {
+		return true
+	}
+	return isManagedWorktreeDir(taskWorkDir)
+}
+
+func isManagedWorktreeDir(dir string) bool {
+	if strings.TrimSpace(dir) == "" {
+		return false
+	}
+	clean := filepath.ToSlash(filepath.Clean(dir))
+	return strings.Contains(clean, "/.gc/worktrees/") || strings.HasPrefix(clean, ".gc/worktrees/")
 }
 
 func executePreparedStartWave(

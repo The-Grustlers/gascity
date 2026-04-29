@@ -5,6 +5,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -164,6 +167,24 @@ func TestListRunning(t *testing.T) {
 	}
 	if len(names) != 3 {
 		t.Errorf("expected 3 running, got %d", len(names))
+	}
+}
+
+func TestListRunningSkipsPodsWithoutReadyTmux(t *testing.T) {
+	fake := newFakeK8sOps()
+	p := newProviderWithOps(fake)
+
+	addRunningPodWithAnnotation(fake, "gc-test-ready", "gc-test-ready", "gc-test-ready")
+	addRunningPodWithAnnotation(fake, "gc-test-starting", "gc-test-starting", "gc-test-starting")
+	fake.setExecResult("gc-test-starting", []string{"tmux", "has-session", "-t", "main"}, "",
+		fmt.Errorf("no session: main"))
+
+	names, err := p.ListRunning("gc-test-")
+	if err != nil {
+		t.Fatalf("ListRunning: %v", err)
+	}
+	if len(names) != 1 || names[0] != "gc-test-ready" {
+		t.Fatalf("ListRunning = %v, want only ready pod", names)
 	}
 }
 
@@ -433,8 +454,9 @@ func TestStartCreatesPodsAndWaits(t *testing.T) {
 	cfg := runtime.Config{
 		Command: "claude --settings .gc/settings.json",
 		Env: map[string]string{
-			"GC_AGENT": "mayor",
-			"GC_CITY":  "/workspace",
+			"GC_AGENT":      "mayor",
+			"GC_CITY":       "/workspace",
+			"GC_SESSION_ID": "gc-123",
 		},
 	}
 	err := p.Start(context.Background(), "gc-test-agent", cfg)
@@ -457,6 +479,17 @@ func TestStartCreatesPodsAndWaits(t *testing.T) {
 	}
 	if pod.Annotations["gc-session-name"] != "gc-test-agent" {
 		t.Errorf("annotation gc-session-name = %q, want gc-test-agent", pod.Annotations["gc-session-name"])
+	}
+	var sawSessionEnv bool
+	for _, c := range fake.calls {
+		if c.method == "execInPod" && len(c.cmd) == 6 &&
+			c.cmd[0] == "tmux" && c.cmd[1] == "set-environment" &&
+			c.cmd[4] == "GC_SESSION_ID" && c.cmd[5] == "gc-123" {
+			sawSessionEnv = true
+		}
+	}
+	if !sawSessionEnv {
+		t.Fatalf("Start did not stamp GC_SESSION_ID into tmux environment: calls=%+v", fake.calls)
 	}
 }
 
@@ -655,6 +688,141 @@ func TestPodManifestCompatibility(t *testing.T) {
 	if pod.Spec.Containers[0].WorkingDir != "/workspace/demo-rig" {
 		t.Errorf("workingDir = %q, want /workspace/demo-rig",
 			pod.Spec.Containers[0].WorkingDir)
+	}
+}
+
+func TestProjectedPodWorkDirMapsHostRigOutsideCityToStableWorkspacePath(t *testing.T) {
+	cfg := runtime.Config{
+		WorkDir: "/home/me/projects/grustle-monorepo",
+		Env: map[string]string{
+			"GC_CITY":     "/home/me/projects/grustle-monorepo/grustle-city",
+			"GC_RIG_ROOT": "/home/me/projects/grustle-monorepo",
+			"GC_DIR":      "/home/me/projects/grustle-monorepo",
+		},
+	}
+
+	if got := projectedPodWorkDir(cfg); got != "/workspace/grustle-monorepo" {
+		t.Fatalf("projectedPodWorkDir = %q, want /workspace/grustle-monorepo", got)
+	}
+}
+
+func TestBuildPodEnvMapsHostPreparedWorktreeToPodRigRoot(t *testing.T) {
+	cfgEnv := map[string]string{
+		"GC_CITY":       "/host/city",
+		"GC_DIR":        "/host/city/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1",
+		"GC_RIG_ROOT":   "/home/me/projects/grustle-monorepo",
+		"GC_STORE_ROOT": "/home/me/projects/grustle-monorepo",
+		"BEADS_DIR":     "/home/me/projects/grustle-monorepo/.beads",
+	}
+
+	env := mustBuildPodEnv(t, cfgEnv, "/workspace/grustle-monorepo", podManagedDoltHost, podManagedDoltPort)
+	envMap := map[string]string{}
+	for _, e := range env {
+		envMap[e.Name] = e.Value
+	}
+
+	if envMap["GC_DIR"] != "/workspace/grustle-monorepo" {
+		t.Fatalf("GC_DIR = %q, want /workspace/grustle-monorepo", envMap["GC_DIR"])
+	}
+	if envMap["GC_RIG_ROOT"] != "/workspace/grustle-monorepo" {
+		t.Fatalf("GC_RIG_ROOT = %q, want /workspace/grustle-monorepo", envMap["GC_RIG_ROOT"])
+	}
+	if envMap["GC_STORE_ROOT"] != "/workspace/grustle-monorepo" {
+		t.Fatalf("GC_STORE_ROOT = %q, want /workspace/grustle-monorepo", envMap["GC_STORE_ROOT"])
+	}
+	if envMap["BEADS_DIR"] != "/workspace/grustle-monorepo/.beads" {
+		t.Fatalf("BEADS_DIR = %q, want /workspace/grustle-monorepo/.beads", envMap["BEADS_DIR"])
+	}
+}
+
+func TestBuildPodPrebakedHostPathMountsPreparedWorktree(t *testing.T) {
+	p := newProviderWithOps(newFakeK8sOps())
+	p.prebaked = true
+	p.hostPathRig = true
+
+	cfg := runtime.Config{
+		Command: "claude",
+		WorkDir: "/host/city/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1",
+		Env: map[string]string{
+			"GC_CITY":       "/host/city",
+			"GC_DIR":        "/host/city/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1",
+			"GC_RIG_ROOT":   "/home/me/projects/grustle-monorepo",
+			"GC_STORE_ROOT": "/home/me/projects/grustle-monorepo",
+			"BEADS_DIR":     "/home/me/projects/grustle-monorepo/.beads",
+		},
+	}
+
+	pod, err := buildPod("gc-test-worker", cfg, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pod.Spec.Containers[0].WorkingDir != "/workspace/grustle-monorepo" {
+		t.Fatalf("workingDir = %q, want /workspace/grustle-monorepo", pod.Spec.Containers[0].WorkingDir)
+	}
+	var foundMount, foundVolume, foundBeadsMount, foundBeadsVolume bool
+	for _, mount := range pod.Spec.Containers[0].VolumeMounts {
+		if mount.Name == "rig-workdir" && mount.MountPath == "/workspace/grustle-monorepo" {
+			foundMount = true
+		}
+		if mount.Name == "rig-beads" && mount.MountPath == "/workspace/grustle-monorepo/.beads" {
+			foundBeadsMount = true
+		}
+	}
+	for _, volume := range pod.Spec.Volumes {
+		if volume.Name == "rig-workdir" && volume.HostPath != nil &&
+			volume.HostPath.Path == cfg.WorkDir {
+			foundVolume = true
+		}
+		if volume.Name == "rig-beads" && volume.HostPath != nil &&
+			volume.HostPath.Path == "/home/me/projects/grustle-monorepo/.beads" {
+			foundBeadsVolume = true
+		}
+	}
+	if !foundMount || !foundVolume || !foundBeadsMount || !foundBeadsVolume {
+		t.Fatalf("hostpath mount not projected correctly: mounts=%+v volumes=%+v",
+			pod.Spec.Containers[0].VolumeMounts, pod.Spec.Volumes)
+	}
+}
+
+func TestPrepareHostWorkDirCreatesGitWorktreeAndBeadsRedirect(t *testing.T) {
+	rigRoot := t.TempDir()
+	gitCmd(t, rigRoot, "init")
+	gitCmd(t, rigRoot, "config", "user.email", "test@example.com")
+	gitCmd(t, rigRoot, "config", "user.name", "Test User")
+	if err := os.WriteFile(filepath.Join(rigRoot, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, rigRoot, "add", "README.md")
+	gitCmd(t, rigRoot, "commit", "-m", "initial")
+	if err := os.MkdirAll(filepath.Join(rigRoot, ".beads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cityRoot := t.TempDir()
+	workDir := filepath.Join(cityRoot, ".gc", "worktrees", "demo", "workers", "worker-1")
+	cfg := runtime.Config{
+		WorkDir: workDir,
+		Env: map[string]string{
+			"GC_RIG_ROOT": rigRoot,
+			"GC_ALIAS":    "demo/worker-1",
+		},
+	}
+
+	if err := prepareHostWorkDir(cfg); err != nil {
+		t.Fatalf("prepareHostWorkDir: %v", err)
+	}
+	if !pathExists(filepath.Join(workDir, ".git")) {
+		t.Fatalf("worktree .git was not created at %s", workDir)
+	}
+	redirect, err := os.ReadFile(filepath.Join(workDir, ".beads", "redirect"))
+	if err != nil {
+		t.Fatalf("reading redirect: %v", err)
+	}
+	if got, want := strings.TrimSpace(string(redirect)), filepath.Join(rigRoot, ".beads"); got != want {
+		t.Fatalf("redirect = %q, want %q", got, want)
+	}
+	if err := prepareHostWorkDir(cfg); err != nil {
+		t.Fatalf("prepareHostWorkDir second run: %v", err)
 	}
 }
 
@@ -1697,6 +1865,16 @@ func containsStr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func gitCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
 }
 
 func TestBuildPodServiceAccount(t *testing.T) {

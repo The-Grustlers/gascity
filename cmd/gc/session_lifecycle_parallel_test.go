@@ -617,6 +617,63 @@ func TestPrepareStartCandidate_UsesSessionIDForTaskWorkDir(t *testing.T) {
 	}
 }
 
+func TestPrepareStartCandidate_PreservesManagedWorktreeOverRigRootTaskWorkDir(t *testing.T) {
+	store := beads.NewMemStore()
+	rigRoot := t.TempDir()
+	managedWorkDir := filepath.Join(t.TempDir(), ".gc", "worktrees", "frontend", "workers", "worker-1")
+	if err := os.MkdirAll(managedWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	session, err := store.Create(beads.Bead{
+		Title:  "worker",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel, "agent:frontend/worker-1"},
+		Metadata: map[string]string{
+			"template":     "worker",
+			"session_name": "custom-worker-1",
+			"pool_slot":    "1",
+			"work_dir":     rigRoot,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := store.Create(beads.Bead{
+		Title: "task",
+		Metadata: map[string]string{
+			"work_dir": rigRoot,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := "in_progress"
+	assignee := session.ID
+	if err := store.Update(task.ID, beads.UpdateOpts{Status: &status, Assignee: &assignee}); err != nil {
+		t.Fatal(err)
+	}
+
+	prepared, err := prepareStartCandidate(startCandidate{
+		session: &session,
+		tp: TemplateParams{
+			TemplateName: "frontend/worker",
+			SessionName:  "custom-worker-1",
+			WorkDir:      managedWorkDir,
+		},
+		order: 0,
+	}, &config.City{
+		Agents: []config.Agent{
+			{Name: "worker", Dir: "frontend", MinActiveSessions: intPtr(1), MaxActiveSessions: intPtr(2)},
+		},
+	}, store, &clock.Fake{Time: time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatalf("prepareStartCandidate: %v", err)
+	}
+	if prepared.cfg.WorkDir != managedWorkDir {
+		t.Fatalf("prepared.cfg.WorkDir = %q, want managed worktree %q", prepared.cfg.WorkDir, managedWorkDir)
+	}
+}
+
 func TestExecutePlannedStarts_FreshWakeAfterDrainRetainsStartupContext(t *testing.T) {
 	skipSlowCmdGCTest(t, "waits through stale session-key detection; run make test-cmd-gc-process for full coverage")
 	sp := runtime.NewFake()

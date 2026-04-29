@@ -66,6 +66,43 @@ func TestSessionProviderContextForCityUsesTargetCityAndEnvOverride(t *testing.T)
 	}
 }
 
+func TestApplyK8sConfigEnvUsesTomlAsDefaults(t *testing.T) {
+	t.Setenv("GC_K8S_IMAGE", "ambient-image")
+	os.Unsetenv("GC_K8S_NAMESPACE")
+	os.Unsetenv("GC_K8S_PREBAKED")
+	os.Unsetenv("GC_K8S_HOSTPATH_RIG")
+
+	restore := applyK8sConfigEnv(config.K8sConfig{
+		Namespace: "gc",
+		Image:     "configured-image",
+		Prebaked:  true,
+	})
+
+	if got := os.Getenv("GC_K8S_IMAGE"); got != "ambient-image" {
+		t.Fatalf("GC_K8S_IMAGE = %q, want ambient override preserved", got)
+	}
+	if got := os.Getenv("GC_K8S_NAMESPACE"); got != "gc" {
+		t.Fatalf("GC_K8S_NAMESPACE = %q, want gc", got)
+	}
+	if got := os.Getenv("GC_K8S_PREBAKED"); got != "true" {
+		t.Fatalf("GC_K8S_PREBAKED = %q, want true", got)
+	}
+	if got := os.Getenv("GC_K8S_HOSTPATH_RIG"); got != "true" {
+		t.Fatalf("GC_K8S_HOSTPATH_RIG = %q, want true", got)
+	}
+
+	restore()
+
+	if got := os.Getenv("GC_K8S_IMAGE"); got != "ambient-image" {
+		t.Fatalf("GC_K8S_IMAGE after restore = %q, want ambient-image", got)
+	}
+	for _, key := range []string{"GC_K8S_NAMESPACE", "GC_K8S_PREBAKED", "GC_K8S_HOSTPATH_RIG"} {
+		if got := os.Getenv(key); got != "" {
+			t.Fatalf("%s after restore = %q, want empty", key, got)
+		}
+	}
+}
+
 func TestRawBeadsProviderNormalizesManagedExecEnv(t *testing.T) {
 	cityPath := t.TempDir()
 	t.Setenv("GC_BEADS", "exec:"+gcBeadsBdScriptPath(cityPath))

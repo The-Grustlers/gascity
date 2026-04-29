@@ -140,11 +140,59 @@ func newSessionProviderByName(name string, sc config.SessionConfig, cityName, ci
 		}
 		return sessionacp.NewProvider(cfg), nil
 	case "k8s":
-		return sessionk8s.NewProvider()
+		return newK8sSessionProvider(sc.K8s)
 	case "hybrid":
 		return newHybridProvider(sc, cityName, cityPath)
 	default:
 		return sessiontmux.NewProviderWithConfig(tmuxConfigFromSession(sc, cityName, cityPath)), nil
+	}
+}
+
+func newK8sSessionProvider(kc config.K8sConfig) (runtime.Provider, error) {
+	restore := applyK8sConfigEnv(kc)
+	defer restore()
+	return sessionk8s.NewProvider()
+}
+
+func applyK8sConfigEnv(kc config.K8sConfig) func() {
+	type entry struct {
+		key     string
+		value   string
+		wasSet  bool
+		old     string
+		enabled bool
+	}
+	boolValue := func(v bool) string {
+		if v {
+			return "true"
+		}
+		return ""
+	}
+	entries := []entry{
+		{key: "GC_K8S_NAMESPACE", value: kc.Namespace, enabled: kc.Namespace != ""},
+		{key: "GC_K8S_IMAGE", value: kc.Image, enabled: kc.Image != ""},
+		{key: "GC_K8S_CONTEXT", value: kc.Context, enabled: kc.Context != ""},
+		{key: "GC_K8S_CPU_REQUEST", value: kc.CPURequest, enabled: kc.CPURequest != ""},
+		{key: "GC_K8S_MEM_REQUEST", value: kc.MemRequest, enabled: kc.MemRequest != ""},
+		{key: "GC_K8S_CPU_LIMIT", value: kc.CPULimit, enabled: kc.CPULimit != ""},
+		{key: "GC_K8S_MEM_LIMIT", value: kc.MemLimit, enabled: kc.MemLimit != ""},
+		{key: "GC_K8S_PREBAKED", value: boolValue(kc.Prebaked), enabled: kc.Prebaked},
+		{key: "GC_K8S_HOSTPATH_RIG", value: boolValue(kc.Prebaked), enabled: kc.Prebaked},
+	}
+	for i := range entries {
+		entries[i].old, entries[i].wasSet = os.LookupEnv(entries[i].key)
+		if entries[i].enabled && !entries[i].wasSet {
+			_ = os.Setenv(entries[i].key, entries[i].value)
+		}
+	}
+	return func() {
+		for _, e := range entries {
+			if e.wasSet {
+				_ = os.Setenv(e.key, e.old)
+			} else if e.enabled {
+				_ = os.Unsetenv(e.key)
+			}
+		}
 	}
 }
 

@@ -34,21 +34,32 @@ type Manifest struct {
 	BaseImage string    `json:"base_image"`
 }
 
-// excludedPaths returns true for paths that should never be baked.
+// excludedPaths returns true for paths that should never be baked, regardless
+// of any user-supplied .dockerignore. These are sane defaults: runtime state,
+// secrets, and the embedded beads database (multi-GB; pods access via the
+// host dolt server, not via a baked-in copy).
 func excludedPath(rel string) bool {
-	if rel == citylayout.RuntimeRoot {
-		return false
-	}
-	if strings.HasPrefix(rel, citylayout.RuntimeRoot+"/") {
+	// Runtime state directory — sockets, watchers, ephemeral state.
+	if rel == citylayout.RuntimeRoot+"/runtime" ||
+		strings.HasPrefix(rel, citylayout.RuntimeRoot+"/runtime/") {
 		return true
 	}
-	// Runtime state files.
+	// Controller sockets / locks / event log (huge + transient).
 	if rel == ".gc/controller.lock" || rel == ".gc/controller.sock" ||
 		rel == ".gc/events.jsonl" {
 		return true
 	}
 	// Agent registry (runtime state).
-	if strings.HasPrefix(rel, ".gc/agents/") {
+	if rel == ".gc/agents" || strings.HasPrefix(rel, ".gc/agents/") {
+		return true
+	}
+	// Per-session tmp scratch.
+	if rel == ".gc/tmp" || strings.HasPrefix(rel, ".gc/tmp/") {
+		return true
+	}
+	// Embedded beads database — multi-GB; pods access via the dolt server on
+	// the host (BEADS_DOLT_SERVER_HOST/PORT), never via a local copy.
+	if rel == ".beads" || strings.HasPrefix(rel, ".beads/") {
 		return true
 	}
 	// Secrets: match exact base names and specific extensions, not substrings.
@@ -79,15 +90,26 @@ func AssembleContext(opts Options) error {
 		return fmt.Errorf("creating workspace dir: %w", err)
 	}
 
+	// Honor a user-supplied .dockerignore at the city root (industry-standard
+	// Docker pattern). Applied in addition to the built-in excludedPath rules.
+	cityPatterns, err := LoadDockerignore(filepath.Join(opts.CityPath, ".dockerignore"))
+	if err != nil {
+		return fmt.Errorf("loading city .dockerignore: %w", err)
+	}
+
 	// Copy city directory contents into workspace, excluding runtime state.
-	if err := copyDirFiltered(opts.CityPath, wsDir); err != nil {
+	if err := copyDirFiltered(opts.CityPath, wsDir, cityPatterns); err != nil {
 		return fmt.Errorf("copying city to workspace: %w", err)
 	}
 
-	// Copy rig paths into workspace.
+	// Copy rig paths into workspace. Each rig may have its own .dockerignore.
 	for rigName, rigPath := range opts.RigPaths {
 		rigDst := filepath.Join(wsDir, rigName)
-		if err := copyDirFiltered(rigPath, rigDst); err != nil {
+		rigPatterns, err := LoadDockerignore(filepath.Join(rigPath, ".dockerignore"))
+		if err != nil {
+			return fmt.Errorf("loading rig %q .dockerignore: %w", rigName, err)
+		}
+		if err := copyDirFiltered(rigPath, rigDst, rigPatterns); err != nil {
 			return fmt.Errorf("copying rig %q: %w", rigName, err)
 		}
 	}
@@ -118,7 +140,15 @@ func AssembleContext(opts Options) error {
 }
 
 // copyDirFiltered copies src directory to dst, skipping excluded paths.
-func copyDirFiltered(src, dst string) error {
+// Built-in excludedPath rules apply unconditionally; userPatterns is the
+// parsed .dockerignore (may be nil).
+//
+// Symlinks are handled gracefully: a symlink-to-file is recreated as a
+// symlink in dst (preserving the link), and a symlink-to-directory is
+// recreated as a symlink WITHOUT recursing through it (avoids the
+// "copy_file_range: is a directory" failure mode that filepath.Walk's
+// default symlink-following behavior produced).
+func copyDirFiltered(src, dst string, userPatterns []Pattern) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -136,7 +166,11 @@ func copyDirFiltered(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		if excludedPath(rel) || excludedPath(fullRel) {
+		// filepath.Walk uses os.PathSeparator; normalize for pattern matching
+		// which expects forward slashes (Docker convention).
+		relForward := filepath.ToSlash(rel)
+		if excludedPath(rel) || excludedPath(fullRel) ||
+			MatchPatterns(userPatterns, relForward, info.IsDir()) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
@@ -144,6 +178,32 @@ func copyDirFiltered(src, dst string) error {
 		}
 
 		target := filepath.Join(dst, rel)
+
+		// Handle symlinks: recreate them in dst rather than following. This
+		// is what users intuitively expect ("copy the directory") and avoids
+		// crashing on symlink-to-directory entries (e.g., python venv lib64,
+		// gc-materialized .claude/skills/<name> → packs).
+		if info.Mode()&os.ModeSymlink != 0 {
+			linkTarget, err := os.Readlink(path)
+			if err != nil {
+				return fmt.Errorf("readlink %s: %w", path, err)
+			}
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			// If the destination already exists (rare in a fresh build dir),
+			// remove it so Symlink doesn't fail with EEXIST.
+			_ = os.Remove(target)
+			if err := os.Symlink(linkTarget, target); err != nil {
+				return fmt.Errorf("symlink %s -> %s: %w", target, linkTarget, err)
+			}
+			// Symlink to dir: don't recurse (Walk already handles ModeSymlink
+			// by not descending, but be explicit).
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 
 		if info.IsDir() {
 			return os.MkdirAll(target, info.Mode())

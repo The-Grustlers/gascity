@@ -584,6 +584,9 @@ func ensureSessionAliasAvailable(store beads.Store, cfg *config.City, alias, sel
 		if strings.TrimSpace(b.Metadata["alias"]) == alias {
 			return fmt.Errorf("%w: %q already belongs to %s", ErrSessionAliasExists, alias, b.ID)
 		}
+		if strings.TrimSpace(b.Metadata["pending_alias"]) == alias {
+			return fmt.Errorf("%w: %q is being started by %s", ErrSessionAliasExists, alias, b.ID)
+		}
 		if strings.TrimSpace(b.Metadata["agent_name"]) == alias {
 			if selfOwner != "" && selfOwner == alias {
 				continue
