@@ -784,6 +784,56 @@ func TestBuildPodPrebakedHostPathMountsPreparedWorktree(t *testing.T) {
 	}
 }
 
+func TestBuildPodPrebakedHostPathMountsGitDirForPreparedWorktree(t *testing.T) {
+	p := newProviderWithOps(newFakeK8sOps())
+	p.prebaked = true
+	p.hostPathRig = true
+
+	hostRoot := t.TempDir()
+	cityRoot := filepath.Join(hostRoot, "city")
+	rigRoot := filepath.Join(hostRoot, "projects", "grustle-monorepo")
+	workDir := filepath.Join(cityRoot, ".gc", "worktrees", "grustle-monorepo", "web-workers", "web-worker-1")
+	if err := os.MkdirAll(filepath.Join(rigRoot, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := runtime.Config{
+		Command: "claude",
+		WorkDir: workDir,
+		Env: map[string]string{
+			"GC_CITY":       cityRoot,
+			"GC_DIR":        workDir,
+			"GC_RIG_ROOT":   rigRoot,
+			"GC_STORE_ROOT": rigRoot,
+			"BEADS_DIR":     filepath.Join(rigRoot, ".beads"),
+		},
+	}
+
+	pod, err := buildPod("gc-test-worker", cfg, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gitDir := filepath.Join(rigRoot, ".git")
+	var foundMount, foundVolume bool
+	for _, mount := range pod.Spec.Containers[0].VolumeMounts {
+		if mount.Name == "rig-gitdir" && mount.MountPath == filepath.ToSlash(gitDir) {
+			foundMount = true
+		}
+	}
+	for _, volume := range pod.Spec.Volumes {
+		if volume.Name == "rig-gitdir" && volume.HostPath != nil &&
+			volume.HostPath.Path == gitDir && volume.HostPath.Type != nil &&
+			*volume.HostPath.Type == corev1.HostPathDirectory {
+			foundVolume = true
+		}
+	}
+	if !foundMount || !foundVolume {
+		t.Fatalf("gitdir hostpath mount missing: mounts=%+v volumes=%+v",
+			pod.Spec.Containers[0].VolumeMounts, pod.Spec.Volumes)
+	}
+}
+
 func TestPrepareHostWorkDirCreatesGitWorktreeAndBeadsRedirect(t *testing.T) {
 	rigRoot := t.TempDir()
 	gitCmd(t, rigRoot, "init")

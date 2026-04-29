@@ -325,6 +325,24 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 					},
 				},
 			})
+			if strings.Contains(filepath.ToSlash(cfg.WorkDir), "/.gc/worktrees/") {
+				gitDir := filepath.Join(rigRoot, ".git")
+				if pathIsDir(gitDir) {
+					hostPathDir := corev1.HostPathDirectory
+					mainVolMounts = append(mainVolMounts, corev1.VolumeMount{
+						Name: "rig-gitdir", MountPath: filepath.ToSlash(gitDir),
+					})
+					volumes = append(volumes, corev1.Volume{
+						Name: "rig-gitdir",
+						VolumeSource: corev1.VolumeSource{
+							HostPath: &corev1.HostPathVolumeSource{
+								Path: gitDir,
+								Type: &hostPathDir,
+							},
+						},
+					})
+				}
+			}
 		}
 	}
 
@@ -638,3 +656,8 @@ func buildResources(p *Provider) (corev1.ResourceRequirements, error) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func pathIsDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
