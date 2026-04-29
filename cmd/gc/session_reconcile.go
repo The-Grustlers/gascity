@@ -173,7 +173,11 @@ func sessionStartRequested(session beads.Bead, clk clock.Clock) bool {
 	return !staleCreatingState(session, clk)
 }
 
-const staleCreatingStateTimeout = time.Minute
+// LOCAL PATCH (ADR-013): bumped from 1 minute to 30 minutes so k8s pool
+// sessions get a real grace period before being reaped. The reaper sometimes
+// false-negatives on IsRunning for k8s sessions; a 1-min window means workers
+// get killed mid-task. See .gc/handoffs/architecture-decisions.md ADR-013.
+const staleCreatingStateTimeout = 30 * time.Minute
 
 func sessionMetadataState(session beads.Bead) string {
 	switch state := strings.TrimSpace(session.Metadata["state"]); state {

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -528,11 +530,11 @@ func buildPreparedStart(
 		session.Metadata["session_key"] = sessionKey
 	}
 	if sk := session.Metadata["session_key"]; sk != "" && tp.ResolvedProvider != nil {
-		firstStart := session.Metadata["started_config_hash"] == ""
+		firstStart := effectiveFirstStart(session.Metadata, agentCfg.WorkDir)
 		forceFresh := session.Metadata["wake_mode"] == "fresh"
 		agentCfg.Command = resolveSessionCommand(agentCfg.Command, sk, tp.ResolvedProvider, firstStart, forceFresh)
 	}
-	firstStart := session.Metadata["started_config_hash"] == ""
+	firstStart := effectiveFirstStart(session.Metadata, agentCfg.WorkDir)
 	forceFresh := session.Metadata["wake_mode"] == "fresh"
 	if !firstStart && !forceFresh {
 		agentCfg.PromptSuffix = ""
@@ -549,7 +551,7 @@ func buildPreparedStart(
 	if raw := session.Metadata["template_overrides"]; raw != "" {
 		var overrides map[string]string
 		if err := json.Unmarshal([]byte(raw), &overrides); err == nil {
-			firstStart := session.Metadata["started_config_hash"] == ""
+			firstStart := effectiveFirstStart(session.Metadata, agentCfg.WorkDir)
 			forceFresh := session.Metadata["wake_mode"] == "fresh"
 			if msg, ok := overrides["initial_message"]; ok && msg != "" && (firstStart || forceFresh) {
 				if tp.ResolvedProvider != nil && tp.ResolvedProvider.PromptMode == "none" {
@@ -1944,4 +1946,65 @@ func stopSessionsBounded(
 	stdout, stderr io.Writer,
 ) int {
 	return stopTargetsBounded(stopTargetsForNames(names, cfg, store, stderr), cfg, store, sp, rec, actor, stdout, stderr)
+}
+
+// effectiveFirstStart wraps the historical
+// `session.Metadata["started_config_hash"] == ""` check with a defensive
+// override: if a prior Claude conversation .jsonl is present on disk for
+// this session_key, treat the launch as a resume even when
+// started_config_hash has been cleared.
+//
+// Why: started_config_hash is cleared by reconciler paths (ConfigDriftReset,
+// RestartRequest, recordWakeFailure) that have nothing to do with whether
+// the prior conversation is recoverable. For long-running named singletons
+// (director, mayor) ConfigDriftReset typically fires after any rebuild that
+// changes CoreFingerprint inputs, and the resulting first-start path picks
+// `--session-id <preserved-key>` — which Claude treats as "create a new
+// conversation under this UUID," not "resume the prior one." The on-disk
+// .jsonl is the source of truth for whether resume is possible; check it.
+//
+// Safety: this only flips firstStart from true→false (treats first-start as
+// resume). If --resume hits a missing/corrupt file, claude exits and
+// chat.go's stale-key detection clears the key on the next tick, recovering
+// cleanly. Legitimate fresh-conversation paths (RestartRequest with rotated
+// key + no on-disk file, wake_mode=fresh) are unaffected.
+func effectiveFirstStart(meta map[string]string, workDir string) bool {
+	if meta == nil {
+		return true
+	}
+	if strings.TrimSpace(meta["started_config_hash"]) != "" {
+		return false
+	}
+	sk := strings.TrimSpace(meta["session_key"])
+	if sk == "" {
+		return true
+	}
+	if !claudeConversationFileExists(workDir, sk) {
+		return true
+	}
+	return false
+}
+
+// claudeConversationFileExists reports whether a non-empty Claude
+// conversation .jsonl exists for sessionKey under workDir. Path layout:
+// ~/.claude/projects/<workdir-with-/-replaced-by-->/<sessionKey>.jsonl
+func claudeConversationFileExists(workDir, sessionKey string) bool {
+	if workDir == "" || sessionKey == "" {
+		return false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return false
+	}
+	abs, err := filepath.Abs(workDir)
+	if err != nil {
+		return false
+	}
+	encoded := strings.ReplaceAll(abs, "/", "-")
+	p := filepath.Join(home, ".claude", "projects", encoded, sessionKey+".jsonl")
+	info, statErr := os.Stat(p)
+	if statErr != nil || info.IsDir() || info.Size() == 0 {
+		return false
+	}
+	return true
 }

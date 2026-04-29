@@ -1128,6 +1128,66 @@ func TestNeedsStaging(t *testing.T) {
 	}
 }
 
+func TestAgentImagePullPolicy(t *testing.T) {
+	tests := []struct {
+		name     string
+		prebaked bool
+		envVal   string // value of GC_K8S_IMAGE_PULL_POLICY ("" = unset)
+		want     corev1.PullPolicy
+	}{
+		{name: "non-prebaked default Always", prebaked: false, want: corev1.PullAlways},
+		{name: "prebaked default IfNotPresent", prebaked: true, want: corev1.PullIfNotPresent},
+		{name: "env override Always wins on prebaked", prebaked: true, envVal: "Always", want: corev1.PullAlways},
+		{name: "env override IfNotPresent wins on non-prebaked", prebaked: false, envVal: "IfNotPresent", want: corev1.PullIfNotPresent},
+		{name: "env override Never honored", prebaked: false, envVal: "Never", want: corev1.PullNever},
+		{name: "unknown env value falls through to default", prebaked: true, envVal: "bogus", want: corev1.PullIfNotPresent},
+		{name: "whitespace env value trimmed", prebaked: false, envVal: "  Always  ", want: corev1.PullAlways},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GC_K8S_IMAGE_PULL_POLICY", tt.envVal)
+			got := agentImagePullPolicy(tt.prebaked)
+			if got != tt.want {
+				t.Errorf("agentImagePullPolicy(prebaked=%v, env=%q) = %v, want %v", tt.prebaked, tt.envVal, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildPodAgentPullPolicyPrebaked(t *testing.T) {
+	t.Setenv("GC_K8S_IMAGE_PULL_POLICY", "")
+	p := newProviderWithOps(newFakeK8sOps())
+	p.prebaked = true
+	cfg := runtime.Config{
+		WorkDir: "/city/demo-rig",
+		Env:     map[string]string{"GC_AGENT": "demo-rig/polecat", "GC_CITY": "/city"},
+	}
+	pod, err := buildPod("gc-pull-prebaked", cfg, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pod.Spec.Containers[0].ImagePullPolicy; got != corev1.PullIfNotPresent {
+		t.Errorf("prebaked agent ImagePullPolicy = %v, want IfNotPresent", got)
+	}
+}
+
+func TestBuildPodAgentPullPolicyNonPrebaked(t *testing.T) {
+	t.Setenv("GC_K8S_IMAGE_PULL_POLICY", "")
+	p := newProviderWithOps(newFakeK8sOps())
+	p.prebaked = false
+	cfg := runtime.Config{
+		WorkDir: "/city/demo-rig",
+		Env:     map[string]string{"GC_AGENT": "demo-rig/polecat", "GC_CITY": "/city"},
+	}
+	pod, err := buildPod("gc-pull-default", cfg, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pod.Spec.Containers[0].ImagePullPolicy; got != corev1.PullAlways {
+		t.Errorf("non-prebaked agent ImagePullPolicy = %v, want Always (default)", got)
+	}
+}
+
 func TestBuildPodPrebaked(t *testing.T) {
 	p := newProviderWithOps(newFakeK8sOps())
 	p.prebaked = true

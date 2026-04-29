@@ -49,7 +49,15 @@ RUN /tmp/install-dolt-archive.sh "${DOLT_VERSION}" \
 # Default non-root user for Claude Code (--dangerously-skip-permissions rejects root).
 # When LINUX_USERNAME is set at runtime, the pod entrypoint creates a dynamic
 # user via useradd and drops privileges via su. gcagent is kept as fallback.
-RUN useradd -m -s /bin/bash gcagent \
+#
+# Ubuntu 24.04 ships with a default `ubuntu` user at uid 1000, which would
+# push gcagent to uid 1001. With hostpath-mounted rigs that means files
+# written by pods are owned by uid 1001 on the host, breaking host user
+# (typically uid 1000) ability to git add / chmod / etc. Delete the
+# ubuntu user first, then create gcagent explicitly at uid 1000 so pod
+# writes match host user ownership.
+RUN userdel -r ubuntu 2>/dev/null || true \
+    && useradd -m -s /bin/bash -u 1000 gcagent \
     && echo "gcagent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gcagent \
     && chmod 0440 /etc/sudoers.d/gcagent
 ENV HOME=/home/gcagent

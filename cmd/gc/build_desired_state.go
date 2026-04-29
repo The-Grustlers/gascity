@@ -591,7 +591,19 @@ func appendInProgressWorkUnique(cfg *config.City, dst *[]beads.Bead, stores *[]b
 
 func appendAssignedUnique(dst *[]beads.Bead, stores *[]beads.Store, beadList []beads.Bead, seen map[string]struct{}, store beads.Store) {
 	for _, b := range beadList {
-		if strings.TrimSpace(b.Assignee) == "" {
+		// Cross-rig `gc sling` sets metadata.gc.routed_to but NOT Assignee;
+		// without this OR-clause, slung beads were filtered out here and the
+		// pool-desired-state computation never saw them, so the supervisor
+		// never spawned pool members for routed work. computePoolDesiredStates
+		// emits a Tier="new" request when it sees a routed bead with empty
+		// Assignee (see the loop at line ~135 of pool_desired_state.go), so
+		// admitting them here is the trigger that enables auto-spawn.
+		assignee := strings.TrimSpace(b.Assignee)
+		routedTo := ""
+		if b.Metadata != nil {
+			routedTo = strings.TrimSpace(b.Metadata["gc.routed_to"])
+		}
+		if assignee == "" && routedTo == "" {
 			continue
 		}
 		appendWorkUnique(dst, stores, b, seen, store)

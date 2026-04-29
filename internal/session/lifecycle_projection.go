@@ -520,8 +520,16 @@ func shouldResetContinuation(base BaseState, meta map[string]string, sleepReason
 	if strings.TrimSpace(meta["session_key"]) == "" && strings.TrimSpace(meta["started_config_hash"]) == "" {
 		return false
 	}
-	switch strings.TrimSpace(sleepReason) {
-	case "idle", "idle-timeout", "no-wake-reason", "config-drift", "drained", "city-stop", "user-hold", "wait-hold":
+	reason := strings.TrimSpace(sleepReason)
+	switch reason {
+	case "", "idle", "idle-timeout", "no-wake-reason", "config-drift", "drained", "city-stop", "user-hold", "wait-hold":
+		// Empty sleep_reason means the runtime disappeared without an
+		// explicit shutdown signal (e.g., VM died, supervisor killed,
+		// host crash). The conversation .jsonl on disk is still good;
+		// preserve session_key so the next wake can resume cleanly. Reset
+		// is reserved for cases with a positive signal that the
+		// conversation should be discarded (handoff, restart-requested,
+		// stale-key after retries).
 		return false
 	}
 	return base == BaseStateActive || base == BaseStateCreating

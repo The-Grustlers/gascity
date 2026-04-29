@@ -3,6 +3,8 @@ package k8s
 import (
 	"encoding/base64"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -233,6 +235,34 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 		},
 	})
 
+	// LOCAL PATCH (not upstream): hostpath-mount the rig's host work_dir into
+	// the pod, so live host content (node_modules/.venv/.env/source) appears
+	// in /workspace/<rig-basename> without rebuilding the image. Enabled
+	// per-pod by setting GC_K8S_HOSTPATH_RIG=true in supervisor env.
+	// Single-node clusters only — host path must exist on whatever node
+	// schedules the pod. See: .gc/handoffs/architecture-decisions.md ADR-004.
+	//
+	// Mount path uses filepath.Base(cfg.WorkDir) because rigs typically aren't
+	// under the city dir, so the projectedPodWorkDir() helper returns plain
+	// "/workspace" for them. Mounting at /workspace/<basename> matches what
+	// gc agents with `dir = "<rig-name>"` expect at runtime.
+	if os.Getenv("GC_K8S_HOSTPATH_RIG") == "true" && cfg.WorkDir != "" {
+		hostPathDir := corev1.HostPathDirectory
+		rigMountPath := "/workspace/" + filepath.Base(cfg.WorkDir)
+		mainVolMounts = append(mainVolMounts, corev1.VolumeMount{
+			Name: "rig-hostpath", MountPath: rigMountPath,
+		})
+		volumes = append(volumes, corev1.Volume{
+			Name: "rig-hostpath",
+			VolumeSource: corev1.VolumeSource{
+				HostPath: &corev1.HostPathVolumeSource{
+					Path: cfg.WorkDir,
+					Type: &hostPathDir,
+				},
+			},
+		})
+	}
+
 	// If GC_CITY differs from work_dir, add a city volume (not needed when prebaked).
 	if !p.prebaked && ctrlCity != "" && ctrlCity != cfg.WorkDir {
 		mainVolMounts = append(mainVolMounts, corev1.VolumeMount{
@@ -269,7 +299,7 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 			Containers: []corev1.Container{{
 				Name:            "agent",
 				Image:           p.image,
-				ImagePullPolicy: corev1.PullAlways,
+				ImagePullPolicy: agentImagePullPolicy(p.prebaked),
 				WorkingDir:      podWorkDir,
 				Command:         []string{"/bin/sh", "-c"},
 				Args:            []string{tmuxCmd},
@@ -306,6 +336,27 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 	return pod, nil
 }
 
+// agentImagePullPolicy chooses the ImagePullPolicy for the agent container.
+// Order of precedence:
+//  1. GC_K8S_IMAGE_PULL_POLICY env var override (Always|IfNotPresent|Never).
+//  2. IfNotPresent when prebaked=true — by definition the image is local-only
+//     and would loop on ImagePullBackOff under PullAlways.
+//  3. Always (preserves prior default for non-prebaked images).
+func agentImagePullPolicy(prebaked bool) corev1.PullPolicy {
+	switch strings.TrimSpace(os.Getenv("GC_K8S_IMAGE_PULL_POLICY")) {
+	case "Always":
+		return corev1.PullAlways
+	case "IfNotPresent":
+		return corev1.PullIfNotPresent
+	case "Never":
+		return corev1.PullNever
+	}
+	if prebaked {
+		return corev1.PullIfNotPresent
+	}
+	return corev1.PullAlways
+}
+
 // agentSecurityContext returns a container security context.
 // When a dynamic linux username is configured, the container starts as root
 // (UID 0) so it can create the user at runtime before dropping privileges.
@@ -336,9 +387,69 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir, managedServiceHost, manag
 		"GC_DOLT_PORT":           true,
 		"BEADS_DOLT_SERVER_HOST": true,
 		"BEADS_DOLT_SERVER_PORT": true,
+		// Host-specific shell-session vars that must NOT leak into the pod —
+		// the supervisor inherits these from the bash that started it (e.g.,
+		// HOME=/home/bputm, USER=bputm). The pod runs as gcagent (or a
+		// dynamic LINUX_USERNAME) and must use the image-level defaults
+		// (HOME=/home/gcagent etc., set in Dockerfile.base). Without this,
+		// the pod entrypoint's `mkdir -p $HOME/.claude` tries to create
+		// /home/bputm/.claude as gcagent → "Permission denied" → no auth
+		// state → claude TUI hits the login screen.
+		"HOME":            true,
+		"USER":            true,
+		"LOGNAME":         true,
+		"PWD":             true,
+		"OLDPWD":          true,
+		"SHLVL":           true,
+		"MAIL":            true,
+		"XDG_CONFIG_HOME": true,
+		"XDG_DATA_HOME":   true,
+		"XDG_CACHE_HOME":  true,
+		"XDG_STATE_HOME":  true,
+		"XDG_RUNTIME_DIR": true,
+		// PATH, LANG, LC_*, TERM are useful in pods if the supervisor's
+		// values are sane, but PATH especially can include host-only
+		// directories. Strip PATH and let the pod's /etc/profile + image
+		// defaults rebuild it. Same for shell-flavored locale vars.
+		"PATH": true,
+		"TERM": true,
 	}
 
 	ctrlCity := controllerCityPath(cfgEnv)
+
+	// LOCAL PATCH: pod's HOME must point to a directory that exists in the
+	// container. The controller's HOME is the host user's home (/home/bputm),
+	// which doesn't exist in the pod and the unprivileged pod user can't
+	// create it (parent /home is root-owned). Remap to LINUX_USERNAME's home
+	// when set, otherwise the baked-in gcagent home.
+	podHomeUser := cfgEnv["LINUX_USERNAME"]
+	if podHomeUser == "" {
+		podHomeUser = "gcagent"
+	}
+	podHome := "/home/" + podHomeUser
+
+	// LOCAL PATCH: remap rig-relative paths into the pod. With GC_K8S_HOSTPATH_RIG=true
+	// the rig's host work_dir is mounted at /workspace/<basename>. Env vars
+	// referencing the host rig path (BEADS_DIR, GC_RIG_ROOT, etc) must be rewritten
+	// so processes inside the pod find files at the pod-visible mount path.
+	hostRigRoot := strings.TrimSpace(cfgEnv["GC_RIG_ROOT"])
+	podRigRoot := ""
+	if hostRigRoot != "" {
+		podRigRoot = "/workspace/" + filepath.Base(hostRigRoot)
+	}
+	remapRig := func(val string) string {
+		if hostRigRoot == "" || podRigRoot == "" {
+			return val
+		}
+		v := strings.TrimSpace(val)
+		if v == hostRigRoot {
+			return podRigRoot
+		}
+		if strings.HasPrefix(v, hostRigRoot+"/") {
+			return podRigRoot + v[len(hostRigRoot):]
+		}
+		return val
+	}
 
 	var env []corev1.EnvVar
 	for k, v := range cfgEnv {
@@ -353,7 +464,13 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir, managedServiceHost, manag
 		case "GC_DIR":
 			val = podWorkDir
 		case "GC_STORE_ROOT", "GC_RIG_ROOT", "BEADS_DIR", "GT_ROOT", "GC_CITY_RUNTIME_DIR", "GC_PACK_STATE_DIR", "GC_PACK_DIR":
-			val = remapControllerPathToPod(val, ctrlCity)
+			remapped := remapControllerPathToPod(val, ctrlCity)
+			if remapped == val {
+				remapped = remapRig(val)
+			}
+			val = remapped
+		case "HOME":
+			val = podHome
 		}
 		env = append(env, corev1.EnvVar{Name: k, Value: val})
 	}
