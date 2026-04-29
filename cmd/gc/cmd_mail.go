@@ -743,7 +743,8 @@ type multiRecipientMailCounter interface {
 }
 
 func newMailSendCmd(stdout, stderr io.Writer) *cobra.Command {
-	var notify bool
+	notify := true
+	var noNotify bool
 	var all bool
 	var from string
 	var to string
@@ -755,8 +756,9 @@ func newMailSendCmd(stdout, stderr io.Writer) *cobra.Command {
 		Long: `Send a message to a session alias or human.
 
 Creates a message bead addressed to the recipient. The sender defaults
-to $GC_SESSION_ID, $GC_ALIAS, $GC_AGENT, or "human". Use --notify to nudge
-the recipient after sending. Use --from to override the sender identity.
+to $GC_SESSION_ID, $GC_ALIAS, $GC_AGENT, or "human". Live session recipients
+are nudged after sending by default; use --no-notify for quiet inbox-only mail.
+Use --from to override the sender identity.
 Use --to as an alternative to the positional <to> argument.
 Use -s/--subject for the summary line and -m/--message for the body text.
 Use --all to broadcast to all live sessions (excluding sender and "human").`,
@@ -765,25 +767,29 @@ Use --all to broadcast to all live sessions (excluding sender and "human").`,
   gc mail send myrig/witness -s "Need investigation" -m "Attach logs from the last failed run"
   gc mail send --to mayor "Build is green"
   gc mail send human "Review needed for PR #42"
-  gc mail send polecat "Priority task" --notify
+  gc mail send polecat "Inbox-only note" --no-notify
   gc mail send --all "Status update: tests passing"`,
 		Args: cobra.ArbitraryArgs,
 		RunE: func(_ *cobra.Command, args []string) error {
-			if cmdMailSend(args, notify, all, from, to, subject, message, stdout, stderr) != 0 {
+			effectiveNotify := notify && !noNotify
+			if cmdMailSend(args, effectiveNotify, all, from, to, subject, message, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&notify, "notify", false, "nudge the recipient after sending")
-	cmd.Flags().BoolVar(&notify, "nudge", false, "alias for --notify")
+	cmd.Flags().BoolVar(&notify, "notify", true, "nudge the recipient after sending")
+	cmd.Flags().BoolVar(&notify, "nudge", true, "alias for --notify")
 	_ = cmd.Flags().MarkHidden("nudge")
+	cmd.Flags().BoolVar(&noNotify, "no-notify", false, "send without nudging the recipient")
 	cmd.Flags().BoolVar(&all, "all", false, "broadcast to all live sessions (excludes sender and human)")
 	cmd.Flags().StringVar(&from, "from", "", "sender identity (default: $GC_SESSION_ID, $GC_ALIAS, $GC_AGENT, or \"human\")")
 	cmd.Flags().StringVar(&to, "to", "", "recipient address (alternative to positional argument)")
 	cmd.Flags().StringVarP(&subject, "subject", "s", "", "message subject line")
 	cmd.Flags().StringVarP(&message, "message", "m", "", "message body text")
 	cmd.MarkFlagsMutuallyExclusive("to", "all")
+	cmd.MarkFlagsMutuallyExclusive("notify", "no-notify")
+	cmd.MarkFlagsMutuallyExclusive("nudge", "no-notify")
 	return cmd
 }
 

@@ -2177,6 +2177,22 @@ func TestMailSendAcceptsNudgeAlias(t *testing.T) {
 	}
 }
 
+func TestMailSendNotifiesByDefault(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	cmd := newMailSendCmd(&stdout, &stderr)
+
+	notifyFlag := cmd.Flags().Lookup("notify")
+	if notifyFlag == nil {
+		t.Fatal("send command missing --notify flag")
+	}
+	if notifyFlag.DefValue != "true" {
+		t.Fatalf("--notify default = %q, want true", notifyFlag.DefValue)
+	}
+	if cmd.Flags().Lookup("no-notify") == nil {
+		t.Fatal("send command missing --no-notify flag")
+	}
+}
+
 // --- gc mail send --all ---
 
 func TestMailSendAll(t *testing.T) {

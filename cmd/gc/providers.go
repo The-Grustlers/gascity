@@ -759,7 +759,7 @@ func openCityEventsProvider(stderr io.Writer, cmdName string) (events.Provider, 
 // local tmux.
 func newHybridProvider(sc config.SessionConfig, cityName, cityPath string) (runtime.Provider, error) {
 	local := sessiontmux.NewProviderWithConfig(tmuxConfigFromSession(sc, cityName, cityPath))
-	remote, err := sessionk8s.NewProvider()
+	remote, err := newK8sSessionProvider(sc.K8s)
 	if err != nil {
 		return nil, fmt.Errorf("hybrid: k8s backend: %w", err)
 	}
