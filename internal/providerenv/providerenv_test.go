@@ -48,11 +48,11 @@ func TestMergeManagedSessionEnvSuppressesOAuthMirroredAnthropicKey(t *testing.T)
 	if got["CLAUDE_CODE_OAUTH_TOKEN"] != "oauth-token" {
 		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want token from OAuth file", got["CLAUDE_CODE_OAUTH_TOKEN"])
 	}
-	if _, ok := got["ANTHROPIC_API_KEY"]; ok {
-		t.Fatalf("ANTHROPIC_API_KEY was projected from OAuth token")
+	if got["ANTHROPIC_API_KEY"] != "" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q, want explicit unset", got["ANTHROPIC_API_KEY"])
 	}
-	if _, ok := got["ANTHROPIC_API_KEY_FILE"]; ok {
-		t.Fatalf("ANTHROPIC_API_KEY_FILE was projected from OAuth token file")
+	if got["ANTHROPIC_API_KEY_FILE"] != "" {
+		t.Fatalf("ANTHROPIC_API_KEY_FILE = %q, want explicit unset", got["ANTHROPIC_API_KEY_FILE"])
 	}
 }
 

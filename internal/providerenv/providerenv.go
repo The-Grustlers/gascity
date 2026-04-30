@@ -123,6 +123,26 @@ func shouldSkipCredentialEnv(key, value string, fileValues map[string]string) bo
 	return false
 }
 
+func applyOAuthIncompatibleCredentialUnsets(env map[string]string, fileValues map[string]string) {
+	oauth := strings.TrimSpace(fileValues["CLAUDE_CODE_OAUTH_TOKEN"])
+	oauthFile := credentialFilePathEnv("CLAUDE_CODE_OAUTH_TOKEN_FILE")
+	if oauth == "" && oauthFile == "" {
+		return
+	}
+	for key := range oauthIncompatibleAnthropicCredentials {
+		if strings.TrimSpace(fileValues[key]) != "" {
+			continue
+		}
+		if value := strings.TrimSpace(env[key]); value == "" || (oauth != "" && value == oauth) {
+			env[key] = ""
+		}
+		fileKey := fileBackedCredentials[key]
+		if value := strings.TrimSpace(env[fileKey]); value == "" || (oauthFile != "" && value == oauthFile) {
+			env[fileKey] = ""
+		}
+	}
+}
+
 // MergeFileBackedCredentials overlays only file-backed credential values onto
 // env. Use this in planner/reconciler paths where adding the full managed
 // baseline would churn runtime fingerprints.
@@ -144,6 +164,7 @@ func MergeFileBackedCredentials(env map[string]string) map[string]string {
 			out[fileKey] = activeFiles[fileKey]
 		}
 	}
+	applyOAuthIncompatibleCredentialUnsets(out, fileValues)
 	return out
 }
 
@@ -167,6 +188,7 @@ func MergeManagedSessionEnv(env map[string]string) map[string]string {
 	for fileKey, value := range activeFileBackedCredentialFiles(fileValues) {
 		out[fileKey] = value
 	}
+	applyOAuthIncompatibleCredentialUnsets(out, fileValues)
 	return out
 }
 
@@ -243,6 +265,7 @@ func ManagedSessionBaseline() map[string]string {
 	for fileKey, value := range activeFileBackedCredentialFiles(credentialFiles) {
 		m[fileKey] = value
 	}
+	applyOAuthIncompatibleCredentialUnsets(m, credentialFiles)
 	for k, v := range telemetry.OTELEnvMap() {
 		m[k] = v
 	}
