@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/providerenv"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/shellquote"
 )
@@ -313,6 +314,7 @@ func (t *Tmux) NewSessionWithCommandAndEnv(name, workDir, command string, env ma
 	if err := validateSessionName(name); err != nil {
 		return err
 	}
+	env = providerenv.MergeManagedSessionEnv(env)
 	// Disable mouse mode and monitor-activity before creating the session.
 	// With mouse on, tmux sends SGR mouse tracking sequences (\x1b[<...M)
 	// into panes. When the gc controller polls tmux state (list-panes,

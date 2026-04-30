@@ -64,8 +64,11 @@ func TestNewSessionWithCommandAndEnvClearsEmptyVars(t *testing.T) {
 	if !strings.Contains(joined, "\x00-e\x00LANG=en_US.UTF-8\x00") {
 		t.Fatalf("new-session args missing LANG -e flag: %v", args)
 	}
-	if got := args[len(args)-1]; got != "env -u LC_ALL -u LC_CTYPE claude" {
-		t.Fatalf("command = %q, want env -u LC_ALL -u LC_CTYPE claude", got)
+	got := args[len(args)-1]
+	for _, want := range []string{"env ", "-u LC_ALL", "-u LC_CTYPE", "-u CLAUDECODE", "-u CLAUDE_CODE_ENTRYPOINT", " claude"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("command = %q, want fragment %q", got, want)
+		}
 	}
 }
 
