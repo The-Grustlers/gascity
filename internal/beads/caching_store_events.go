@@ -23,6 +23,9 @@ func (c *CachingStore) ApplyEvent(eventType string, payload json.RawMessage) {
 		c.recordProblem(fmt.Sprintf("apply %s event", eventType), err)
 		return
 	}
+	if !c.ownsBeadID(patch.ID) {
+		return
+	}
 
 	c.mu.RLock()
 	if c.state != cacheLive {
