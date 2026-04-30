@@ -691,6 +691,29 @@ func TestPodManifestCompatibility(t *testing.T) {
 	}
 }
 
+func TestBuildPodIncludesPromptSuffixInAgentCommand(t *testing.T) {
+	p := newProviderWithOps(newFakeK8sOps())
+
+	cfg := runtime.Config{
+		Command:      "claude --dangerously-skip-permissions",
+		PromptFlag:   "--append-system-prompt",
+		PromptSuffix: "'web worker prompt'",
+		Env:          map[string]string{"GC_AGENT": "web-worker-1"},
+	}
+
+	pod, err := buildPod("gc-test-worker", cfg, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantCmd := "claude --dangerously-skip-permissions --append-system-prompt 'web worker prompt'"
+	wantB64 := base64.StdEncoding.EncodeToString([]byte(wantCmd))
+	entrypoint := pod.Spec.Containers[0].Args[0]
+	if !strings.Contains(entrypoint, wantB64) {
+		t.Fatalf("pod entrypoint missing prompt-bearing command b64 %q:\n%s", wantB64, entrypoint)
+	}
+}
+
 func TestProjectedPodWorkDirMapsHostRigOutsideCityToStableWorkspacePath(t *testing.T) {
 	cfg := runtime.Config{
 		WorkDir: "/home/me/projects/grustle-monorepo",

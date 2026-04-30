@@ -176,6 +176,13 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 	if agentCmd == "" {
 		agentCmd = "/bin/bash"
 	}
+	if cfg.PromptSuffix != "" {
+		if cfg.PromptFlag != "" {
+			agentCmd += " " + cfg.PromptFlag + " " + cfg.PromptSuffix
+		} else {
+			agentCmd += " " + cfg.PromptSuffix
+		}
+	}
 	// Remap controller-side city path references to pod-side /workspace.
 	// The controller expands {{.ConfigDir}} templates using its own city path
 	// (e.g. /city/packs/...) but pods have files at /workspace/....
