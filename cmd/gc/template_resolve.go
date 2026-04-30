@@ -29,6 +29,7 @@ import (
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/convergence"
 	"github.com/gastownhall/gascity/internal/materialize"
+	"github.com/gastownhall/gascity/internal/providerenv"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
 	"github.com/gastownhall/gascity/internal/shellquote"
@@ -351,7 +352,7 @@ func resolveTemplate(p *agentBuildParams, cfgAgent *config.Agent, qualifiedName 
 	}
 
 	// Step 10: Merge environment layers.
-	env := convergence.ScrubTokenEnv(mergeEnv(passthroughEnv(), expandEnvMap(resolved.Env), expandEnvMap(cfgAgent.Env), agentEnv))
+	env := convergence.ScrubTokenEnv(mergeEnv(providerenv.MergeManagedSessionEnv(resolved.Env), expandEnvMap(cfgAgent.Env), agentEnv))
 
 	// Step 11: Expand session setup templates.
 	configDir := p.cityPath

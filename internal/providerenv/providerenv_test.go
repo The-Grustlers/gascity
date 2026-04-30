@@ -1,0 +1,31 @@
+package providerenv
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestMergeManagedSessionEnvPreservesFileBackedCredentialSSOT(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
+	if err := os.WriteFile(tokenFile, []byte("file-backed-token\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_FILE", tokenFile)
+
+	got := MergeManagedSessionEnv(map[string]string{
+		"CLAUDE_CODE_OAUTH_TOKEN": "stale-session-token",
+		"EXTRA_PROVIDER_ENV":      "kept",
+	})
+
+	if got["CLAUDE_CODE_OAUTH_TOKEN"] != "file-backed-token" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want token from file", got["CLAUDE_CODE_OAUTH_TOKEN"])
+	}
+	if got["CLAUDE_CODE_OAUTH_TOKEN_FILE"] != tokenFile {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want %q", got["CLAUDE_CODE_OAUTH_TOKEN_FILE"], tokenFile)
+	}
+	if got["EXTRA_PROVIDER_ENV"] != "kept" {
+		t.Fatalf("EXTRA_PROVIDER_ENV = %q, want kept", got["EXTRA_PROVIDER_ENV"])
+	}
+}

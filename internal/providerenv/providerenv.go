@@ -15,6 +15,12 @@ var credentialEnvPrefixes = []string{
 	"OPENAI_",
 }
 
+var fileBackedCredentials = map[string]string{
+	"CLAUDE_CODE_OAUTH_TOKEN": "CLAUDE_CODE_OAUTH_TOKEN_FILE",
+	"ANTHROPIC_API_KEY":       "ANTHROPIC_API_KEY_FILE",
+	"ANTHROPIC_AUTH_TOKEN":    "ANTHROPIC_AUTH_TOKEN_FILE",
+}
+
 // IsCredentialEnv reports whether key carries provider credentials that managed
 // agent runtimes need to inherit from the supervisor environment.
 func IsCredentialEnv(key string) bool {
@@ -45,6 +51,39 @@ func CredentialFromFileEnv(key string) string {
 	return strings.TrimSpace(string(data))
 }
 
+func fileBackedCredentialValues() map[string]string {
+	values := make(map[string]string, len(fileBackedCredentials))
+	for key, fileKey := range fileBackedCredentials {
+		values[key] = CredentialFromFileEnv(fileKey)
+	}
+	return values
+}
+
+// MergeManagedSessionEnv overlays explicit provider/session env on top of the
+// managed baseline while preserving file-backed credentials as the SSOT.
+func MergeManagedSessionEnv(env map[string]string) map[string]string {
+	out := ManagedSessionBaseline()
+	fileValues := fileBackedCredentialValues()
+	for key, value := range env {
+		expanded := os.ExpandEnv(value)
+		if fileValues[key] != "" {
+			continue
+		}
+		out[key] = expanded
+	}
+	for key, value := range fileValues {
+		if value != "" {
+			out[key] = value
+		}
+	}
+	for _, fileKey := range fileBackedCredentials {
+		if value := os.Getenv(fileKey); strings.TrimSpace(value) != "" {
+			out[fileKey] = os.ExpandEnv(value)
+		}
+	}
+	return out
+}
+
 // ManagedSessionBaseline returns the environment baseline shared by all local
 // managed agent/session starts. File-backed credentials are expanded here so a
 // single token file remains the operator-facing SSOT.
@@ -57,11 +96,7 @@ func ManagedSessionBaseline() map[string]string {
 		m["HOME"] = v
 	}
 
-	credentialFiles := map[string]string{
-		"CLAUDE_CODE_OAUTH_TOKEN": CredentialFromFileEnv("CLAUDE_CODE_OAUTH_TOKEN_FILE"),
-		"ANTHROPIC_API_KEY":       CredentialFromFileEnv("ANTHROPIC_API_KEY_FILE"),
-		"ANTHROPIC_AUTH_TOKEN":    CredentialFromFileEnv("ANTHROPIC_AUTH_TOKEN_FILE"),
-	}
+	credentialFiles := fileBackedCredentialValues()
 	for _, key := range []string{"USER", "LOGNAME", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_FILE"} {
 		if v := os.Getenv(key); v != "" {
 			if credentialFiles[key] != "" {

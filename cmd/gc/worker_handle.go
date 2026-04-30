@@ -10,6 +10,7 @@ import (
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
 	"github.com/gastownhall/gascity/internal/materialize"
+	"github.com/gastownhall/gascity/internal/providerenv"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
 	"github.com/gastownhall/gascity/internal/worker"
@@ -107,7 +108,7 @@ func workerSessionCreateHints(resolved *config.ResolvedProvider) runtime.Config 
 }
 
 func resolvedSessionProviderEnv(env map[string]string) map[string]string {
-	return mergeEnv(passthroughEnv(), expandEnvMap(env))
+	return providerenv.MergeManagedSessionEnv(env)
 }
 
 func resolvedRuntimeMCPServersWithConfig(

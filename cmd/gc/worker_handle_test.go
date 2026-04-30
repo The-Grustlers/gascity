@@ -1670,6 +1670,13 @@ func TestResolvedWorkerRuntimeIncludesFileBackedClaudeCredentialEnv(t *testing.T
 
 	cfg := &config.City{
 		Workspace: config.Workspace{Name: "test-city"},
+		Providers: map[string]config.ProviderSpec{
+			"claude": {
+				Env: map[string]string{
+					"CLAUDE_CODE_OAUTH_TOKEN": "stale-provider-token",
+				},
+			},
+		},
 		Agents: []config.Agent{{
 			Name:     "mayor",
 			Provider: "claude",
@@ -1707,7 +1714,13 @@ func TestResolvedWorkerSessionConfigIncludesFileBackedClaudeCredentialEnv(t *tes
 	resolved, err := config.ResolveProvider(
 		&config.Agent{Provider: "claude"},
 		&config.Workspace{Provider: "claude"},
-		nil,
+		map[string]config.ProviderSpec{
+			"claude": {
+				Env: map[string]string{
+					"CLAUDE_CODE_OAUTH_TOKEN": "stale-provider-token",
+				},
+			},
+		},
 		func(name string) (string, error) { return name, nil },
 	)
 	if err != nil {
