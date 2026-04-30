@@ -59,6 +59,25 @@ func fileBackedCredentialValues() map[string]string {
 	return values
 }
 
+// MergeFileBackedCredentials overlays only file-backed credential values onto
+// env. Use this in planner/reconciler paths where adding the full managed
+// baseline would churn runtime fingerprints.
+func MergeFileBackedCredentials(env map[string]string) map[string]string {
+	out := make(map[string]string, len(env)+len(fileBackedCredentials)*2)
+	for key, value := range env {
+		out[key] = value
+	}
+	for key, fileKey := range fileBackedCredentials {
+		if value := CredentialFromFileEnv(fileKey); value != "" {
+			out[key] = value
+			if path := strings.TrimSpace(os.Getenv(fileKey)); path != "" {
+				out[fileKey] = os.ExpandEnv(path)
+			}
+		}
+	}
+	return out
+}
+
 // MergeManagedSessionEnv overlays explicit provider/session env on top of the
 // managed baseline while preserving file-backed credentials as the SSOT.
 func MergeManagedSessionEnv(env map[string]string) map[string]string {
