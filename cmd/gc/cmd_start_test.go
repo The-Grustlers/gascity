@@ -202,8 +202,8 @@ func TestPassthroughEnvIncludesClaudeAuthContext(t *testing.T) {
 		"XDG_STATE_HOME":          "/tmp/gc-home/.local/state",
 		"CLAUDE_CONFIG_DIR":       "/tmp/gc-home/.claude",
 		"CLAUDE_CODE_OAUTH_TOKEN": "oauth-token",
-		"ANTHROPIC_API_KEY":       "sk-ant-123",
-		"ANTHROPIC_AUTH_TOKEN":    "anth-auth-token",
+		"ANTHROPIC_API_KEY":       "",
+		"ANTHROPIC_AUTH_TOKEN":    "",
 	} {
 		if got[key] != want {
 			t.Errorf("passthroughEnv()[%s] = %q, want %q", key, got[key], want)
@@ -211,7 +211,7 @@ func TestPassthroughEnvIncludesClaudeAuthContext(t *testing.T) {
 	}
 }
 
-func TestPassthroughEnvPrefersClaudeOAuthTokenFile(t *testing.T) {
+func TestPassthroughEnvUsesRawClaudeOAuthToken(t *testing.T) {
 	dir := t.TempDir()
 	tokenFile := filepath.Join(dir, "claude-token")
 	if err := os.WriteFile(tokenFile, []byte("file-token\n"), 0o600); err != nil {
@@ -223,11 +223,11 @@ func TestPassthroughEnvPrefersClaudeOAuthTokenFile(t *testing.T) {
 
 	got := passthroughEnv()
 
-	if got["CLAUDE_CODE_OAUTH_TOKEN"] != "" {
-		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want empty because token file is the managed SSOT", got["CLAUDE_CODE_OAUTH_TOKEN"])
+	if got["CLAUDE_CODE_OAUTH_TOKEN"] != "ambient-token" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want raw token from env", got["CLAUDE_CODE_OAUTH_TOKEN"])
 	}
-	if got["CLAUDE_CODE_OAUTH_TOKEN_FILE"] != tokenFile {
-		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want %q", got["CLAUDE_CODE_OAUTH_TOKEN_FILE"], tokenFile)
+	if got["CLAUDE_CODE_OAUTH_TOKEN_FILE"] != "" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want empty because raw token env is the SSOT", got["CLAUDE_CODE_OAUTH_TOKEN_FILE"])
 	}
 }
 
@@ -238,6 +238,7 @@ func TestPassthroughEnvPrefersAnthropicAPIKeyFile(t *testing.T) {
 		t.Fatalf("write key file: %v", err)
 	}
 	t.Setenv("HOME", dir)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("ANTHROPIC_API_KEY", "ambient-key")
 	t.Setenv("ANTHROPIC_API_KEY_FILE", keyFile)
 
@@ -252,6 +253,7 @@ func TestPassthroughEnvPrefersAnthropicAPIKeyFile(t *testing.T) {
 }
 
 func TestPassthroughEnvIncludesProviderCredentialEnv(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-123")
 	t.Setenv("OPENAI_API_KEY", "sk-openai-123")
 	t.Setenv("OPENAI_BASE_URL", "https://openai.example.test")
@@ -294,6 +296,7 @@ func TestPassthroughEnvXDGFallbackFromHOME(t *testing.T) {
 }
 
 func TestPassthroughEnvOmitsEmptyAnthropicVars(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "")
 

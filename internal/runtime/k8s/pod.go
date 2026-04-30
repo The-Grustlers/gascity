@@ -497,15 +497,21 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir, managedServiceHost, manag
 	// Start with cfg.Env, removing controller-only vars.
 	// Auth creds (GC_DOLT_USER, GC_DOLT_PASSWORD, BEADS_DOLT_*_USER/PASSWORD) intentionally pass through.
 	skip := map[string]bool{
-		"GC_BEADS":               true,
-		"GC_SESSION":             true,
-		"GC_EVENTS":              true,
-		"GC_K8S_DOLT_HOST":       true,
-		"GC_K8S_DOLT_PORT":       true,
-		"GC_DOLT_HOST":           true,
-		"GC_DOLT_PORT":           true,
-		"BEADS_DOLT_SERVER_HOST": true,
-		"BEADS_DOLT_SERVER_PORT": true,
+		"GC_BEADS":                     true,
+		"GC_SESSION":                   true,
+		"GC_EVENTS":                    true,
+		"GC_K8S_DOLT_HOST":             true,
+		"GC_K8S_DOLT_PORT":             true,
+		"GC_DOLT_HOST":                 true,
+		"GC_DOLT_PORT":                 true,
+		"BEADS_DOLT_SERVER_HOST":       true,
+		"BEADS_DOLT_SERVER_PORT":       true,
+		"CLAUDE_CODE_OAUTH_TOKEN":      true,
+		"CLAUDE_CODE_OAUTH_TOKEN_FILE": true,
+		"ANTHROPIC_API_KEY":            true,
+		"ANTHROPIC_API_KEY_FILE":       true,
+		"ANTHROPIC_AUTH_TOKEN":         true,
+		"ANTHROPIC_AUTH_TOKEN_FILE":    true,
 		// Host-specific shell-session vars that must NOT leak into the pod —
 		// the supervisor inherits these from the bash that started it (e.g.,
 		// HOME=/home/bputm, USER=bputm). The pod runs as gcagent (or a
@@ -630,6 +636,18 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir, managedServiceHost, manag
 	} else {
 		env = append(env, corev1.EnvVar{Name: "CLAUDE_CONFIG_DIR", Value: "/home/gcagent/.claude"})
 	}
+
+	// Claude Code auth SSOT in pods: never project host-side token-file or
+	// Anthropic credentials; use the raw OAuth token from the k8s secret.
+	env = append(env, corev1.EnvVar{
+		Name: "CLAUDE_CODE_OAUTH_TOKEN",
+		ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "claude-credentials"},
+				Key:                  "CLAUDE_CODE_OAUTH_TOKEN",
+			},
+		},
+	})
 
 	// Inject GITHUB_TOKEN from optional K8s secret for git push in pods.
 	env = append(env, corev1.EnvVar{

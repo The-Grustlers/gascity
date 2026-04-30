@@ -1660,13 +1660,9 @@ func TestWorkerSessionRuntimeResolverWithConfigFallsBackToPersistedProviderWhenC
 	}
 }
 
-func TestResolvedWorkerRuntimeIncludesFileBackedClaudeCredentialEnv(t *testing.T) {
-	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
-	if err := os.WriteFile(tokenFile, []byte("file-backed-token\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_FILE", tokenFile)
+func TestResolvedWorkerRuntimeIncludesRawClaudeOAuthCredentialEnv(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "raw-oauth-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_FILE", "/tmp/stale-oauth-file")
 
 	cfg := &config.City{
 		Workspace: config.Workspace{Name: "test-city"},
@@ -1695,21 +1691,17 @@ func TestResolvedWorkerRuntimeIncludesFileBackedClaudeCredentialEnv(t *testing.T
 	if runtimeCfg == nil {
 		t.Fatal("runtime config is nil")
 	}
-	if got := runtimeCfg.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN"]; got != "" {
-		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN] = %q, want empty because token file is the managed SSOT", got)
+	if got := runtimeCfg.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN"]; got != "raw-oauth-token" {
+		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN] = %q, want raw OAuth token from env", got)
 	}
-	if got := runtimeCfg.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != tokenFile {
-		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN_FILE] = %q, want %q", got, tokenFile)
+	if got := runtimeCfg.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != "" {
+		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN_FILE] = %q, want empty because raw token env is the SSOT", got)
 	}
 }
 
-func TestResolvedWorkerSessionConfigIncludesFileBackedClaudeCredentialEnv(t *testing.T) {
-	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
-	if err := os.WriteFile(tokenFile, []byte("file-backed-token\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_FILE", tokenFile)
+func TestResolvedWorkerSessionConfigIncludesRawClaudeOAuthCredentialEnv(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "raw-oauth-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_FILE", "/tmp/stale-oauth-file")
 
 	resolved, err := config.ResolveProvider(
 		&config.Agent{Provider: "claude"},
@@ -1743,10 +1735,10 @@ func TestResolvedWorkerSessionConfigIncludesFileBackedClaudeCredentialEnv(t *tes
 	if err != nil {
 		t.Fatalf("resolvedWorkerSessionConfigWithConfig: %v", err)
 	}
-	if got := sessionCfg.Runtime.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN"]; got != "" {
-		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN] = %q, want empty because token file is the managed SSOT", got)
+	if got := sessionCfg.Runtime.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN"]; got != "raw-oauth-token" {
+		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN] = %q, want raw OAuth token from env", got)
 	}
-	if got := sessionCfg.Runtime.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != tokenFile {
-		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN_FILE] = %q, want %q", got, tokenFile)
+	if got := sessionCfg.Runtime.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != "" {
+		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN_FILE] = %q, want empty because raw token env is the SSOT", got)
 	}
 }

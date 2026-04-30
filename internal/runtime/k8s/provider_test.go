@@ -1099,6 +1099,44 @@ func TestBuildPodEnvRemapsVars(t *testing.T) {
 	}
 }
 
+func TestBuildPodEnvUsesSecretBackedRawClaudeOAuth(t *testing.T) {
+	cfgEnv := map[string]string{
+		"GC_AGENT":                      "worker",
+		"CLAUDE_CODE_OAUTH_TOKEN":       "host-raw-token",
+		"CLAUDE_CODE_OAUTH_TOKEN_FILE":  "/host/stale-token-file",
+		"ANTHROPIC_API_KEY":             "stale-api-key",
+		"ANTHROPIC_API_KEY_FILE":        "/host/stale-api-key-file",
+		"ANTHROPIC_AUTH_TOKEN":          "stale-auth-token",
+		"ANTHROPIC_AUTH_TOKEN_FILE":     "/host/stale-auth-token-file",
+		"ANTHROPIC_DEFAULT_HAIKU_MODEL": "model-setting",
+	}
+
+	env := mustBuildPodEnv(t, cfgEnv, "/workspace", podManagedDoltHost, podManagedDoltPort)
+
+	var oauth *corev1.EnvVar
+	for i := range env {
+		switch env[i].Name {
+		case "CLAUDE_CODE_OAUTH_TOKEN":
+			oauth = &env[i]
+		case "CLAUDE_CODE_OAUTH_TOKEN_FILE", "ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY_FILE", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN_FILE":
+			t.Fatalf("%s should not be projected into agent pods", env[i].Name)
+		}
+	}
+	if oauth == nil {
+		t.Fatal("CLAUDE_CODE_OAUTH_TOKEN env var not injected")
+	}
+	if oauth.Value != "" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN literal value = %q, want secret reference only", oauth.Value)
+	}
+	if oauth.ValueFrom == nil || oauth.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN ValueFrom = %#v, want SecretKeyRef", oauth.ValueFrom)
+	}
+	ref := oauth.ValueFrom.SecretKeyRef
+	if ref.Name != "claude-credentials" || ref.Key != "CLAUDE_CODE_OAUTH_TOKEN" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN SecretKeyRef = %s/%s, want claude-credentials/CLAUDE_CODE_OAUTH_TOKEN", ref.Name, ref.Key)
+	}
+}
+
 func TestBuildPodEnvProjectsManagedDoltEndpoint(t *testing.T) {
 	cfgEnv := map[string]string{
 		"GC_AGENT":               "worker",

@@ -845,13 +845,9 @@ func TestCreateInjectsUnifiedSessionRuntimeEnv(t *testing.T) {
 	}
 }
 
-func TestCreatePrefersFileBackedCredentialOverStaleRuntimeEnv(t *testing.T) {
-	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
-	if err := os.WriteFile(tokenFile, []byte("file-backed-token\n"), 0o600); err != nil {
-		t.Fatalf("write token file: %v", err)
-	}
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_FILE", tokenFile)
+func TestCreatePrefersRawClaudeOAuthEnvOverStaleRuntimeEnv(t *testing.T) {
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "raw-oauth-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_FILE", "/tmp/stale-oauth-file")
 
 	store := beads.NewMemStore()
 	sp := runtime.NewFake()
@@ -880,11 +876,11 @@ func TestCreatePrefersFileBackedCredentialOverStaleRuntimeEnv(t *testing.T) {
 	if cfg == nil {
 		t.Fatalf("Start call not recorded: %#v", sp.Calls)
 	}
-	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != "" {
-		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want empty because token file is the managed SSOT", got)
+	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != "raw-oauth-token" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want raw OAuth token from env", got)
 	}
-	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != tokenFile {
-		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want %q", got, tokenFile)
+	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != "" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want empty because raw token env is the SSOT", got)
 	}
 }
 
@@ -926,12 +922,8 @@ func TestCreateUsesBuiltinAncestorForGCProviderEnv(t *testing.T) {
 }
 
 func TestAttachUsesBuiltinAncestorForGCProviderEnv(t *testing.T) {
-	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
-	if err := os.WriteFile(tokenFile, []byte("file-backed-token\n"), 0o600); err != nil {
-		t.Fatalf("write token file: %v", err)
-	}
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_FILE", tokenFile)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "raw-oauth-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_FILE", "/tmp/stale-oauth-file")
 
 	store := beads.NewMemStore()
 	sp := runtime.NewFake()
@@ -967,11 +959,11 @@ func TestAttachUsesBuiltinAncestorForGCProviderEnv(t *testing.T) {
 	if got := cfg.Env["GC_PROVIDER"]; got != "claude" {
 		t.Fatalf("GC_PROVIDER = %q, want claude", got)
 	}
-	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != "" {
-		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want empty because token file is the managed SSOT", got)
+	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != "raw-oauth-token" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want raw OAuth token from env", got)
 	}
-	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != tokenFile {
-		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want %q", got, tokenFile)
+	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != "" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want empty because raw token env is the SSOT", got)
 	}
 }
 

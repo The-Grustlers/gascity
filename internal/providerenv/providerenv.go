@@ -16,13 +16,8 @@ var credentialEnvPrefixes = []string{
 }
 
 var fileBackedCredentials = map[string]string{
-	"CLAUDE_CODE_OAUTH_TOKEN": "CLAUDE_CODE_OAUTH_TOKEN_FILE",
-	"ANTHROPIC_API_KEY":       "ANTHROPIC_API_KEY_FILE",
-	"ANTHROPIC_AUTH_TOKEN":    "ANTHROPIC_AUTH_TOKEN_FILE",
-}
-
-var pathOnlyFileBackedCredentials = map[string]bool{
-	"CLAUDE_CODE_OAUTH_TOKEN": true,
+	"ANTHROPIC_API_KEY":    "ANTHROPIC_API_KEY_FILE",
+	"ANTHROPIC_AUTH_TOKEN": "ANTHROPIC_AUTH_TOKEN_FILE",
 }
 
 var oauthIncompatibleAnthropicCredentials = map[string]bool{
@@ -73,20 +68,7 @@ func fileBackedCredentialValues() map[string]string {
 	for key, fileKey := range fileBackedCredentials {
 		values[key] = CredentialFromFileEnv(fileKey)
 	}
-	suppressOAuthMirroredAnthropicCredentials(values)
 	return values
-}
-
-func suppressOAuthMirroredAnthropicCredentials(values map[string]string) {
-	oauth := strings.TrimSpace(values["CLAUDE_CODE_OAUTH_TOKEN"])
-	if oauth == "" {
-		return
-	}
-	for key := range oauthIncompatibleAnthropicCredentials {
-		if strings.TrimSpace(values[key]) == oauth {
-			values[key] = ""
-		}
-	}
 }
 
 func activeFileBackedCredentialFiles(values map[string]string) map[string]string {
@@ -102,10 +84,6 @@ func activeFileBackedCredentialFiles(values map[string]string) map[string]string
 	return files
 }
 
-func shouldProjectFileBackedCredentialValue(key string) bool {
-	return !pathOnlyFileBackedCredentials[key]
-}
-
 func knownCredentialFileKey(fileKey string) bool {
 	for _, candidate := range fileBackedCredentials {
 		if fileKey == candidate {
@@ -116,6 +94,13 @@ func knownCredentialFileKey(fileKey string) bool {
 }
 
 func shouldSkipCredentialEnv(key, value string, fileValues map[string]string) bool {
+	if key == "CLAUDE_CODE_OAUTH_TOKEN" {
+		raw := strings.TrimSpace(os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"))
+		return raw != "" && strings.TrimSpace(value) != raw
+	}
+	if key == "CLAUDE_CODE_OAUTH_TOKEN_FILE" {
+		return true
+	}
 	if knownCredentialFileKey(key) {
 		activeFiles := activeFileBackedCredentialFiles(fileValues)
 		return activeFiles[key] == ""
@@ -132,22 +117,14 @@ func shouldSkipCredentialEnv(key, value string, fileValues map[string]string) bo
 }
 
 func applyOAuthIncompatibleCredentialUnsets(env map[string]string, fileValues map[string]string) {
-	oauth := strings.TrimSpace(fileValues["CLAUDE_CODE_OAUTH_TOKEN"])
-	oauthFile := credentialFilePathEnv("CLAUDE_CODE_OAUTH_TOKEN_FILE")
-	if oauth == "" && oauthFile == "" {
+	oauth := strings.TrimSpace(env["CLAUDE_CODE_OAUTH_TOKEN"])
+	if oauth == "" {
 		return
 	}
 	for key := range oauthIncompatibleAnthropicCredentials {
-		if strings.TrimSpace(fileValues[key]) != "" {
-			continue
-		}
-		if value := strings.TrimSpace(env[key]); value == "" || (oauth != "" && value == oauth) {
-			env[key] = ""
-		}
+		env[key] = ""
 		fileKey := fileBackedCredentials[key]
-		if value := strings.TrimSpace(env[fileKey]); value == "" || (oauthFile != "" && value == oauthFile) {
-			env[fileKey] = ""
-		}
+		env[fileKey] = ""
 	}
 }
 
@@ -165,7 +142,7 @@ func MergeFileBackedCredentials(env map[string]string) map[string]string {
 	}
 	activeFiles := activeFileBackedCredentialFiles(fileValues)
 	for key, value := range fileValues {
-		if value != "" && shouldProjectFileBackedCredentialValue(key) {
+		if value != "" {
 			out[key] = value
 		}
 		if fileKey := fileBackedCredentials[key]; activeFiles[fileKey] != "" {
@@ -177,7 +154,7 @@ func MergeFileBackedCredentials(env map[string]string) map[string]string {
 }
 
 // MergeManagedSessionEnv overlays explicit provider/session env on top of the
-// managed baseline while preserving file-backed credentials as the SSOT.
+// managed baseline while preserving credential SSOT rules.
 func MergeManagedSessionEnv(env map[string]string) map[string]string {
 	out := ManagedSessionBaseline()
 	fileValues := fileBackedCredentialValues()
@@ -189,7 +166,7 @@ func MergeManagedSessionEnv(env map[string]string) map[string]string {
 		out[key] = expanded
 	}
 	for key, value := range fileValues {
-		if value != "" && shouldProjectFileBackedCredentialValue(key) {
+		if value != "" {
 			out[key] = value
 		}
 	}
@@ -201,8 +178,9 @@ func MergeManagedSessionEnv(env map[string]string) map[string]string {
 }
 
 // ManagedSessionBaseline returns the environment baseline shared by all local
-// managed agent/session starts. File-backed credentials are expanded here so a
-// single token file remains the operator-facing SSOT.
+// managed agent/session starts. Claude Code OAuth is intentionally raw-env
+// driven: CLAUDE_CODE_OAUTH_TOKEN is the SSOT; CLAUDE_CODE_OAUTH_TOKEN_FILE is
+// not projected into managed sessions.
 func ManagedSessionBaseline() map[string]string {
 	m := make(map[string]string)
 	if v := os.Getenv("PATH"); v != "" {
@@ -213,7 +191,7 @@ func ManagedSessionBaseline() map[string]string {
 	}
 
 	credentialFiles := fileBackedCredentialValues()
-	for _, key := range []string{"USER", "LOGNAME", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_FILE"} {
+	for _, key := range []string{"USER", "LOGNAME", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN"} {
 		if v := os.Getenv(key); v != "" {
 			if credentialFiles[key] != "" {
 				continue
@@ -222,7 +200,7 @@ func ManagedSessionBaseline() map[string]string {
 		}
 	}
 	for key, value := range credentialFiles {
-		if value != "" && shouldProjectFileBackedCredentialValue(key) {
+		if value != "" {
 			m[key] = value
 		}
 	}
@@ -266,7 +244,7 @@ func ManagedSessionBaseline() map[string]string {
 		}
 	}
 	for key, value := range credentialFiles {
-		if value != "" && shouldProjectFileBackedCredentialValue(key) {
+		if value != "" {
 			m[key] = value
 		}
 	}
