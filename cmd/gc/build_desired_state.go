@@ -1188,9 +1188,11 @@ func selectOrCreatePoolSessionBead(
 	if preferred != nil && preferred.ID != "" && !used[preferred.ID] {
 		return *preferred, nil
 	}
-	// Reuse an existing active/creating session bead. Skip drained, closed,
-	// and asleep — asleep ephemerals are not restarted; a fresh session is
-	// created instead. The reconciler closes orphaned asleep beads.
+	// Reuse an existing active/creating session bead. Replace asleep
+	// ephemerals with a fresh bead. The replacement is created in this same
+	// build pass, so close the asleep bead first to release any managed alias
+	// it holds; otherwise the fresh bead is forced into an aliasless fallback
+	// and pool status shows ghost sessions.
 	for _, bead := range bp.sessionBeads.Open() {
 		if bead.Status == "closed" {
 			continue
@@ -1199,6 +1201,9 @@ func selectOrCreatePoolSessionBead(
 			continue
 		}
 		if bead.Metadata["state"] == "asleep" {
+			if bp.beadStore != nil && normalizedSessionTemplate(bead, &config.City{Agents: bp.agents}) == template && !isManualSessionBeadForAgent(bead, cfgAgent) && !isNamedSessionBead(bead) {
+				closeBead(bp.beadStore, bead.ID, "fresh-replaced", time.Now().UTC(), io.Discard)
+			}
 			continue
 		}
 		if isManualSessionBeadForAgent(bead, cfgAgent) {

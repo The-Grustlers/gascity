@@ -2544,6 +2544,16 @@ func TestSelectOrCreatePoolSessionBead_SkipsAsleepBeads(t *testing.T) {
 	if result.ID == asleep.ID {
 		t.Fatal("asleep pool session should not be reused — a fresh session should be created instead")
 	}
+	closed, err := store.Get(asleep.ID)
+	if err != nil {
+		t.Fatalf("getting replaced asleep bead: %v", err)
+	}
+	if closed.Status != "closed" {
+		t.Fatalf("replaced asleep bead status = %q, want closed", closed.Status)
+	}
+	if got := closed.Metadata["close_reason"]; got != "fresh-replaced" {
+		t.Fatalf("close_reason = %q, want fresh-replaced", got)
+	}
 }
 
 func TestSelectOrCreatePoolSessionBead_ReusesActiveBeforeCreatingNew(t *testing.T) {
