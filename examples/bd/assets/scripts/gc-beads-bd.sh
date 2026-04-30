@@ -283,20 +283,38 @@ backfill_project_id_if_missing() {
     if metadata_has_project_id "$meta_file"; then
         return 0
     fi
-    run_bd_pinned "$dir" migrate --update-repo-id 2>/dev/null || true
+
+    gc_bin=$(resolve_gc_helper_bin)
+    dolt_database=$(read_existing_dolt_database "$meta_file")
+    host=$(connect_host)
+    if [ -n "$gc_bin" ] && [ -n "$dolt_database" ]; then
+        "$gc_bin" dolt-state ensure-project-id \
+            --metadata "$meta_file" \
+            --host "$host" \
+            --port "$DOLT_PORT" \
+            --user "$DOLT_USER" \
+            --database "$dolt_database" >/dev/null 2>&1 || true
+        if metadata_has_project_id "$meta_file"; then
+            return 0
+        fi
+    fi
+
+    # Older bd migrate implementations can update metadata and then keep the
+    # process alive for tens of seconds. Never let that hold supervisor boot.
+    run_with_timeout "${GC_BD_MIGRATE_REPO_ID_TIMEOUT_SECONDS:-10}" \
+        run_bd_pinned "$dir" migrate --update-repo-id >/dev/null 2>&1 || true
     if metadata_has_project_id "$meta_file"; then
         return 0
     fi
-    gc_bin=$(resolve_gc_helper_bin)
-    if [ -z "$gc_bin" ]; then
-        return 0
+
+    if [ -n "$gc_bin" ] && [ -n "$dolt_database" ]; then
+        "$gc_bin" dolt-state ensure-project-id \
+            --metadata "$meta_file" \
+            --host "$host" \
+            --port "$DOLT_PORT" \
+            --user "$DOLT_USER" \
+            --database "$dolt_database" >/dev/null || die "failed to ensure project identity for $dir"
     fi
-    dolt_database=$(read_existing_dolt_database "$meta_file")
-    if [ -z "$dolt_database" ]; then
-        return 0
-    fi
-    host=$(connect_host)
-    "$gc_bin" dolt-state ensure-project-id         --metadata "$meta_file"         --host "$host"         --port "$DOLT_PORT"         --user "$DOLT_USER"         --database "$dolt_database" >/dev/null || die "failed to ensure project identity for $dir"
 }
 
 # --- Robustness Helpers ---

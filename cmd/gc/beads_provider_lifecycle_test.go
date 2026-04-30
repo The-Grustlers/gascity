@@ -3902,7 +3902,7 @@ esac
 	}
 }
 
-func TestGcBeadsBdInitUsesProjectIDHelperWhenRepoIDMigrationFails(t *testing.T) {
+func TestGcBeadsBdInitPrefersProjectIDHelperBeforeRepoIDMigration(t *testing.T) {
 	cityPath := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(cityPath, ".gc"), 0o755); err != nil {
 		t.Fatal(err)
@@ -4017,8 +4017,8 @@ esac
 	if err != nil {
 		t.Fatalf("gc-beads-bd init failed: %v\n%s", err, out)
 	}
-	if _, err := os.Stat(filepath.Join(captureDir, "migrate.called")); err != nil {
-		t.Fatalf("expected migrate attempt before helper fallback, stat err = %v", err)
+	if _, err := os.Stat(filepath.Join(captureDir, "migrate.called")); !os.IsNotExist(err) {
+		t.Fatalf("migrate should be skipped when project-id helper succeeds, stat err = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(captureDir, "helper.called")); err != nil {
 		t.Fatalf("expected project-id helper fallback, stat err = %v", err)
