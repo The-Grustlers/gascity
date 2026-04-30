@@ -13,9 +13,12 @@ func TestGenerateDockerfile(t *testing.T) {
 		t.Error("missing ARG BASE=gc-agent:latest")
 	}
 
-	// Must copy workspace.
-	if !strings.Contains(content, "COPY workspace/ /workspace/") {
-		t.Error("missing COPY workspace/")
+	// Must copy workspace as the default runtime user without a recursive chown.
+	if !strings.Contains(content, "COPY --chown=gcagent:gcagent workspace/ /workspace/") {
+		t.Error("missing COPY --chown workspace/")
+	}
+	if strings.Contains(content, "chown -R") {
+		t.Error("must not recursively chown the workspace")
 	}
 
 	// Must touch the ready sentinel.

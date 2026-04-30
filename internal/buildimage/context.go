@@ -36,30 +36,37 @@ type Manifest struct {
 
 // excludedPaths returns true for paths that should never be baked, regardless
 // of any user-supplied .dockerignore. These are sane defaults: runtime state,
-// secrets, and the embedded beads database (multi-GB; pods access via the
-// host dolt server, not via a baked-in copy).
+// generated worktrees, secrets, and the embedded beads database (multi-GB; pods
+// access via the host dolt server, not via a baked-in copy).
 func excludedPath(rel string) bool {
+	rel = filepath.ToSlash(rel)
+
 	// Runtime state directory — sockets, watchers, ephemeral state.
-	if rel == citylayout.RuntimeRoot+"/runtime" ||
-		strings.HasPrefix(rel, citylayout.RuntimeRoot+"/runtime/") {
+	if pathMatches(rel, citylayout.RuntimeRoot+"/runtime") {
+		return true
+	}
+	// Host-created worker worktrees are mounted into pods at runtime. Baking
+	// them into every image makes rebuilds multi-GB and can leak dirty work.
+	if pathMatches(rel, ".gc/worktrees") {
 		return true
 	}
 	// Controller sockets / locks / event log (huge + transient).
-	if rel == ".gc/controller.lock" || rel == ".gc/controller.sock" ||
-		rel == ".gc/events.jsonl" {
+	if pathMatches(rel, ".gc/controller.lock") ||
+		pathMatches(rel, ".gc/controller.sock") ||
+		pathMatches(rel, ".gc/events.jsonl") {
 		return true
 	}
 	// Agent registry (runtime state).
-	if rel == ".gc/agents" || strings.HasPrefix(rel, ".gc/agents/") {
+	if pathMatches(rel, ".gc/agents") {
 		return true
 	}
 	// Per-session tmp scratch.
-	if rel == ".gc/tmp" || strings.HasPrefix(rel, ".gc/tmp/") {
+	if pathMatches(rel, ".gc/tmp") {
 		return true
 	}
 	// Embedded beads database — multi-GB; pods access via the dolt server on
 	// the host (BEADS_DOLT_SERVER_HOST/PORT), never via a local copy.
-	if rel == ".beads" || strings.HasPrefix(rel, ".beads/") {
+	if pathMatches(rel, ".beads") {
 		return true
 	}
 	// Secrets: match exact base names and specific extensions, not substrings.
@@ -70,6 +77,14 @@ func excludedPath(rel string) bool {
 		return true
 	}
 	return false
+}
+
+func pathMatches(rel, prefix string) bool {
+	prefix = filepath.ToSlash(prefix)
+	return rel == prefix ||
+		strings.HasPrefix(rel, prefix+"/") ||
+		strings.HasSuffix(rel, "/"+prefix) ||
+		strings.Contains(rel, "/"+prefix+"/")
 }
 
 // AssembleContext builds the Docker build context directory.

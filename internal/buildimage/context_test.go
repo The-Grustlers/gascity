@@ -111,6 +111,7 @@ name = "test-city"
 	writeFile(t, cityDir, filepath.Join(citylayout.SystemPacksRoot, "bd", "pack.toml"), "[pack]\nname = \"bd\"\n")
 	writeFile(t, cityDir, filepath.Join(citylayout.CachePacksRoot, "remote", ".git", "HEAD"), "ref: refs/heads/main\n")
 	writeFile(t, cityDir, filepath.Join(citylayout.RuntimeRoot, "runtime", "artifact.txt"), "runtime")
+	writeFile(t, cityDir, filepath.Join(".gc", "worktrees", "rig", "web-workers", "web-worker-1", "artifact.txt"), "dirty worktree")
 	writeFile(t, cityDir, filepath.Join(".gc", "prompts", "mayor.md"), "old prompt")
 	writeFile(t, cityDir, filepath.Join(".gc", "formulas", "legacy.formula.toml"), "name = \"legacy\"\n")
 	writeFile(t, cityDir, filepath.Join(".gc", "settings.json"), "{}")
@@ -129,6 +130,7 @@ name = "test-city"
 	assertFileExists(t, outputDir, filepath.Join("workspace", citylayout.SystemPacksRoot, "bd", "pack.toml"))
 	assertFileExists(t, outputDir, filepath.Join("workspace", citylayout.CachePacksRoot, "remote", ".git", "HEAD"))
 	assertFileNotExists(t, outputDir, filepath.Join("workspace", citylayout.RuntimeRoot, "runtime", "artifact.txt"))
+	assertFileNotExists(t, outputDir, filepath.Join("workspace", ".gc", "worktrees", "rig", "web-workers", "web-worker-1", "artifact.txt"))
 	assertFileExists(t, outputDir, filepath.Join("workspace", ".gc", "prompts", "mayor.md"))
 	assertFileExists(t, outputDir, filepath.Join("workspace", ".gc", "formulas", "legacy.formula.toml"))
 	assertFileExists(t, outputDir, filepath.Join("workspace", ".gc", "scripts", "setup.sh"))
@@ -158,6 +160,42 @@ name = "test-city"
 	// Verify rig content was copied.
 	assertFileExists(t, outputDir, "workspace/my-rig/main.go")
 	assertFileExists(t, outputDir, "workspace/my-rig/README.md")
+}
+
+func TestAssembleContextWithRigPathsExcludesNestedCityRuntime(t *testing.T) {
+	cityDir := t.TempDir()
+	outputDir := t.TempDir()
+	rigDir := t.TempDir()
+
+	writeFile(t, cityDir, "city.toml", `[workspace]
+name = "test-city"
+`)
+	writeFile(t, rigDir, "apps/web/package.json", "{}")
+	writeFile(t, rigDir, "grustle-city/city.toml", "[workspace]\nname = \"nested-city\"\n")
+	writeFile(t, rigDir, "grustle-city/.gc/worktrees/rig/web-workers/web-worker-1/file.txt", "dirty worktree")
+	writeFile(t, rigDir, "grustle-city/.gc/runtime/session-reconciler-trace/trace.jsonl", "{}")
+	writeFile(t, rigDir, "grustle-city/.gc/events.jsonl", "{}")
+	writeFile(t, rigDir, "grustle-city/.gc/controller.lock", "locked")
+	writeFile(t, rigDir, "grustle-city/.gc/tmp/scratch.txt", "tmp")
+	writeFile(t, rigDir, "grustle-city/.beads/issues.jsonl", "{}")
+
+	err := AssembleContext(Options{
+		CityPath:  cityDir,
+		OutputDir: outputDir,
+		RigPaths:  map[string]string{"grustle-monorepo": rigDir},
+	})
+	if err != nil {
+		t.Fatalf("AssembleContext: %v", err)
+	}
+
+	assertFileExists(t, outputDir, "workspace/grustle-monorepo/apps/web/package.json")
+	assertFileExists(t, outputDir, "workspace/grustle-monorepo/grustle-city/city.toml")
+	assertFileNotExists(t, outputDir, "workspace/grustle-monorepo/grustle-city/.gc/worktrees/rig/web-workers/web-worker-1/file.txt")
+	assertFileNotExists(t, outputDir, "workspace/grustle-monorepo/grustle-city/.gc/runtime/session-reconciler-trace/trace.jsonl")
+	assertFileNotExists(t, outputDir, "workspace/grustle-monorepo/grustle-city/.gc/events.jsonl")
+	assertFileNotExists(t, outputDir, "workspace/grustle-monorepo/grustle-city/.gc/controller.lock")
+	assertFileNotExists(t, outputDir, "workspace/grustle-monorepo/grustle-city/.gc/tmp/scratch.txt")
+	assertFileNotExists(t, outputDir, "workspace/grustle-monorepo/grustle-city/.beads/issues.jsonl")
 }
 
 func TestAssembleContextPreservesCustomReferencedCityFiles(t *testing.T) {
@@ -218,11 +256,19 @@ func TestExcludedPath(t *testing.T) {
 		{".gc/system/packs/bd/pack.toml", false},
 		{".gc/cache/packs/remote/.git/HEAD", false},
 		{".gc/runtime/worktrees/agent/file.txt", true},
+		{".gc/worktrees/grustle-monorepo/web-workers/web-worker-1/file.txt", true},
+		{"grustle-city/.gc/runtime/session-reconciler-trace/trace.jsonl", true},
+		{"grustle-city/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1/file.txt", true},
+		{"grustle-city/.gc/events.jsonl", true},
+		{"grustle-city/.gc/controller.lock", true},
+		{"grustle-city/.gc/controller.sock", true},
+		{"grustle-city/.gc/tmp/scratch.txt", true},
 		{".gc/prompts/mayor.md", false},
 		{".gc/formulas/test.toml", false},
 		{".gc/scripts/setup.sh", false},
 		{".gc/settings.json", false},
 		{".beads/issues.jsonl", true},
+		{"grustle-city/.beads/issues.jsonl", true},
 		{".env", true},
 		{"credentials.json", true},
 		{"path/to/secret.key", true},

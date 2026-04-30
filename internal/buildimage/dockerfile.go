@@ -18,10 +18,11 @@ func GenerateDockerfile(baseImage string) []byte {
 ARG BASE=%s
 FROM ${BASE}
 USER root
-COPY workspace/ /workspace/
-# chown to gcagent (default). When LINUX_USERNAME is set at runtime, the pod
-# entrypoint re-chowns the workspace to the dynamic user.
-RUN chown -R gcagent:gcagent /workspace && touch /workspace/.gc-workspace-ready
+COPY --chown=gcagent:gcagent workspace/ /workspace/
+# COPY --chown avoids a slow recursive chown layer for large prebaked contexts.
+# When LINUX_USERNAME is set at runtime, the pod entrypoint still re-chowns the
+# workspace to the dynamic user.
+RUN touch /workspace/.gc-workspace-ready && chown gcagent:gcagent /workspace/.gc-workspace-ready
 USER gcagent
 `
 	return []byte(fmt.Sprintf(tmpl, baseImage))
