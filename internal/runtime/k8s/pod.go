@@ -86,7 +86,16 @@ func projectedPodStoreRoot(cfg runtime.Config, podWorkDir string) string {
 	if storeRoot == "" {
 		storeRoot = controllerCityPath(cfg.Env)
 	}
-	storeRoot = remapControllerPathToPod(storeRoot, controllerCityPath(cfg.Env))
+	ctrlCity := controllerCityPath(cfg.Env)
+	hostWorkDir := projectedHostWorkDir(cfg.Env)
+	hostRigRoot := strings.TrimSpace(cfg.Env["GC_RIG_ROOT"])
+	if hostRigRoot != "" {
+		podRigRoot := "/workspace/" + filepath.Base(hostRigRoot)
+		if storeRoot == hostRigRoot || strings.HasPrefix(storeRoot, hostRigRoot+"/") {
+			storeRoot = podRigRoot + storeRoot[len(hostRigRoot):]
+		}
+	}
+	storeRoot = remapHostPathToPod(storeRoot, ctrlCity, hostWorkDir, podWorkDir)
 	if storeRoot == "" {
 		return podWorkDir
 	}

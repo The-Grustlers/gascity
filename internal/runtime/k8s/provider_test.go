@@ -1551,6 +1551,47 @@ func TestInitBeadsInPodUsesProjectedStoreRootAndPrefix(t *testing.T) {
 	}
 }
 
+func TestInitBeadsInPodMapsHostPreparedRigStoreRoot(t *testing.T) {
+	fake := newFakeK8sOps()
+	cfg := runtime.Config{
+		WorkDir: "/host/city/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1",
+		Env: map[string]string{
+			"GC_CITY":         "/host/city",
+			"GC_DIR":          "/host/city/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1",
+			"GC_RIG_ROOT":     "/home/me/projects/grustle-monorepo",
+			"GC_STORE_ROOT":   "/home/me/projects/grustle-monorepo",
+			"GC_BEADS_PREFIX": "gm",
+			"GC_DOLT_HOST":    "dolt.gc.svc.cluster.local",
+			"GC_DOLT_PORT":    "3307",
+		},
+	}
+	podWorkDir := projectedPodWorkDir(cfg)
+	if podWorkDir != "/workspace/grustle-monorepo" {
+		t.Fatalf("projectedPodWorkDir = %q, want /workspace/grustle-monorepo", podWorkDir)
+	}
+
+	if err := initBeadsInPod(context.Background(), fake, "gc-test-pod", cfg, podWorkDir, podManagedDoltHost, podManagedDoltPort); err != nil {
+		t.Fatalf("initBeadsInPod: %v", err)
+	}
+
+	wantStoreRootB64 := base64.StdEncoding.EncodeToString([]byte("/workspace/grustle-monorepo"))
+	hostStoreRootB64 := base64.StdEncoding.EncodeToString([]byte("/home/me/projects/grustle-monorepo"))
+	for _, c := range fake.calls {
+		if c.method != "execInPod" || len(c.cmd) < 3 || c.cmd[0] != "sh" || c.cmd[1] != "-c" {
+			continue
+		}
+		script := c.cmd[2]
+		if !strings.Contains(script, wantStoreRootB64) {
+			t.Fatalf("repair script missing pod-visible store root %s:\n%s", wantStoreRootB64, script)
+		}
+		if strings.Contains(script, hostStoreRootB64) {
+			t.Fatalf("repair script used host store root %s:\n%s", hostStoreRootB64, script)
+		}
+		return
+	}
+	t.Fatal("no pod repair exec call found")
+}
+
 func TestVerifyBeadsInPodChecksCanonicalFiles(t *testing.T) {
 	fake := newFakeK8sOps()
 	cfg := runtime.Config{
