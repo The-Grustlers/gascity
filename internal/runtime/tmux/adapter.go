@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gastownhall/gascity/internal/overlay"
+	"github.com/gastownhall/gascity/internal/providerenv"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/shellquote"
 )
@@ -63,6 +64,7 @@ func NewProviderWithConfig(cfg Config) *Provider {
 // being set; an agent with no startup hints gets fire-and-forget.
 func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) error {
 	var err error
+	cfg.Env = providerenv.MergeManagedSessionEnv(cfg.Env)
 	cfg.Env, err = ensureInstanceToken(cfg.Env)
 	if err != nil {
 		return fmt.Errorf("ensuring instance token: %w", err)
