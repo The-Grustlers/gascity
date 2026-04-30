@@ -848,11 +848,9 @@ func syncSessionBeadsWithSnapshotAndRigStores(
 				lockFn := func() error {
 					if err := session.EnsureAliasAvailableWithConfigForOwner(store, cfg, managedAlias, "", managedAlias); err != nil {
 						fmt.Fprintf(stderr, "session beads: alias %q for %s unavailable: %v\n", managedAlias, agentName, err) //nolint:errcheck
-						if isConfiguredNamed {
-							createErr = err
-							blocked = true
-							return nil
-						}
+						createErr = err
+						blocked = true
+						return nil
 					} else {
 						meta["alias"] = managedAlias
 					}

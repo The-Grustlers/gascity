@@ -385,6 +385,59 @@ func TestSyncSessionBeads_SetsManagedAlias(t *testing.T) {
 	}
 }
 
+func TestSyncSessionBeads_DefersManagedPoolCreationWhenAliasUnavailable(t *testing.T) {
+	store := beads.NewMemStore()
+	clk := &clock.Fake{Time: time.Date(2026, 4, 29, 22, 0, 0, 0, time.UTC)}
+	sp := runtime.NewFake()
+
+	if _, err := store.Create(beads.Bead{
+		Title:  "older worker",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel},
+		Metadata: map[string]string{
+			"session_name": "web-worker-gc-old",
+			"template":     "grustle-monorepo/web-worker",
+			"alias":        "grustle-monorepo/web-worker-1",
+			"state":        "awake",
+		},
+	}); err != nil {
+		t.Fatalf("creating conflicting bead: %v", err)
+	}
+
+	ds := map[string]TemplateParams{
+		"web-worker-gc-new": {
+			TemplateName: "grustle-monorepo/web-worker",
+			InstanceName: "grustle-monorepo/web-worker-1",
+			Alias:        "grustle-monorepo/web-worker-1",
+			PoolSlot:     1,
+			Command:      "claude",
+		},
+	}
+
+	var stderr bytes.Buffer
+	syncSessionBeads("", store, ds, sp, allConfiguredDS(ds), nil, clk, &stderr, false)
+
+	all, err := store.ListByLabel(sessionBeadLabel, 0)
+	if err != nil {
+		t.Fatalf("listing beads: %v", err)
+	}
+	if len(all) != 0 {
+		t.Fatalf("expected no open fallback bead while alias is unavailable, got %d beads", len(all))
+	}
+	history, err := store.ListByLabel(sessionBeadLabel, 0, beads.IncludeClosed)
+	if err != nil {
+		t.Fatalf("listing bead history: %v", err)
+	}
+	for _, b := range history {
+		if got := b.Metadata["session_name"]; got == "web-worker-gc-new" {
+			t.Fatalf("unexpected aliasless fallback bead created: %#v", b.Metadata)
+		}
+	}
+	if !strings.Contains(stderr.String(), "alias \"grustle-monorepo/web-worker-1\"") {
+		t.Fatalf("stderr = %q, want alias conflict warning", stderr.String())
+	}
+}
+
 func TestSyncSessionBeads_DoesNotCreateFallbackForConfiguredNamedConflict(t *testing.T) {
 	store := beads.NewMemStore()
 	clk := &clock.Fake{Time: time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC)}
