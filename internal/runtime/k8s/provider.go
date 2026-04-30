@@ -211,7 +211,12 @@ func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) e
 	// Ensure .beads/ inside the pod. This remains warning-only so older staged
 	// or prebaked workspaces can self-heal instead of failing session startup.
 	podWorkDir := projectedPodWorkDir(cfg)
-	if err := initBeadsInPod(ctx, p.ops, podName, cfg, podWorkDir, p.managedServiceHost, p.managedServicePort); err != nil {
+	if p.prebaked && p.hostPathRig && strings.TrimSpace(cfg.Env["GC_RIG_ROOT"]) != "" {
+		storeRoot := projectedPodStoreRoot(cfg, podWorkDir)
+		if err := verifyBeadsInPod(ctx, p.ops, podName, cfg, storeRoot, p.managedServiceHost, p.managedServicePort); err != nil {
+			fmt.Fprintf(p.stderr, "gc: warning: verifyBeadsInPod for %s: %v\n", podName, err) //nolint:errcheck
+		}
+	} else if err := initBeadsInPod(ctx, p.ops, podName, cfg, podWorkDir, p.managedServiceHost, p.managedServicePort); err != nil {
 		fmt.Fprintf(p.stderr, "gc: warning: initBeadsInPod for %s: %v\n", podName, err) //nolint:errcheck
 	}
 
@@ -220,11 +225,19 @@ func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) e
 		cleanup("tmux not ready")
 		return fmt.Errorf("waiting for tmux in pod %q: %w", podName, err)
 	}
-	for key, value := range cfg.Env {
-		if key == "" || value == "" {
-			continue
-		}
-		if strings.HasPrefix(key, "GC_") || key == "BEADS_DIR" {
+	podEnv, err := buildPodEnv(cfg.Env, podWorkDir, p.managedServiceHost, p.managedServicePort)
+	if err != nil {
+		fmt.Fprintf(p.stderr, "gc: warning: buildPodEnv for tmux in %s: %v\n", podName, err) //nolint:errcheck
+	} else {
+		for _, entry := range podEnv {
+			key := entry.Name
+			value := entry.Value
+			if key == "" || value == "" {
+				continue
+			}
+			if !strings.HasPrefix(key, "GC_") && key != "BEADS_DIR" {
+				continue
+			}
 			_, _ = p.ops.execInPod(ctx, podName, "agent",
 				[]string{"tmux", "set-environment", "-t", tmuxSession, key, value}, nil)
 		}

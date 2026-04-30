@@ -1718,6 +1718,67 @@ func TestStartUsesPodBeadsRepairScript(t *testing.T) {
 	}
 }
 
+func TestStartHostPathRigVerifiesSharedBeadsWithoutRepair(t *testing.T) {
+	fake := newFakeK8sOps()
+	p := newProviderWithOps(fake)
+	p.prebaked = true
+	p.hostPathRig = true
+	p.postStartSettle = 0
+
+	fake.setExecResult("gc-test-agent",
+		[]string{"tmux", "has-session", "-t", "main"}, "", nil)
+
+	cfg := runtime.Config{
+		Command: "claude --settings .gc/settings.json",
+		WorkDir: "/host/city/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1",
+		Env: map[string]string{
+			"GC_AGENT":      "grustle-monorepo/web-worker-1",
+			"GC_CITY":       "/host/city",
+			"GC_DIR":        "/host/city/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1",
+			"GC_RIG_ROOT":   "/home/me/projects/grustle-monorepo",
+			"GC_STORE_ROOT": "/home/me/projects/grustle-monorepo",
+			"BEADS_DIR":     "/home/me/projects/grustle-monorepo/.beads",
+			"GC_DOLT_PORT":  "43266",
+		},
+	}
+	if err := p.Start(context.Background(), "gc-test-agent", cfg); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	var foundVerify, foundProjectedBeadsDir, foundHostBeadsDir bool
+	for _, c := range fake.calls {
+		if c.method != "execInPod" {
+			continue
+		}
+		if len(c.cmd) >= 5 && c.cmd[0] == "sh" && c.cmd[1] == "-c" {
+			script := c.cmd[2]
+			if strings.Contains(script, "bd init --server") || strings.Contains(script, "m.pop('project_id'") {
+				t.Fatalf("host-mounted rig beads must not be repaired in-place:\n%s", script)
+			}
+			if strings.Contains(script, "test -f .beads/metadata.json") && c.cmd[4] == "/workspace/grustle-monorepo" {
+				foundVerify = true
+			}
+		}
+		if len(c.cmd) == 6 && c.cmd[0] == "tmux" && c.cmd[1] == "set-environment" && c.cmd[4] == "BEADS_DIR" {
+			if c.cmd[5] == "/workspace/grustle-monorepo/.beads" {
+				foundProjectedBeadsDir = true
+			}
+			if strings.Contains(c.cmd[5], "/home/me/projects") {
+				foundHostBeadsDir = true
+			}
+		}
+	}
+	if !foundVerify {
+		t.Fatalf("Start did not verify pod-visible shared beads without repair: calls=%+v", fake.calls)
+	}
+	if !foundProjectedBeadsDir {
+		t.Fatalf("Start did not stamp projected BEADS_DIR into tmux: calls=%+v", fake.calls)
+	}
+	if foundHostBeadsDir {
+		t.Fatalf("Start stamped host BEADS_DIR into tmux: calls=%+v", fake.calls)
+	}
+}
+
 func TestStartWarnsWhenInitBeadsInPodFails(t *testing.T) {
 	fake := newFakeK8sOps()
 	p := newProviderWithOps(fake)
