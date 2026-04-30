@@ -845,6 +845,49 @@ func TestCreateInjectsUnifiedSessionRuntimeEnv(t *testing.T) {
 	}
 }
 
+func TestCreatePrefersFileBackedCredentialOverStaleRuntimeEnv(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
+	if err := os.WriteFile(tokenFile, []byte("file-backed-token\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_FILE", tokenFile)
+
+	store := beads.NewMemStore()
+	sp := runtime.NewFake()
+	mgr := NewManager(store, sp)
+
+	_, err := mgr.CreateAliasedNamedWithTransportAndMetadata(
+		context.Background(),
+		"mayor",
+		"test-city--mayor",
+		"reviewer",
+		"Mayor",
+		"claude",
+		"/tmp",
+		"claude",
+		"",
+		map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "stale-session-token"},
+		ProviderResume{},
+		runtime.Config{Env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "stale-hint-token"}},
+		map[string]string{"session_origin": "named"},
+	)
+	if err != nil {
+		t.Fatalf("CreateAliasedNamedWithTransportAndMetadata: %v", err)
+	}
+
+	cfg := sp.LastStartConfig("test-city--mayor")
+	if cfg == nil {
+		t.Fatalf("Start call not recorded: %#v", sp.Calls)
+	}
+	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != "file-backed-token" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want token from file", got)
+	}
+	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != tokenFile {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want %q", got, tokenFile)
+	}
+}
+
 func TestCreateUsesBuiltinAncestorForGCProviderEnv(t *testing.T) {
 	store := beads.NewMemStore()
 	sp := runtime.NewFake()
@@ -883,6 +926,13 @@ func TestCreateUsesBuiltinAncestorForGCProviderEnv(t *testing.T) {
 }
 
 func TestAttachUsesBuiltinAncestorForGCProviderEnv(t *testing.T) {
+	tokenFile := filepath.Join(t.TempDir(), "oauth-token")
+	if err := os.WriteFile(tokenFile, []byte("file-backed-token\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_FILE", tokenFile)
+
 	store := beads.NewMemStore()
 	sp := runtime.NewFake()
 	mgr := NewManager(store, sp)
@@ -904,7 +954,9 @@ func TestAttachUsesBuiltinAncestorForGCProviderEnv(t *testing.T) {
 		t.Fatalf("creating session bead: %v", err)
 	}
 
-	if err := mgr.Attach(context.Background(), b.ID, "claude --resume abc", runtime.Config{}); err != nil {
+	if err := mgr.Attach(context.Background(), b.ID, "claude --resume abc", runtime.Config{
+		Env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "stale-runtime-token"},
+	}); err != nil {
 		t.Fatalf("Attach: %v", err)
 	}
 
@@ -914,6 +966,12 @@ func TestAttachUsesBuiltinAncestorForGCProviderEnv(t *testing.T) {
 	}
 	if got := cfg.Env["GC_PROVIDER"]; got != "claude" {
 		t.Fatalf("GC_PROVIDER = %q, want claude", got)
+	}
+	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != "file-backed-token" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want token from file", got)
+	}
+	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != tokenFile {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want %q", got, tokenFile)
 	}
 }
 

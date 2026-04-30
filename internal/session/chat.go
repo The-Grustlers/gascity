@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/providerenv"
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/sessionlog"
 	"github.com/gastownhall/gascity/internal/telemetry"
@@ -246,6 +247,7 @@ func (m *Manager) ensureRunning(ctx context.Context, id string, b beads.Bead, se
 	if gcProvider := providerKind(b); gcProvider != "" {
 		cfg.Env = mergeEnv(cfg.Env, map[string]string{"GC_PROVIDER": gcProvider})
 	}
+	cfg.Env = providerenv.MergeManagedSessionEnv(cfg.Env)
 	cfg = runtime.SyncWorkDirEnv(cfg)
 	started := false
 	if err := m.sp.Start(ctx, sessName, cfg); err != nil {
@@ -356,6 +358,7 @@ func (m *Manager) ensureRunningRuntimeOnly(ctx context.Context, id string, b bea
 	} else if provider := strings.TrimSpace(b.Metadata["provider"]); provider != "" {
 		cfg.Env = mergeEnv(cfg.Env, map[string]string{"GC_PROVIDER": provider})
 	}
+	cfg.Env = providerenv.MergeManagedSessionEnv(cfg.Env)
 	cfg = runtime.SyncWorkDirEnv(cfg)
 	started := false
 	if err := m.sp.Start(ctx, sessName, cfg); err != nil {

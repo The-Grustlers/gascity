@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/providerenv"
 	"github.com/gastownhall/gascity/internal/runtime"
 )
 
@@ -475,6 +476,7 @@ func (m *Manager) createAliasedNamedWithTransport(ctx context.Context, alias, ex
 		if gcProvider := providerKindFromMetadata(meta, provider); gcProvider != "" {
 			cfg.Env = mergeEnv(cfg.Env, map[string]string{"GC_PROVIDER": gcProvider})
 		}
+		cfg.Env = providerenv.MergeManagedSessionEnv(cfg.Env)
 		cfg = runtime.SyncWorkDirEnv(cfg)
 
 		// Start the runtime session.
