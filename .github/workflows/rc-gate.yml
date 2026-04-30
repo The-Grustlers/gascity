@@ -7,8 +7,8 @@ permissions:
   contents: read
 
 env:
-  DOLT_VERSION: "1.86.1"
-  BD_VERSION: "v1.0.0"
+  DOLT_VERSION: "1.86.6"
+  BD_VERSION: "v1.0.3"
 
 jobs:
   # Reuse the shared CI graph so RC inherits new parity checks automatically.
@@ -309,7 +309,7 @@ jobs:
         with:
           # The mac runner still needs Go for `make test`, but not for building bd.
           cache: false
-          go-version: "1.25.8"
+          go-version: "1.25.9"
       - name: Install released bd
         run: .github/scripts/install-bd-archive.sh "${{ env.BD_VERSION }}" --cache
       - name: Run make test

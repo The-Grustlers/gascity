@@ -33,6 +33,7 @@
       "customType": "regex",
       "fileMatch": [
         "/^\\.github/workflows/(ci|nightly|mac-regression|rc-gate|review-formulas)\\.yml$/",
+        "/^deps\\.env$/",
         "/^Makefile$/",
         "/^contrib/k8s/Dockerfile\\.base$/"
       ],
@@ -47,7 +48,8 @@
     {
       "customType": "regex",
       "fileMatch": [
-        "/^\\.github/workflows/(ci|nightly|mac-regression|rc-gate|review-formulas)\\.yml$/"
+        "/^\\.github/workflows/(ci|nightly|mac-regression|rc-gate|review-formulas)\\.yml$/",
+        "/^deps\\.env$/"
       ],
       "matchStrings": [
         "BD_VERSION:\\s*\"(?<currentValue>v?\\d+\\.\\d+\\.\\d+)\""
@@ -135,6 +137,29 @@
       ],
       "datasourceTemplate": "npm",
       "depNameTemplate": "@google/gemini-cli"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": [
+        "/^deps\\.env$/"
+      ],
+      "matchStrings": [
+        "BR_VERSION=(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "Dicklesworthstone/beads_rust",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "fileMatch": [
+        "/^\\.github/workflows/container-scan\\.yml$/"
+      ],
+      "matchStrings": [
+        "TRIVY_VERSION:\\s*\"(?<currentValue>v?\\d+\\.\\d+\\.\\d+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "depNameTemplate": "aquasecurity/trivy"
     }
   ]
 }

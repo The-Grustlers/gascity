@@ -86,8 +86,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # Pinned dependency versions — keep in sync with deps.env.
-      DOLT_VERSION: "1.86.1"
-      BD_VERSION: "v1.0.0"
+      DOLT_VERSION: "1.86.6"
+      BD_VERSION: "v1.0.3"
       # Make TestGeneratedClientInSync fatal on missing oapi-codegen so the
       # spec→client drift check can never silently skip in CI.
       GC_REQUIRE_OAPI_CODEGEN: "1"
@@ -153,8 +153,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      DOLT_VERSION: "1.86.1"
-      BD_VERSION: "v1.0.0"
+      DOLT_VERSION: "1.86.6"
+      BD_VERSION: "v1.0.3"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: ./.github/actions/setup-gascity-ubuntu
@@ -190,8 +190,8 @@ jobs:
             timeout_minutes: 35
             command: make test-integration-rest
     env:
-      DOLT_VERSION: "1.86.1"
-      BD_VERSION: "v1.0.0"
+      DOLT_VERSION: "1.86.6"
+      BD_VERSION: "v1.0.3"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: ./.github/actions/setup-gascity-ubuntu
@@ -828,8 +828,8 @@ jobs:
       - name: Pack compatibility tests
         run: make test-acceptance
     env:
-      DOLT_VERSION: "1.86.1"
-      BD_VERSION: "v1.0.0"
+      DOLT_VERSION: "1.86.6"
+      BD_VERSION: "v1.0.3"
 
   # Dashboard SPA typecheck + tests + build. Runs on every push/PR
   # so TS drift against the spec (e.g. a query param tightening from

@@ -3,10 +3,10 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: install-bd-archive.sh VERSION [--cache]
+Usage: install-trivy-archive.sh VERSION [--cache]
 
-Downloads a bd release tarball, verifies its pinned SHA-256, and installs bd.
-Use --cache on self-hosted runners to install under RUNNER_TOOL_CACHE/HOME
+Downloads a Trivy release tarball, verifies its pinned SHA-256, and installs
+trivy. Use --cache on self-hosted runners to install under RUNNER_TOOL_CACHE/HOME
 and add that bin directory to GITHUB_PATH.
 USAGE
 }
@@ -36,8 +36,8 @@ while (($#)); do
 done
 
 case "$(uname -s)" in
-  Darwin) os=darwin ;;
-  Linux) os=linux ;;
+  Darwin) os_asset=macOS ;;
+  Linux) os_asset=Linux ;;
   *)
     echo "Unsupported OS: $(uname -s)" >&2
     exit 1
@@ -45,8 +45,8 @@ case "$(uname -s)" in
 esac
 
 case "$(uname -m)" in
-  arm64|aarch64) arch=arm64 ;;
-  x86_64|amd64) arch=amd64 ;;
+  arm64|aarch64) arch_asset=ARM64 ;;
+  x86_64|amd64) arch_asset=64bit ;;
   *)
     echo "Unsupported architecture: $(uname -m)" >&2
     exit 1
@@ -54,22 +54,19 @@ case "$(uname -m)" in
 esac
 
 version_no_v="${version#v}"
-platform_tuple="${os}_${arch}"
+tag="v${version_no_v}"
+asset_platform="${os_asset}-${arch_asset}"
 expected_sha=""
-case "${version}:${platform_tuple}" in
-  v1.0.3:linux_amd64) expected_sha="1ef5dca818d7e81574df9e9f9fc2a16ab711da09b0fa7b822ae162d9a81c8912" ;;
-  v1.0.3:linux_arm64) expected_sha="243a9c75012e794888fcafb957e7624b8fefdfef033d14cd03ebc9831c3bc12f" ;;
-  v1.0.3:darwin_amd64) expected_sha="6bd75ac056288a5e8bbb203750e95af5a441d5ad1d20ca5511e60cd6c813e54b" ;;
-  v1.0.3:darwin_arm64) expected_sha="fe6e4465751f46d9f3a670c3cf656714a171e44c8bc318fe19054f513b8306ed" ;;
-  v1.0.0:linux_amd64) expected_sha="7057db1e92428fcf5c08d5dc6b07ead57e588b262cba78b9a26893d55bd29fdb" ;;
-  v1.0.0:linux_arm64) expected_sha="9bb30413041e50dac945a0f8aa64011e4b345ebfd0a3f9b5fccd646c6dca61a7" ;;
-  v1.0.0:darwin_amd64) expected_sha="9a3d5bca07c9ce809c205ef9a20f73de6503ab3714655239ce306d862ceeb0d0" ;;
-  v1.0.0:darwin_arm64) expected_sha="b8763b428e6b68550eb2b2505483797794b49ae497a2e265ed3c60f0f0a0bcd2" ;;
+case "${tag}:${asset_platform}" in
+  v0.70.0:Linux-64bit) expected_sha="8b4376d5d6befe5c24d503f10ff136d9e0c49f9127a4279fd110b727929a5aa9" ;;
+  v0.70.0:Linux-ARM64) expected_sha="2f6bb988b553a1bbac6bdd1ce890f5e412439564e17522b88a4541b4f364fc8d" ;;
+  v0.70.0:macOS-64bit) expected_sha="52d531452b19e7593da29366007d02a810e1e0080d02f9cf6a1afb46c35aaa93" ;;
+  v0.70.0:macOS-ARM64) expected_sha="68e543c51dcc96e1c344053a4fde9660cf602c25565d9f09dc17dd41e13b838a" ;;
 esac
 
 github_release_asset_sha() {
   local owner_repo="$1"
-  local tag="$2"
+  local release_tag="$2"
   local asset="$3"
   if ! command -v jq >/dev/null 2>&1; then
     echo "jq is required to resolve GitHub release asset checksums" >&2
@@ -81,16 +78,16 @@ github_release_asset_sha() {
   fi
   curl -fsSL "${auth_header[@]}" \
     -H "Accept: application/vnd.github+json" \
-    "https://api.github.com/repos/${owner_repo}/releases/tags/${tag}" \
+    "https://api.github.com/repos/${owner_repo}/releases/tags/${release_tag}" \
     | jq -r --arg asset "$asset" '.assets[] | select(.name == $asset) | .digest // empty' \
     | sed 's/^sha256://'
 }
 
-archive="beads_${version_no_v}_${platform_tuple}.tar.gz"
+archive="trivy_${version_no_v}_${asset_platform}.tar.gz"
 if [[ -z "$expected_sha" ]]; then
-  expected_sha="$(github_release_asset_sha "gastownhall/beads" "$version" "$archive")"
+  expected_sha="$(github_release_asset_sha "aquasecurity/trivy" "$tag" "$archive")"
   if [[ -z "$expected_sha" ]]; then
-    echo "No bd checksum found for ${version}/${platform_tuple}" >&2
+    echo "No Trivy checksum found for ${tag}/${asset_platform}" >&2
     exit 1
   fi
 fi
@@ -128,35 +125,36 @@ install_binary_with_sudo_fallback() {
 
 if $use_cache; then
   cache_root="${RUNNER_TOOL_CACHE:-$HOME/.local}"
-  bin_dir="${cache_root}/gascity-bd/${version}/${platform_tuple}/bin"
+  bin_dir="${cache_root}/gascity-trivy/${tag}/${asset_platform}/bin"
 else
-  bin_dir="${BD_INSTALL_BIN_DIR:-/usr/local/bin}"
+  bin_dir="${TRIVY_INSTALL_BIN_DIR:-/usr/local/bin}"
 fi
 
-target="${bin_dir}/bd"
+target="${bin_dir}/trivy"
 if [[ -x "$target" ]]; then
-  echo "Reusing cached bd ${version} at ${target}"
+  echo "Reusing cached Trivy ${tag} at ${target}"
 else
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
   curl -fsSL -o "${tmp}/${archive}" \
-    "https://github.com/gastownhall/beads/releases/download/${version}/${archive}"
+    "https://github.com/aquasecurity/trivy/releases/download/${tag}/${archive}"
   actual_sha="$(sha256_file "${tmp}/${archive}")"
   if [[ "$actual_sha" != "$expected_sha" ]]; then
-    echo "bd checksum mismatch for ${version}/${platform_tuple}" >&2
+    echo "Trivy checksum mismatch for ${tag}/${asset_platform}" >&2
     echo "expected: $expected_sha" >&2
     echo "actual:   $actual_sha" >&2
     exit 1
   fi
-  tar -xzf "${tmp}/${archive}" -C "$tmp"
-  src="${tmp}/bd"
-  if [[ ! -x "$src" ]]; then
-    src="${tmp}/beads_${version_no_v}_${platform_tuple}/bd"
+  tar -xzf "${tmp}/${archive}" -C "$tmp" trivy
+  install_target="${tmp}/trivy"
+  if [[ ! -x "$install_target" ]]; then
+    echo "trivy binary not found in ${archive}" >&2
+    exit 1
   fi
   if $use_cache; then
-    install_binary "$src" "$target"
+    install_binary "$install_target" "$target"
   else
-    install_binary_with_sudo_fallback "$src" "$target"
+    install_binary_with_sudo_fallback "$install_target" "$target"
   fi
 fi
 
@@ -164,4 +162,4 @@ if $use_cache && [[ -n "${GITHUB_PATH:-}" ]]; then
   echo "$bin_dir" >> "$GITHUB_PATH"
 fi
 
-"$target" version
+"$target" --version
