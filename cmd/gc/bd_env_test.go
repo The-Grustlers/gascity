@@ -1674,6 +1674,72 @@ dolt.user: stale-user
 	}
 }
 
+func TestBdRuntimeEnvForRigUsesK8sProjectedEndpointForInheritedManagedCity(t *testing.T) {
+	t.Setenv("GC_BEADS", "bd")
+	t.Setenv("GC_K8S_HOSTPATH_RIG", "true")
+	t.Setenv("GC_DOLT_HOST", "dolt.gc.svc.cluster.local")
+	t.Setenv("GC_DOLT_PORT", "3307")
+
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc", "runtime", "packs", "dolt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(cityDir, ".beads"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, ".beads", "config.yaml"), []byte(`issue_prefix: demo
+gc.endpoint_origin: managed_city
+gc.endpoint_status: verified
+dolt.auto-start: false
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	if err := writeDoltState(cityDir, doltRuntimeState{
+		Running:   true,
+		PID:       os.Getpid(),
+		Port:      ln.Addr().(*net.TCPAddr).Port,
+		DataDir:   filepath.Join(cityDir, ".beads", "dolt"),
+		StartedAt: "2026-04-02T08:00:00Z",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rigDir := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(rigDir, ".beads"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rigDir, ".beads", "config.yaml"), []byte(`issue_prefix: repo
+gc.endpoint_origin: inherited_city
+gc.endpoint_status: verified
+dolt.auto-start: false
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	env := bdRuntimeEnvForRig(cityDir, &config.City{Rigs: []config.Rig{{Name: "repo", Path: rigDir}}}, rigDir)
+	if got := env["GC_DOLT_HOST"]; got != "dolt.gc.svc.cluster.local" {
+		t.Fatalf("GC_DOLT_HOST = %q, want projected k8s service", got)
+	}
+	if got := env["GC_DOLT_PORT"]; got != "3307" {
+		t.Fatalf("GC_DOLT_PORT = %q, want projected k8s service port", got)
+	}
+	if got := env["BEADS_DOLT_SERVER_HOST"]; got != "dolt.gc.svc.cluster.local" {
+		t.Fatalf("BEADS_DOLT_SERVER_HOST = %q, want projected k8s service", got)
+	}
+	if got := env["BEADS_DOLT_SERVER_PORT"]; got != "3307" {
+		t.Fatalf("BEADS_DOLT_SERVER_PORT = %q, want projected k8s service port", got)
+	}
+	if got := env["BEADS_DIR"]; got != filepath.Join(rigDir, ".beads") {
+		t.Fatalf("BEADS_DIR = %q, want %q", got, filepath.Join(rigDir, ".beads"))
+	}
+}
+
 func TestBdRuntimeEnvForRigInheritsCompatCityTargetWhenRigConfigLacksEndpointAuthority(t *testing.T) {
 	cityPath := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(cityPath, ".beads"), 0o700); err != nil {

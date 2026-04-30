@@ -92,6 +92,11 @@ func applyCanonicalScopeDoltEnv(env map[string]string, cityPath, scopeRoot strin
 	if err != nil || !ok {
 		return ok, err
 	}
+	if !target.External {
+		if projected, projectedOK := k8sProjectedManagedDoltTargetFromEnv(); projectedOK {
+			target = projected
+		}
+	}
 	applyCanonicalDoltTargetEnv(env, target)
 	applyCanonicalDoltAuthEnv(env, cityPath, scopeRoot, target)
 	mirrorBeadsDoltEnv(env)
