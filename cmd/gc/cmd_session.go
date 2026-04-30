@@ -1075,7 +1075,7 @@ func buildResumeCommand(cityPath string, cfg *config.City, info session.Info, se
 			ReadyDelayMs:           resolved.ReadyDelayMs,
 			ProcessNames:           resolved.ProcessNames,
 			EmitsPermissionWarning: resolved.EmitsPermissionWarning,
-			Env:                    resolved.Env,
+			Env:                    resolvedSessionProviderEnv(resolved.Env),
 		}
 	}
 

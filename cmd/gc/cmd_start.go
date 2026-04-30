@@ -23,8 +23,8 @@ import (
 	"github.com/gastownhall/gascity/internal/events"
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/hooks"
+	"github.com/gastownhall/gascity/internal/providerenv"
 	"github.com/gastownhall/gascity/internal/runtime"
-	"github.com/gastownhall/gascity/internal/telemetry"
 	workdirutil "github.com/gastownhall/gascity/internal/workdir"
 	"github.com/gastownhall/gascity/internal/workspacesvc"
 	"github.com/spf13/cobra"
@@ -949,120 +949,7 @@ func agentCommandDir(cityPath string, a *config.Agent, rigs []config.Rig) string
 // and Claude auth/home context so managed sessions can launch reliably under
 // shell and supervisor-driven flows.
 func passthroughEnv() map[string]string {
-	m := make(map[string]string)
-	// Pass through PATH so managed sessions can find tools, and preserve the
-	// minimum user/home context Claude Code needs to resolve stored credentials.
-	if v := os.Getenv("PATH"); v != "" {
-		m["PATH"] = v
-	}
-	if v := os.Getenv("HOME"); v != "" {
-		m["HOME"] = v
-	}
-	// USER/LOGNAME are required on macOS for Keychain access — without them
-	// providers like Claude Code cannot read stored OAuth credentials.
-	// CLAUDE_CONFIG_DIR and CLAUDE_CODE_OAUTH_TOKEN let managed Claude
-	// sessions find stored credentials and token-based auth.
-	credentialFiles := map[string]string{
-		"CLAUDE_CODE_OAUTH_TOKEN": credentialFromFileEnv("CLAUDE_CODE_OAUTH_TOKEN_FILE"),
-		"ANTHROPIC_API_KEY":       credentialFromFileEnv("ANTHROPIC_API_KEY_FILE"),
-		"ANTHROPIC_AUTH_TOKEN":    credentialFromFileEnv("ANTHROPIC_AUTH_TOKEN_FILE"),
-	}
-	for _, key := range []string{"USER", "LOGNAME", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_FILE"} {
-		if v := os.Getenv(key); v != "" {
-			if credentialFiles[key] != "" {
-				continue
-			}
-			m[key] = v
-		}
-	}
-	for key, value := range credentialFiles {
-		if value != "" {
-			m[key] = value
-		}
-	}
-	// Locale vars are needed so TUI tools (e.g. Claude Code statusline)
-	// correctly render UTF-8 glyphs inside managed tmux sessions.
-	// The supervisor may run as a launchd service with no locale set,
-	// so fall back to en_US.UTF-8 when the environment is empty.
-	for _, key := range []string{"LANG", "LC_ALL", "LC_CTYPE"} {
-		if v := os.Getenv(key); v != "" {
-			m[key] = v
-		}
-	}
-	if _, ok := m["LC_ALL"]; !ok {
-		m["LC_ALL"] = ""
-	}
-	if _, ok := m["LC_CTYPE"]; !ok {
-		m["LC_CTYPE"] = ""
-	}
-	if m["LANG"] == "" && m["LC_ALL"] == "" && m["LC_CTYPE"] == "" {
-		// This fallback targets launchd-managed macOS sessions; explicit
-		// city or agent env can still override it through later layers.
-		m["LANG"] = "en_US.UTF-8"
-	}
-	// XDG directories are needed for providers to locate config files
-	// (e.g. ~/.config/opencode/opencode.jsonc). When not set, compute
-	// defaults from HOME so spawned sessions always find user config.
-	if v := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); v != "" {
-		m["XDG_CONFIG_HOME"] = v
-	} else if home := os.Getenv("HOME"); home != "" {
-		m["XDG_CONFIG_HOME"] = filepath.Join(home, ".config")
-	}
-	if v := strings.TrimSpace(os.Getenv("XDG_STATE_HOME")); v != "" {
-		m["XDG_STATE_HOME"] = v
-	} else if home := os.Getenv("HOME"); home != "" {
-		m["XDG_STATE_HOME"] = filepath.Join(home, ".local", "state")
-	}
-	// Pass through GC_* vars and provider credential env. Agent credentials are
-	// included in the global baseline because the SDK cannot know which
-	// agent uses which provider (zero hardcoded roles); the trust boundary
-	// is the managed session itself.
-	for _, entry := range os.Environ() {
-		key, val, ok := strings.Cut(entry, "=")
-		if !ok || val == "" {
-			continue
-		}
-		if strings.HasPrefix(key, "GC_") || isProviderCredentialEnv(key) {
-			if credentialFiles[key] != "" {
-				continue
-			}
-			m[key] = val
-		}
-	}
-	for key, value := range credentialFiles {
-		if value != "" {
-			m[key] = value
-		}
-	}
-	// Propagate OTel env vars so agent subprocesses emit telemetry.
-	for k, v := range telemetry.OTELEnvMap() {
-		m[k] = v
-	}
-	// Always clear Claude nesting-detection vars so agents don't refuse to
-	// start when gc is run from inside a Claude Code session. Set
-	// unconditionally so the fingerprint is stable regardless of whether
-	// the supervisor or a user shell created the session bead.
-	m["CLAUDECODE"] = ""
-	m["CLAUDE_CODE_ENTRYPOINT"] = ""
-	return m
-}
-
-func credentialFromFileEnv(key string) string {
-	path := strings.TrimSpace(os.Getenv(key))
-	if path == "" {
-		return ""
-	}
-	path = os.ExpandEnv(path)
-	if strings.HasPrefix(path, "~/") {
-		if home := os.Getenv("HOME"); home != "" {
-			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
-		}
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(data))
+	return providerenv.ManagedSessionBaseline()
 }
 
 // expandEnvMap returns a copy of m with os.ExpandEnv applied to each value.

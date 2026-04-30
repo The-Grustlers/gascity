@@ -21,6 +21,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/gastownhall/gascity/internal/providerenv"
 	"github.com/gastownhall/gascity/internal/searchpath"
 	"github.com/gastownhall/gascity/internal/supervisor"
 	"github.com/spf13/cobra"
@@ -401,13 +402,6 @@ var supervisorServiceEnvKeys = map[string]bool{
 	"XDG_STATE_HOME":                           true,
 }
 
-var providerCredentialEnvPrefixes = []string{
-	"ANTHROPIC_",
-	"GEMINI_",
-	"GOOGLE_",
-	"OPENAI_",
-}
-
 var supervisorServiceFixedEnvKeys = map[string]bool{
 	"GC_HOME":         true,
 	"PATH":            true,
@@ -448,16 +442,7 @@ func shouldPersistSupervisorEnv(key string) bool {
 	if supervisorServiceEnvKeys[key] {
 		return true
 	}
-	return isProviderCredentialEnv(key)
-}
-
-func isProviderCredentialEnv(key string) bool {
-	for _, prefix := range providerCredentialEnvPrefixes {
-		if strings.HasPrefix(key, prefix) {
-			return true
-		}
-	}
-	return false
+	return providerenv.IsCredentialEnv(key)
 }
 
 func supervisorServiceExplicitEnvKeys(raw string) []string {

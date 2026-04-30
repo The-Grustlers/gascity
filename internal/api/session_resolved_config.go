@@ -47,7 +47,7 @@ func resolvedSessionConfigForProvider(
 			Command:    firstNonEmptyString(command, resolvedCommand, resolved.Name),
 			WorkDir:    workDir,
 			Provider:   resolved.Name,
-			SessionEnv: resolved.Env,
+			SessionEnv: providerSessionEnv(resolved.Env),
 			Resume: session.ProviderResume{
 				ResumeFlag:    resolved.ResumeFlag,
 				ResumeStyle:   resolved.ResumeStyle,

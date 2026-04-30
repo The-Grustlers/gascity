@@ -44,7 +44,7 @@ func sessionResumeHints(resolved *config.ResolvedProvider, workDir string, mcpSe
 		ReadyDelayMs:           resolved.ReadyDelayMs,
 		ProcessNames:           resolved.ProcessNames,
 		EmitsPermissionWarning: resolved.EmitsPermissionWarning,
-		Env:                    resolved.Env,
+		Env:                    providerSessionEnv(resolved.Env),
 		MCPServers:             mcpServers,
 	}
 }
@@ -370,7 +370,7 @@ func (s *Server) resolveWorkerSessionRuntimeWithMetadata(info session.Info, _ st
 		Command:    command,
 		WorkDir:    firstNonEmptyString(info.WorkDir, workDir),
 		Provider:   firstNonEmptyString(info.Provider, resolved.Name),
-		SessionEnv: resolved.Env,
+		SessionEnv: providerSessionEnv(resolved.Env),
 		Hints:      sessionResumeHints(resolved, firstNonEmptyString(workDir, info.WorkDir), mcpServers),
 		Resume: session.ProviderResume{
 			ResumeFlag:    firstNonEmptyString(resolved.ResumeFlag, info.ResumeFlag),
@@ -467,12 +467,12 @@ func (s *Server) startedConfigHashProvesACPTransport(
 	}
 	acpHash := runtime.CoreFingerprint(runtime.Config{
 		Command:    acpCommand,
-		Env:        resolved.Env,
+		Env:        providerSessionEnv(resolved.Env),
 		MCPServers: mcpServers,
 	})
 	defaultHash := runtime.CoreFingerprint(runtime.Config{
 		Command: defaultCommand,
-		Env:     resolved.Env,
+		Env:     providerSessionEnv(resolved.Env),
 	})
 	if acpHash == defaultHash {
 		return false

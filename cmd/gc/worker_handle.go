@@ -106,6 +106,10 @@ func workerSessionCreateHints(resolved *config.ResolvedProvider) runtime.Config 
 	}
 }
 
+func resolvedSessionProviderEnv(env map[string]string) map[string]string {
+	return mergeEnv(passthroughEnv(), expandEnvMap(env))
+}
+
 func resolvedRuntimeMCPServersWithConfig(
 	cityPath string,
 	cfg *config.City,
@@ -282,7 +286,7 @@ func resolvedWorkerSessionConfigWithConfig(
 			Command:    command,
 			WorkDir:    workDir,
 			Provider:   providerName,
-			SessionEnv: resolved.Env,
+			SessionEnv: resolvedSessionProviderEnv(resolved.Env),
 			Resume: session.ProviderResume{
 				ResumeFlag:    resolved.ResumeFlag,
 				ResumeStyle:   resolved.ResumeStyle,
@@ -488,7 +492,7 @@ func resolvedWorkerRuntimeWithConfigAndMetadata(cityPath string, cfg *config.Cit
 		Command:    command,
 		WorkDir:    workDir,
 		Provider:   firstNonEmptyGCString(info.Provider, resolved.Name),
-		SessionEnv: resolved.Env,
+		SessionEnv: resolvedSessionProviderEnv(resolved.Env),
 		Hints: runtime.Config{
 			WorkDir:                workDir,
 			ReadyPromptPrefix:      resolved.ReadyPromptPrefix,
