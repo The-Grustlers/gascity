@@ -22,8 +22,9 @@ FROM ${BASE_IMAGE}
 # Build with: cp $(which bd) . && docker build ...
 COPY bd /usr/local/bin/bd
 
-# br (beads_rust) CLI — copied from build context.
-# Build with: cp $(which br) . && docker build ...
+# br (beads_rust) CLI — copied from build context when present. `make
+# docker-agent` supplies a small placeholder when the optional br backend is
+# not installed locally, so unrelated agent image rebuilds still succeed.
 COPY br /usr/local/bin/br
 
 # gc binary — copied from build context.

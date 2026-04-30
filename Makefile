@@ -484,7 +484,15 @@ docker-agent: check-docker
 	@set -e; \
 		cp bin/gc gc; \
 		cp "$$(command -v bd)" bd; \
-		cp "$$(command -v br)" br; \
+		if command -v br >/dev/null 2>&1; then \
+			cp "$$(command -v br)" br; \
+		else \
+			printf '%s\n' \
+				'#!/usr/bin/env sh' \
+				'echo "br CLI is not installed in this gc-agent image; exec:beads/br is unavailable" >&2' \
+				'exit 127' > br; \
+			chmod +x br; \
+		fi; \
 		trap 'rm -f gc bd br' EXIT; \
 		docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
 	@if kubectl config current-context 2>/dev/null | grep -q '^kind-'; then \
