@@ -880,8 +880,8 @@ func TestCreatePrefersFileBackedCredentialOverStaleRuntimeEnv(t *testing.T) {
 	if cfg == nil {
 		t.Fatalf("Start call not recorded: %#v", sp.Calls)
 	}
-	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != "file-backed-token" {
-		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want token from file", got)
+	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != "" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want empty because token file is the managed SSOT", got)
 	}
 	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != tokenFile {
 		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want %q", got, tokenFile)
@@ -967,8 +967,8 @@ func TestAttachUsesBuiltinAncestorForGCProviderEnv(t *testing.T) {
 	if got := cfg.Env["GC_PROVIDER"]; got != "claude" {
 		t.Fatalf("GC_PROVIDER = %q, want claude", got)
 	}
-	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != "file-backed-token" {
-		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want token from file", got)
+	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN"]; got != "" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want empty because token file is the managed SSOT", got)
 	}
 	if got := cfg.Env["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != tokenFile {
 		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want %q", got, tokenFile)

@@ -1695,8 +1695,8 @@ func TestResolvedWorkerRuntimeIncludesFileBackedClaudeCredentialEnv(t *testing.T
 	if runtimeCfg == nil {
 		t.Fatal("runtime config is nil")
 	}
-	if got := runtimeCfg.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN"]; got != "file-backed-token" {
-		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN] = %q, want token from file", got)
+	if got := runtimeCfg.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN"]; got != "" {
+		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN] = %q, want empty because token file is the managed SSOT", got)
 	}
 	if got := runtimeCfg.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != tokenFile {
 		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN_FILE] = %q, want %q", got, tokenFile)
@@ -1743,8 +1743,8 @@ func TestResolvedWorkerSessionConfigIncludesFileBackedClaudeCredentialEnv(t *tes
 	if err != nil {
 		t.Fatalf("resolvedWorkerSessionConfigWithConfig: %v", err)
 	}
-	if got := sessionCfg.Runtime.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN"]; got != "file-backed-token" {
-		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN] = %q, want token from file", got)
+	if got := sessionCfg.Runtime.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN"]; got != "" {
+		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN] = %q, want empty because token file is the managed SSOT", got)
 	}
 	if got := sessionCfg.Runtime.SessionEnv["CLAUDE_CODE_OAUTH_TOKEN_FILE"]; got != tokenFile {
 		t.Fatalf("SessionEnv[CLAUDE_CODE_OAUTH_TOKEN_FILE] = %q, want %q", got, tokenFile)

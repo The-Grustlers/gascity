@@ -223,8 +223,8 @@ func TestPassthroughEnvPrefersClaudeOAuthTokenFile(t *testing.T) {
 
 	got := passthroughEnv()
 
-	if got["CLAUDE_CODE_OAUTH_TOKEN"] != "file-token" {
-		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want token from file", got["CLAUDE_CODE_OAUTH_TOKEN"])
+	if got["CLAUDE_CODE_OAUTH_TOKEN"] != "" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want empty because token file is the managed SSOT", got["CLAUDE_CODE_OAUTH_TOKEN"])
 	}
 	if got["CLAUDE_CODE_OAUTH_TOKEN_FILE"] != tokenFile {
 		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want %q", got["CLAUDE_CODE_OAUTH_TOKEN_FILE"], tokenFile)

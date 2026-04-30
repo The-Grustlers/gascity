@@ -19,8 +19,8 @@ func TestMergeManagedSessionEnvPreservesFileBackedCredentialSSOT(t *testing.T) {
 		"EXTRA_PROVIDER_ENV":      "kept",
 	})
 
-	if got["CLAUDE_CODE_OAUTH_TOKEN"] != "file-backed-token" {
-		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want token from file", got["CLAUDE_CODE_OAUTH_TOKEN"])
+	if got["CLAUDE_CODE_OAUTH_TOKEN"] != "" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want empty because file path is the managed SSOT", got["CLAUDE_CODE_OAUTH_TOKEN"])
 	}
 	if got["CLAUDE_CODE_OAUTH_TOKEN_FILE"] != tokenFile {
 		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want %q", got["CLAUDE_CODE_OAUTH_TOKEN_FILE"], tokenFile)
@@ -45,8 +45,8 @@ func TestMergeManagedSessionEnvSuppressesOAuthMirroredAnthropicKey(t *testing.T)
 		"ANTHROPIC_API_KEY_FILE": tokenFile,
 	})
 
-	if got["CLAUDE_CODE_OAUTH_TOKEN"] != "oauth-token" {
-		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want token from OAuth file", got["CLAUDE_CODE_OAUTH_TOKEN"])
+	if got["CLAUDE_CODE_OAUTH_TOKEN"] != "" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want empty because file path is the managed SSOT", got["CLAUDE_CODE_OAUTH_TOKEN"])
 	}
 	if got["ANTHROPIC_API_KEY"] != "" {
 		t.Fatalf("ANTHROPIC_API_KEY = %q, want explicit unset", got["ANTHROPIC_API_KEY"])

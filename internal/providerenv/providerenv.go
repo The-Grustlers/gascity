@@ -21,6 +21,10 @@ var fileBackedCredentials = map[string]string{
 	"ANTHROPIC_AUTH_TOKEN":    "ANTHROPIC_AUTH_TOKEN_FILE",
 }
 
+var pathOnlyFileBackedCredentials = map[string]bool{
+	"CLAUDE_CODE_OAUTH_TOKEN": true,
+}
+
 var oauthIncompatibleAnthropicCredentials = map[string]bool{
 	"ANTHROPIC_API_KEY":    true,
 	"ANTHROPIC_AUTH_TOKEN": true,
@@ -98,6 +102,10 @@ func activeFileBackedCredentialFiles(values map[string]string) map[string]string
 	return files
 }
 
+func shouldProjectFileBackedCredentialValue(key string) bool {
+	return !pathOnlyFileBackedCredentials[key]
+}
+
 func knownCredentialFileKey(fileKey string) bool {
 	for _, candidate := range fileBackedCredentials {
 		if fileKey == candidate {
@@ -157,7 +165,7 @@ func MergeFileBackedCredentials(env map[string]string) map[string]string {
 	}
 	activeFiles := activeFileBackedCredentialFiles(fileValues)
 	for key, value := range fileValues {
-		if value != "" {
+		if value != "" && shouldProjectFileBackedCredentialValue(key) {
 			out[key] = value
 		}
 		if fileKey := fileBackedCredentials[key]; activeFiles[fileKey] != "" {
@@ -181,7 +189,7 @@ func MergeManagedSessionEnv(env map[string]string) map[string]string {
 		out[key] = expanded
 	}
 	for key, value := range fileValues {
-		if value != "" {
+		if value != "" && shouldProjectFileBackedCredentialValue(key) {
 			out[key] = value
 		}
 	}
@@ -214,7 +222,7 @@ func ManagedSessionBaseline() map[string]string {
 		}
 	}
 	for key, value := range credentialFiles {
-		if value != "" {
+		if value != "" && shouldProjectFileBackedCredentialValue(key) {
 			m[key] = value
 		}
 	}
@@ -258,7 +266,7 @@ func ManagedSessionBaseline() map[string]string {
 		}
 	}
 	for key, value := range credentialFiles {
-		if value != "" {
+		if value != "" && shouldProjectFileBackedCredentialValue(key) {
 			m[key] = value
 		}
 	}
