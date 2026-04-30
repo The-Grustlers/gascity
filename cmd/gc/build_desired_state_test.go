@@ -2556,6 +2556,100 @@ func TestSelectOrCreatePoolSessionBead_SkipsAsleepBeads(t *testing.T) {
 	}
 }
 
+func TestSelectOrCreatePoolSessionBead_StopsFreshReplacedRuntimeWhenOwnerMatches(t *testing.T) {
+	store := beads.NewMemStore()
+	cfgAgent := config.Agent{Name: "polecat", MinActiveSessions: intPtr(0), MaxActiveSessions: intPtr(5)}
+
+	asleep, err := store.Create(beads.Bead{
+		Title:  "polecat",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel, "template:polecat"},
+		Metadata: map[string]string{
+			"template":       "polecat",
+			"session_name":   "polecat-gc-old",
+			"state":          "asleep",
+			"pool_managed":   "true",
+			"instance_token": "old-token",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sp := runtime.NewFake()
+	if err := sp.SetMeta("polecat-gc-old", "GC_SESSION_ID", asleep.ID); err != nil {
+		t.Fatalf("set runtime owner: %v", err)
+	}
+	if err := sp.SetMeta("polecat-gc-old", "GC_INSTANCE_TOKEN", "old-token"); err != nil {
+		t.Fatalf("set runtime token: %v", err)
+	}
+	bp := &agentBuildParams{
+		beadStore:    store,
+		sessionBeads: newSessionBeadSnapshot([]beads.Bead{asleep}),
+		sp:           sp,
+		agents:       []config.Agent{cfgAgent},
+	}
+
+	if _, err := selectOrCreatePoolSessionBead(bp, "polecat", nil, map[string]bool{}); err != nil {
+		t.Fatalf("selectOrCreatePoolSessionBead: %v", err)
+	}
+
+	stops := 0
+	for _, call := range sp.Calls {
+		if call.Method == "Stop" && call.Name == "polecat-gc-old" {
+			stops++
+		}
+	}
+	if stops != 1 {
+		t.Fatalf("Stop(polecat-gc-old) calls = %d, want 1; calls=%+v", stops, sp.Calls)
+	}
+}
+
+func TestSelectOrCreatePoolSessionBead_DoesNotStopFreshReplacedRuntimeOwnedByNewBead(t *testing.T) {
+	store := beads.NewMemStore()
+	cfgAgent := config.Agent{Name: "polecat", MinActiveSessions: intPtr(0), MaxActiveSessions: intPtr(5)}
+
+	asleep, err := store.Create(beads.Bead{
+		Title:  "polecat",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel, "template:polecat"},
+		Metadata: map[string]string{
+			"template":       "polecat",
+			"session_name":   "polecat-gc-reused",
+			"state":          "asleep",
+			"pool_managed":   "true",
+			"instance_token": "old-token",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sp := runtime.NewFake()
+	if err := sp.SetMeta("polecat-gc-reused", "GC_SESSION_ID", "gc-new-owner"); err != nil {
+		t.Fatalf("set runtime owner: %v", err)
+	}
+	if err := sp.SetMeta("polecat-gc-reused", "GC_INSTANCE_TOKEN", "new-token"); err != nil {
+		t.Fatalf("set runtime token: %v", err)
+	}
+	bp := &agentBuildParams{
+		beadStore:    store,
+		sessionBeads: newSessionBeadSnapshot([]beads.Bead{asleep}),
+		sp:           sp,
+		agents:       []config.Agent{cfgAgent},
+	}
+
+	if _, err := selectOrCreatePoolSessionBead(bp, "polecat", nil, map[string]bool{}); err != nil {
+		t.Fatalf("selectOrCreatePoolSessionBead: %v", err)
+	}
+
+	for _, call := range sp.Calls {
+		if call.Method == "Stop" {
+			t.Fatalf("unexpected Stop call for reused runtime: %+v; calls=%+v", call, sp.Calls)
+		}
+	}
+}
+
 func TestSelectOrCreatePoolSessionBead_ReusesActiveBeforeCreatingNew(t *testing.T) {
 	// An active (awake) pool session IS reused — no fresh bead created.
 	store := beads.NewMemStore()

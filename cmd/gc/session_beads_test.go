@@ -121,6 +121,59 @@ func TestSyncSessionBeads_CreatesNewBeads(t *testing.T) {
 	}
 }
 
+func TestSyncSessionBeads_StopsDuplicateRuntimeWhenOwnerMatchesClosedBead(t *testing.T) {
+	store := beads.NewMemStore()
+	clk := &clock.Fake{Time: time.Date(2026, 3, 7, 12, 0, 0, 0, time.UTC)}
+	sp := runtime.NewFake()
+
+	duplicate, err := store.Create(beads.Bead{
+		Title:  "worker",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel},
+		Metadata: map[string]string{
+			"session_name":   "worker-gc-old",
+			"template":       "worker",
+			"state":          "active",
+			"instance_token": "old-token",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create duplicate bead: %v", err)
+	}
+	if _, err := store.Create(beads.Bead{
+		Title:  "worker",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel},
+		Metadata: map[string]string{
+			"session_name":   "worker-gc-old",
+			"template":       "worker",
+			"state":          "active",
+			"instance_token": "new-token",
+		},
+	}); err != nil {
+		t.Fatalf("create canonical bead: %v", err)
+	}
+	if err := sp.SetMeta("worker-gc-old", "GC_SESSION_ID", duplicate.ID); err != nil {
+		t.Fatalf("set runtime owner: %v", err)
+	}
+	if err := sp.SetMeta("worker-gc-old", "GC_INSTANCE_TOKEN", "old-token"); err != nil {
+		t.Fatalf("set runtime token: %v", err)
+	}
+
+	var stderr bytes.Buffer
+	syncSessionBeads("", store, nil, sp, map[string]bool{}, nil, clk, &stderr, true)
+
+	stops := 0
+	for _, call := range sp.Calls {
+		if call.Method == "Stop" && call.Name == "worker-gc-old" {
+			stops++
+		}
+	}
+	if stops != 1 {
+		t.Fatalf("Stop(worker-gc-old) calls = %d, want 1; calls=%+v", stops, sp.Calls)
+	}
+}
+
 func TestSyncSessionBeads_ExistingDesiredUsesSnapshotStateWithoutWorkerLookup(t *testing.T) {
 	base := beads.NewMemStore()
 	store := &sessionGetSpyStore{Store: base}

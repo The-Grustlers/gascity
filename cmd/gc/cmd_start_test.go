@@ -211,6 +211,46 @@ func TestPassthroughEnvIncludesClaudeAuthContext(t *testing.T) {
 	}
 }
 
+func TestPassthroughEnvPrefersClaudeOAuthTokenFile(t *testing.T) {
+	dir := t.TempDir()
+	tokenFile := filepath.Join(dir, "claude-token")
+	if err := os.WriteFile(tokenFile, []byte("file-token\n"), 0o600); err != nil {
+		t.Fatalf("write token file: %v", err)
+	}
+	t.Setenv("HOME", dir)
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "ambient-token")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN_FILE", tokenFile)
+
+	got := passthroughEnv()
+
+	if got["CLAUDE_CODE_OAUTH_TOKEN"] != "file-token" {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want token from file", got["CLAUDE_CODE_OAUTH_TOKEN"])
+	}
+	if got["CLAUDE_CODE_OAUTH_TOKEN_FILE"] != tokenFile {
+		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN_FILE = %q, want %q", got["CLAUDE_CODE_OAUTH_TOKEN_FILE"], tokenFile)
+	}
+}
+
+func TestPassthroughEnvPrefersAnthropicAPIKeyFile(t *testing.T) {
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "anthropic-key")
+	if err := os.WriteFile(keyFile, []byte("file-key\n"), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+	t.Setenv("HOME", dir)
+	t.Setenv("ANTHROPIC_API_KEY", "ambient-key")
+	t.Setenv("ANTHROPIC_API_KEY_FILE", keyFile)
+
+	got := passthroughEnv()
+
+	if got["ANTHROPIC_API_KEY"] != "file-key" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q, want key from file", got["ANTHROPIC_API_KEY"])
+	}
+	if got["ANTHROPIC_API_KEY_FILE"] != keyFile {
+		t.Fatalf("ANTHROPIC_API_KEY_FILE = %q, want %q", got["ANTHROPIC_API_KEY_FILE"], keyFile)
+	}
+}
+
 func TestPassthroughEnvIncludesProviderCredentialEnv(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-123")
 	t.Setenv("OPENAI_API_KEY", "sk-openai-123")

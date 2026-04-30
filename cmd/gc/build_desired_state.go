@@ -1202,7 +1202,9 @@ func selectOrCreatePoolSessionBead(
 		}
 		if bead.Metadata["state"] == "asleep" {
 			if bp.beadStore != nil && normalizedSessionTemplate(bead, &config.City{Agents: bp.agents}) == template && !isManualSessionBeadForAgent(bead, cfgAgent) && !isNamedSessionBead(bead) {
-				closeBead(bp.beadStore, bead.ID, "fresh-replaced", time.Now().UTC(), io.Discard)
+				if closeBead(bp.beadStore, bead.ID, "fresh-replaced", time.Now().UTC(), io.Discard) {
+					stopRuntimeIfOwnedBySessionBead(bp.sp, bead, "fresh-replaced", bp.stderr)
+				}
 			}
 			continue
 		}

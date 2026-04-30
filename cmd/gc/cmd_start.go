@@ -962,9 +962,22 @@ func passthroughEnv() map[string]string {
 	// providers like Claude Code cannot read stored OAuth credentials.
 	// CLAUDE_CONFIG_DIR and CLAUDE_CODE_OAUTH_TOKEN let managed Claude
 	// sessions find stored credentials and token-based auth.
-	for _, key := range []string{"USER", "LOGNAME", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN"} {
+	credentialFiles := map[string]string{
+		"CLAUDE_CODE_OAUTH_TOKEN": credentialFromFileEnv("CLAUDE_CODE_OAUTH_TOKEN_FILE"),
+		"ANTHROPIC_API_KEY":       credentialFromFileEnv("ANTHROPIC_API_KEY_FILE"),
+		"ANTHROPIC_AUTH_TOKEN":    credentialFromFileEnv("ANTHROPIC_AUTH_TOKEN_FILE"),
+	}
+	for _, key := range []string{"USER", "LOGNAME", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN_FILE"} {
 		if v := os.Getenv(key); v != "" {
+			if credentialFiles[key] != "" {
+				continue
+			}
 			m[key] = v
+		}
+	}
+	for key, value := range credentialFiles {
+		if value != "" {
+			m[key] = value
 		}
 	}
 	// Locale vars are needed so TUI tools (e.g. Claude Code statusline)
@@ -1010,7 +1023,15 @@ func passthroughEnv() map[string]string {
 			continue
 		}
 		if strings.HasPrefix(key, "GC_") || isProviderCredentialEnv(key) {
+			if credentialFiles[key] != "" {
+				continue
+			}
 			m[key] = val
+		}
+	}
+	for key, value := range credentialFiles {
+		if value != "" {
+			m[key] = value
 		}
 	}
 	// Propagate OTel env vars so agent subprocesses emit telemetry.
@@ -1024,6 +1045,24 @@ func passthroughEnv() map[string]string {
 	m["CLAUDECODE"] = ""
 	m["CLAUDE_CODE_ENTRYPOINT"] = ""
 	return m
+}
+
+func credentialFromFileEnv(key string) string {
+	path := strings.TrimSpace(os.Getenv(key))
+	if path == "" {
+		return ""
+	}
+	path = os.ExpandEnv(path)
+	if strings.HasPrefix(path, "~/") {
+		if home := os.Getenv("HOME"); home != "" {
+			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // expandEnvMap returns a copy of m with os.ExpandEnv applied to each value.

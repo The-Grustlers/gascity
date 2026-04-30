@@ -77,6 +77,48 @@ func syncSessionCachedState(sessionName string, existing beads.Bead, exists bool
 	return "stopped"
 }
 
+func stopRuntimeIfOwnedBySessionBead(sp runtime.Provider, bead beads.Bead, reason string, stderr io.Writer) {
+	if sp == nil {
+		return
+	}
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	sessionName := strings.TrimSpace(bead.Metadata["session_name"])
+	beadID := strings.TrimSpace(bead.ID)
+	if sessionName == "" || beadID == "" {
+		return
+	}
+
+	liveID, err := sp.GetMeta(sessionName, "GC_SESSION_ID")
+	if err != nil {
+		if !runtime.IsSessionGone(err) {
+			fmt.Fprintf(stderr, "session beads: reading runtime owner for %s (%s): %v\n", sessionName, reason, err) //nolint:errcheck
+		}
+		return
+	}
+	if strings.TrimSpace(liveID) != beadID {
+		return
+	}
+
+	if expectedToken := strings.TrimSpace(bead.Metadata["instance_token"]); expectedToken != "" {
+		liveToken, err := sp.GetMeta(sessionName, "GC_INSTANCE_TOKEN")
+		if err != nil {
+			if !runtime.IsSessionGone(err) {
+				fmt.Fprintf(stderr, "session beads: reading runtime token for %s (%s): %v\n", sessionName, reason, err) //nolint:errcheck
+			}
+			return
+		}
+		if liveToken = strings.TrimSpace(liveToken); liveToken != "" && liveToken != expectedToken {
+			return
+		}
+	}
+
+	if err := sp.Stop(sessionName); err != nil && !runtime.IsSessionGone(err) {
+		fmt.Fprintf(stderr, "session beads: stopping closed runtime %s (%s): %v\n", sessionName, reason, err) //nolint:errcheck
+	}
+}
+
 func stampResolvedProviderSessionMetadata(meta map[string]string, resolved *config.ResolvedProvider) {
 	if meta == nil || resolved == nil {
 		return
@@ -690,6 +732,7 @@ func syncSessionBeadsWithSnapshotAndRigStores(
 		canonical, ok := bySessionName[sn]
 		if ok && canonical.ID != b.ID {
 			if closeSessionBeadIfUnassigned(store, rigStores, b, "duplicate", clk.Now().UTC(), stderr) {
+				stopRuntimeIfOwnedBySessionBead(sp, b, "duplicate", stderr)
 				openBeads[i].Status = "closed"
 			}
 		}
