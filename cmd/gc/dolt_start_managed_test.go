@@ -113,7 +113,10 @@ func TestGCBeadsBDScript_UsesPortableSleepMS(t *testing.T) {
 	if !strings.Contains(script, "sleep_ms()") {
 		t.Fatalf("gc-beads-bd.sh must define portable sleep_ms helper")
 	}
-	if got := strings.Count(script, `sleep_ms "$backoff_ms" 2>/dev/null || sleep 1`); got < 2 {
+	if strings.Contains(script, `sleep "$(awk`) {
+		t.Fatalf("gc-beads-bd.sh must not use awk to calculate sleep durations")
+	}
+	if got := strings.Count(script, `sleep_ms "$backoff_ms" 2>/dev/null || sleep 1`); got < 3 {
 		t.Fatalf("gc-beads-bd.sh must use sleep_ms for retry backoff sleeps; found %d call sites", got)
 	}
 }

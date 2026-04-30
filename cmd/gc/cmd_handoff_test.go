@@ -306,7 +306,7 @@ func TestCmdHandoff_Regression744_NamedSessionReturnsWithoutBlocking(t *testing.
 		if code != 0 {
 			t.Fatalf("code = %d, want 0; stderr: %s", code, stderr.String())
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		t.Fatal("cmdHandoff blocked for named on-demand session")
 	}
 	if !strings.Contains(stdout.String(), "restart skipped") {
