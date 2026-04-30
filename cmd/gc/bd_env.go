@@ -203,6 +203,11 @@ func resolvedRuntimeCityDoltTarget(cityPath string, allowRecovery bool) (contrac
 			return contract.DoltConnectionTarget{}, false, err
 		}
 	} else if ok {
+		if !target.External {
+			if projected, projectedOK := k8sProjectedManagedDoltTargetFromEnv(); projectedOK {
+				return projected, true, nil
+			}
+		}
 		return target, true, nil
 	}
 	if host, port, ok, invalid := resolveConfiguredCityDoltTarget(cityPath); invalid {
@@ -231,6 +236,23 @@ func resolvedRuntimeCityDoltTarget(cityPath string, allowRecovery bool) (contrac
 		}
 	}
 	return contract.DoltConnectionTarget{}, false, nil
+}
+
+func k8sProjectedManagedDoltTargetFromEnv() (contract.DoltConnectionTarget, bool) {
+	if strings.TrimSpace(os.Getenv("GC_K8S_HOSTPATH_RIG")) == "" &&
+		strings.TrimSpace(os.Getenv("KUBERNETES_SERVICE_HOST")) == "" {
+		return contract.DoltConnectionTarget{}, false
+	}
+	host := strings.TrimSpace(os.Getenv("GC_DOLT_HOST"))
+	port := strings.TrimSpace(os.Getenv("GC_DOLT_PORT"))
+	if host == "" || port == "" || managedLocalDoltHost(host) {
+		return contract.DoltConnectionTarget{}, false
+	}
+	return contract.DoltConnectionTarget{
+		Host:     host,
+		Port:     port,
+		External: true,
+	}, true
 }
 
 func managedLocalDoltEnv(env map[string]string) bool {

@@ -75,3 +75,43 @@ func TestPhase0RuntimeEnv_TemplateResolutionDoesNotPublishLifecycleBeadsWrapper(
 		t.Fatalf("GC_BEADS = %q, want data-path provider value, not lifecycle wrapper", got)
 	}
 }
+
+func TestPhase0RuntimeEnv_TemplateResolutionPublishesStoreIdentity(t *testing.T) {
+	cityPath := t.TempDir()
+	rigPath := filepath.Join(cityPath, "repo")
+	params := &agentBuildParams{
+		city: &config.City{
+			Workspace: config.Workspace{Name: "phase0-city", Prefix: "gc"},
+			Rigs:      []config.Rig{{Name: "repo", Path: rigPath, Prefix: "rp"}},
+		},
+		cityName:   "phase0-city",
+		cityPath:   cityPath,
+		workspace:  &config.Workspace{Provider: "test-agent"},
+		providers:  map[string]config.ProviderSpec{"test-agent": {DisplayName: "Test Agent", Command: "true"}},
+		lookPath:   func(string) (string, error) { return filepath.Join("/usr/bin", "true"), nil },
+		fs:         fsys.OSFS{},
+		rigs:       []config.Rig{{Name: "repo", Path: rigPath, Prefix: "rp"}},
+		beaconTime: time.Unix(0, 0),
+		beadNames:  make(map[string]string),
+		stderr:     io.Discard,
+	}
+	agentCfg := &config.Agent{
+		Name:     "worker",
+		Dir:      "repo",
+		Provider: "test-agent",
+	}
+
+	tp, err := resolveTemplate(params, agentCfg, agentCfg.QualifiedName(), nil)
+	if err != nil {
+		t.Fatalf("resolveTemplate(worker): %v", err)
+	}
+	if got := tp.Env["GC_STORE_ROOT"]; got != rigPath {
+		t.Fatalf("GC_STORE_ROOT = %q, want rig path %q", got, rigPath)
+	}
+	if got := tp.Env["GC_STORE_SCOPE"]; got != "rig" {
+		t.Fatalf("GC_STORE_SCOPE = %q, want rig", got)
+	}
+	if got := tp.Env["GC_BEADS_PREFIX"]; got != "rp" {
+		t.Fatalf("GC_BEADS_PREFIX = %q, want rp", got)
+	}
+}
