@@ -344,6 +344,20 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 				}
 			}
 		}
+		if ctrlCity != "" && filepath.IsAbs(ctrlCity) {
+			mainVolMounts = append(mainVolMounts, corev1.VolumeMount{
+				Name: "city-beads", MountPath: "/workspace/.beads",
+			})
+			volumes = append(volumes, corev1.Volume{
+				Name: "city-beads",
+				VolumeSource: corev1.VolumeSource{
+					HostPath: &corev1.HostPathVolumeSource{
+						Path: filepath.Join(ctrlCity, ".beads"),
+						Type: &hostPathType,
+					},
+				},
+			})
+		}
 	}
 
 	// Resources.
@@ -536,7 +550,9 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir, managedServiceHost, manag
 			val = "/workspace"
 		case "GC_DIR":
 			val = podWorkDir
-		case "GC_STORE_ROOT", "GC_RIG_ROOT", "BEADS_DIR", "GT_ROOT", "GC_CITY_RUNTIME_DIR", "GC_PACK_STATE_DIR", "GC_PACK_DIR":
+		case "GT_ROOT", "GC_CITY_RUNTIME_DIR", "GC_PACK_STATE_DIR", "GC_PACK_DIR":
+			val = remapControllerPathToPod(val, ctrlCity)
+		case "GC_STORE_ROOT", "GC_RIG_ROOT", "BEADS_DIR":
 			originalVal := val
 			if hostWorkDir != "" && cfgEnv["GC_RIG_ROOT"] != "" && hostWorkDir != cfgEnv["GC_RIG_ROOT"] {
 				rigRoot := strings.TrimSpace(cfgEnv["GC_RIG_ROOT"])

@@ -708,11 +708,13 @@ func TestProjectedPodWorkDirMapsHostRigOutsideCityToStableWorkspacePath(t *testi
 
 func TestBuildPodEnvMapsHostPreparedWorktreeToPodRigRoot(t *testing.T) {
 	cfgEnv := map[string]string{
-		"GC_CITY":       "/host/city",
-		"GC_DIR":        "/host/city/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1",
-		"GC_RIG_ROOT":   "/home/me/projects/grustle-monorepo",
-		"GC_STORE_ROOT": "/home/me/projects/grustle-monorepo",
-		"BEADS_DIR":     "/home/me/projects/grustle-monorepo/.beads",
+		"GC_CITY":             "/host/city",
+		"GC_DIR":              "/host/city/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1",
+		"GC_RIG_ROOT":         "/home/me/projects/grustle-monorepo",
+		"GC_STORE_ROOT":       "/home/me/projects/grustle-monorepo",
+		"BEADS_DIR":           "/home/me/projects/grustle-monorepo/.beads",
+		"GT_ROOT":             "/host/city",
+		"GC_CITY_RUNTIME_DIR": "/host/city/.gc/runtime",
 	}
 
 	env := mustBuildPodEnv(t, cfgEnv, "/workspace/grustle-monorepo", podManagedDoltHost, podManagedDoltPort)
@@ -732,6 +734,12 @@ func TestBuildPodEnvMapsHostPreparedWorktreeToPodRigRoot(t *testing.T) {
 	}
 	if envMap["BEADS_DIR"] != "/workspace/grustle-monorepo/.beads" {
 		t.Fatalf("BEADS_DIR = %q, want /workspace/grustle-monorepo/.beads", envMap["BEADS_DIR"])
+	}
+	if envMap["GT_ROOT"] != "/workspace" {
+		t.Fatalf("GT_ROOT = %q, want /workspace", envMap["GT_ROOT"])
+	}
+	if envMap["GC_CITY_RUNTIME_DIR"] != "/workspace/.gc/runtime" {
+		t.Fatalf("GC_CITY_RUNTIME_DIR = %q, want /workspace/.gc/runtime", envMap["GC_CITY_RUNTIME_DIR"])
 	}
 }
 
@@ -759,13 +767,16 @@ func TestBuildPodPrebakedHostPathMountsPreparedWorktree(t *testing.T) {
 	if pod.Spec.Containers[0].WorkingDir != "/workspace/grustle-monorepo" {
 		t.Fatalf("workingDir = %q, want /workspace/grustle-monorepo", pod.Spec.Containers[0].WorkingDir)
 	}
-	var foundMount, foundVolume, foundBeadsMount, foundBeadsVolume bool
+	var foundMount, foundVolume, foundBeadsMount, foundBeadsVolume, foundCityBeadsMount, foundCityBeadsVolume bool
 	for _, mount := range pod.Spec.Containers[0].VolumeMounts {
 		if mount.Name == "rig-workdir" && mount.MountPath == "/workspace/grustle-monorepo" {
 			foundMount = true
 		}
 		if mount.Name == "rig-beads" && mount.MountPath == "/workspace/grustle-monorepo/.beads" {
 			foundBeadsMount = true
+		}
+		if mount.Name == "city-beads" && mount.MountPath == "/workspace/.beads" {
+			foundCityBeadsMount = true
 		}
 	}
 	for _, volume := range pod.Spec.Volumes {
@@ -777,8 +788,12 @@ func TestBuildPodPrebakedHostPathMountsPreparedWorktree(t *testing.T) {
 			volume.HostPath.Path == "/home/me/projects/grustle-monorepo/.beads" {
 			foundBeadsVolume = true
 		}
+		if volume.Name == "city-beads" && volume.HostPath != nil &&
+			volume.HostPath.Path == "/host/city/.beads" {
+			foundCityBeadsVolume = true
+		}
 	}
-	if !foundMount || !foundVolume || !foundBeadsMount || !foundBeadsVolume {
+	if !foundMount || !foundVolume || !foundBeadsMount || !foundBeadsVolume || !foundCityBeadsMount || !foundCityBeadsVolume {
 		t.Fatalf("hostpath mount not projected correctly: mounts=%+v volumes=%+v",
 			pod.Spec.Containers[0].VolumeMounts, pod.Spec.Volumes)
 	}
