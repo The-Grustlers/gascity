@@ -385,7 +385,7 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 			Containers: []corev1.Container{{
 				Name:            "agent",
 				Image:           p.image,
-				ImagePullPolicy: agentImagePullPolicy(p.prebaked),
+				ImagePullPolicy: agentImagePullPolicy(p.prebaked, p.image),
 				WorkingDir:      podWorkDir,
 				Command:         []string{"/bin/sh", "-c"},
 				Args:            []string{tmuxCmd},
@@ -425,10 +425,13 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 // agentImagePullPolicy chooses the ImagePullPolicy for the agent container.
 // Order of precedence:
 //  1. GC_K8S_IMAGE_PULL_POLICY env var override (Always|IfNotPresent|Never).
-//  2. IfNotPresent when prebaked=true — by definition the image is local-only
-//     and would loop on ImagePullBackOff under PullAlways.
-//  3. Always (preserves prior default for non-prebaked images).
-func agentImagePullPolicy(prebaked bool) corev1.PullPolicy {
+//  2. Always for registry-backed prebaked images, so mutable prebaked tags
+//     like localhost:5000/grustle-city:latest do not silently reuse stale node
+//     cache layers after a rebuild.
+//  3. IfNotPresent for local-only prebaked images, which would loop on
+//     ImagePullBackOff under PullAlways.
+//  4. Always (preserves prior default for non-prebaked images).
+func agentImagePullPolicy(prebaked bool, image string) corev1.PullPolicy {
 	switch strings.TrimSpace(os.Getenv("GC_K8S_IMAGE_PULL_POLICY")) {
 	case "Always":
 		return corev1.PullAlways
@@ -438,9 +441,23 @@ func agentImagePullPolicy(prebaked bool) corev1.PullPolicy {
 		return corev1.PullNever
 	}
 	if prebaked {
+		if isRegistryBackedImage(image) && !strings.Contains(image, "@sha256:") {
+			return corev1.PullAlways
+		}
 		return corev1.PullIfNotPresent
 	}
 	return corev1.PullAlways
+}
+
+func isRegistryBackedImage(image string) bool {
+	parts := strings.SplitN(strings.TrimSpace(image), "/", 2)
+	if len(parts) < 2 {
+		return false
+	}
+	firstComponent := parts[0]
+	return firstComponent == "localhost" ||
+		strings.Contains(firstComponent, ".") ||
+		strings.Contains(firstComponent, ":")
 }
 
 // agentSecurityContext returns a container security context.

@@ -1365,11 +1365,15 @@ func TestAgentImagePullPolicy(t *testing.T) {
 	tests := []struct {
 		name     string
 		prebaked bool
+		image    string
 		envVal   string // value of GC_K8S_IMAGE_PULL_POLICY ("" = unset)
 		want     corev1.PullPolicy
 	}{
 		{name: "non-prebaked default Always", prebaked: false, want: corev1.PullAlways},
-		{name: "prebaked default IfNotPresent", prebaked: true, want: corev1.PullIfNotPresent},
+		{name: "prebaked local default IfNotPresent", prebaked: true, image: "gc-agent:latest", want: corev1.PullIfNotPresent},
+		{name: "prebaked registry latest default Always", prebaked: true, image: "localhost:5000/grustle-city:latest", want: corev1.PullAlways},
+		{name: "prebaked registry tagged default Always", prebaked: true, image: "registry.example.com/grustle-city:v1", want: corev1.PullAlways},
+		{name: "prebaked registry digest default IfNotPresent", prebaked: true, image: "localhost:5000/grustle-city@sha256:abc", want: corev1.PullIfNotPresent},
 		{name: "env override Always wins on prebaked", prebaked: true, envVal: "Always", want: corev1.PullAlways},
 		{name: "env override IfNotPresent wins on non-prebaked", prebaked: false, envVal: "IfNotPresent", want: corev1.PullIfNotPresent},
 		{name: "env override Never honored", prebaked: false, envVal: "Never", want: corev1.PullNever},
@@ -1379,9 +1383,13 @@ func TestAgentImagePullPolicy(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("GC_K8S_IMAGE_PULL_POLICY", tt.envVal)
-			got := agentImagePullPolicy(tt.prebaked)
+			image := tt.image
+			if image == "" {
+				image = "gc-agent:latest"
+			}
+			got := agentImagePullPolicy(tt.prebaked, image)
 			if got != tt.want {
-				t.Errorf("agentImagePullPolicy(prebaked=%v, env=%q) = %v, want %v", tt.prebaked, tt.envVal, got, tt.want)
+				t.Errorf("agentImagePullPolicy(prebaked=%v, image=%q, env=%q) = %v, want %v", tt.prebaked, image, tt.envVal, got, tt.want)
 			}
 		})
 	}
@@ -1391,6 +1399,7 @@ func TestBuildPodAgentPullPolicyPrebaked(t *testing.T) {
 	t.Setenv("GC_K8S_IMAGE_PULL_POLICY", "")
 	p := newProviderWithOps(newFakeK8sOps())
 	p.prebaked = true
+	p.image = "gc-agent:latest"
 	cfg := runtime.Config{
 		WorkDir: "/city/demo-rig",
 		Env:     map[string]string{"GC_AGENT": "demo-rig/polecat", "GC_CITY": "/city"},
@@ -1401,6 +1410,24 @@ func TestBuildPodAgentPullPolicyPrebaked(t *testing.T) {
 	}
 	if got := pod.Spec.Containers[0].ImagePullPolicy; got != corev1.PullIfNotPresent {
 		t.Errorf("prebaked agent ImagePullPolicy = %v, want IfNotPresent", got)
+	}
+}
+
+func TestBuildPodAgentPullPolicyPrebakedRegistryImage(t *testing.T) {
+	t.Setenv("GC_K8S_IMAGE_PULL_POLICY", "")
+	p := newProviderWithOps(newFakeK8sOps())
+	p.prebaked = true
+	p.image = "localhost:5000/grustle-city:latest"
+	cfg := runtime.Config{
+		WorkDir: "/city/demo-rig",
+		Env:     map[string]string{"GC_AGENT": "demo-rig/polecat", "GC_CITY": "/city"},
+	}
+	pod, err := buildPod("gc-pull-prebaked-registry", cfg, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := pod.Spec.Containers[0].ImagePullPolicy; got != corev1.PullAlways {
+		t.Errorf("registry-backed prebaked agent ImagePullPolicy = %v, want Always", got)
 	}
 }
 
