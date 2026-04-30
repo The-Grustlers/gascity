@@ -7,11 +7,12 @@ import (
 
 func TestBuildT3BridgeStartupEnvelope_UsesTemplateForGroupingAgent(t *testing.T) {
 	tp := TemplateParams{
-		TemplateName: "t3code/polecat",
-		InstanceName: "t3code/polecat-1",
-		SessionName:  "t3code--polecat-1",
-		WorkDir:      "/data/projects/gc/.gc/worktrees/t3code/polecat/furiosa",
-		Command:      "codex",
+		TemplateName:             "t3code/polecat",
+		InstanceName:             "t3code/polecat-1",
+		SessionName:              "t3code--polecat-1",
+		EffectiveSessionProvider: "t3bridge",
+		WorkDir:                  "/data/projects/gc/.gc/worktrees/t3code/polecat/furiosa",
+		Command:                  "codex",
 		Env: map[string]string{
 			"GC_CITY_PATH":    "/data/projects/gc",
 			"GC_PROVIDER":     "codex",

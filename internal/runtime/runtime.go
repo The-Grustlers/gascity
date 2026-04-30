@@ -237,6 +237,15 @@ type DialogProvider interface {
 	DismissKnownDialogs(ctx context.Context, name string, timeout time.Duration) error
 }
 
+// TransportCapabilityProvider is an optional extension for providers that can
+// report whether they support starting sessions with a specific transport.
+//
+// Callers use this to fail fast when a requested transport cannot be routed by
+// the active session provider before session creation starts mutating state.
+type TransportCapabilityProvider interface {
+	SupportsTransport(transport string) bool
+}
+
 // ImmediateNudgeProvider is an optional extension for runtimes that can inject
 // input immediately without performing their own wait-idle heuristic first.
 type ImmediateNudgeProvider interface {
@@ -356,6 +365,10 @@ type Config struct {
 	// StartupEnvelope carries provider-specific startup metadata used by
 	// the T3 bridge path. It is excluded from the core fingerprint.
 	StartupEnvelope json.RawMessage
+
+	// MCPServers is the effective ACP session/new MCP server list for this
+	// session. Non-ACP providers ignore it.
+	MCPServers []MCPServerConfig
 
 	// Startup reliability hints (all optional — zero values skip).
 

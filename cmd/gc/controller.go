@@ -898,6 +898,9 @@ func gracefulStopAll(
 			if target, ok := targetByName[name]; ok && target.subject != "" {
 				subject = target.subject
 			}
+			if target, ok := targetByName[name]; ok && cityStopSessionMarked(store, target.sessionID) {
+				markCityStopSessionAsAsleep(store, target.sessionID, stderr)
+			}
 			rec.Record(events.Event{
 				Type: events.SessionStopped, Actor: "gc", Subject: subject,
 			})
@@ -1135,6 +1138,7 @@ func runController(
 	cs := newControllerState(ctx, cfg, sp, eventProv, cityName, cityPath)
 	cs.ct = cr.crashTrack()
 	cs.pokeCh = pokeCh
+	cs.configDirty = configDirty
 	cs.services = cr.svc
 	cs.startBeadEventWatcher(ctx)
 	cr.setControllerState(cs)
@@ -1151,7 +1155,11 @@ func runController(
 		if readOnly {
 			fmt.Fprintf(stderr, "api: binding to %s — mutation endpoints disabled (non-localhost)\n", bind) //nolint:errcheck
 		}
-		apiMux := api.NewSupervisorMux(&singleCityStateResolver{state: cs}, readOnly, "controller", time.Now())
+		// Standalone controller mode serves one existing city. It does
+		// not own the supervisor registry/reconciler path required by
+		// async POST /v0/city, so leave the initializer nil and let the
+		// handler return 501 for create/unregister routes.
+		apiMux := api.NewSupervisorMux(&singleCityStateResolver{state: cs}, nil, readOnly, "controller", time.Now())
 		addr := net.JoinHostPort(bind, strconv.Itoa(cfg.API.Port))
 		apiLis, apiErr := net.Listen("tcp", addr)
 		if apiErr != nil {

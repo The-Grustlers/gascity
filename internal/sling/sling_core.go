@@ -75,15 +75,19 @@ func preflight(opts SlingOpts, deps SlingDeps, querier BeadQuerier) (SlingResult
 		result.PoolEmpty = true
 	}
 
-	// Cross-rig guard.
-	if !opts.IsFormula && !opts.Force && !opts.DryRun {
-		if msg := CheckCrossRig(opts.BeadOrFormula, a, deps.Cfg); msg != "" {
-			return result, fmt.Errorf("%s", msg)
+	if shouldValidateExistingBead(opts) {
+		if err := validateExistingBead(opts.BeadOrFormula, deps); err != nil {
+			return result, err
+		}
+	}
+	if shouldGuardCrossRig(opts) {
+		if err := CrossRigRouteError(opts.BeadOrFormula, a, deps.Cfg); err != nil {
+			return result, err
 		}
 	}
 
 	// Pre-flight idempotency check.
-	if !opts.IsFormula && !opts.Force {
+	if shouldCheckBeadState(opts) {
 		check := CheckBeadState(querier, opts.BeadOrFormula, a, deps)
 		if check.Idempotent {
 			result.Idempotent = true
@@ -113,6 +117,51 @@ func preflight(opts SlingOpts, deps SlingDeps, querier BeadQuerier) (SlingResult
 	}
 
 	return result, nil
+}
+
+func shouldValidateExistingBead(opts SlingOpts) bool {
+	if opts.IsFormula || (opts.DryRun && opts.InlineText) {
+		return false
+	}
+	return !opts.Force || usesFormulaBackedRoute(opts)
+}
+
+func usesFormulaBackedRoute(opts SlingOpts) bool {
+	return opts.OnFormula != "" || (!opts.NoFormula && opts.Target.EffectiveDefaultSlingFormula() != "")
+}
+
+func shouldGuardCrossRig(opts SlingOpts) bool {
+	return !opts.IsFormula && !opts.Force && !opts.DryRun
+}
+
+func shouldCheckBeadState(opts SlingOpts) bool {
+	return !opts.IsFormula && !opts.Force && (!opts.DryRun || !opts.InlineText)
+}
+
+func validateExistingBead(beadID string, deps SlingDeps) error {
+	querier := deps.ValidationQuerier
+	if querier == nil {
+		querier = deps.Store
+	}
+	return validateExistingBeadInQuerier(beadID, deps.StoreRef, querier)
+}
+
+func validateExistingBeadInQuerier(beadID, storeRef string, querier BeadQuerier) error {
+	storeRef = strings.TrimSpace(storeRef)
+	if storeRef == "" {
+		storeRef = "local"
+	}
+	if querier == nil {
+		return &BeadLookupError{BeadID: beadID, StoreRef: storeRef, Err: errors.New("store not configured")}
+	}
+	exists, err := probeBeadInQuerier(querier, beadID)
+	if err != nil {
+		return &BeadLookupError{BeadID: beadID, StoreRef: storeRef, Err: err}
+	}
+	if exists {
+		return nil
+	}
+	return &MissingBeadError{BeadID: beadID, StoreRef: storeRef}
 }
 
 // slingFormula handles the --formula dispatch path.
@@ -306,25 +355,43 @@ func finalize(opts SlingOpts, deps SlingDeps, beadID, method string, result Slin
 
 	// Auto-convoy.
 	if !opts.NoConvoy && !opts.IsFormula && deps.Store != nil {
-		var convoyLabels []string
-		if opts.Owned {
-			convoyLabels = []string{"owned"}
-		}
-		convoy, err := deps.Store.Create(beads.Bead{
-			Title:  fmt.Sprintf("sling-%s", beadID),
-			Type:   "convoy",
-			Labels: convoyLabels,
-		})
+		createAutoConvoy := true
+		exists, err := ProbeBeadInStore(deps.Store, beadID)
 		if err != nil {
 			result.MetadataErrors = append(result.MetadataErrors,
-				fmt.Sprintf("creating auto-convoy: %v", err))
-		} else {
-			parentID := convoy.ID
-			if err := deps.Store.Update(beadID, beads.UpdateOpts{ParentID: &parentID}); err != nil {
+				fmt.Sprintf("checking bead before auto-convoy: %v", err))
+			createAutoConvoy = false
+		} else if !exists {
+			if opts.Force {
 				result.MetadataErrors = append(result.MetadataErrors,
-					fmt.Sprintf("linking bead to convoy: %v", err))
+					fmt.Sprintf("forced dispatch skipped missing-bead validation for %s; no local auto-convoy created", beadID))
 			} else {
-				result.ConvoyID = convoy.ID
+				result.MetadataErrors = append(result.MetadataErrors,
+					fmt.Sprintf("skipping auto-convoy: bead %s is not present in the local store", beadID))
+			}
+			createAutoConvoy = false
+		}
+		if createAutoConvoy {
+			var convoyLabels []string
+			if opts.Owned {
+				convoyLabels = []string{"owned"}
+			}
+			convoy, err := deps.Store.Create(beads.Bead{
+				Title:  fmt.Sprintf("sling-%s", beadID),
+				Type:   "convoy",
+				Labels: convoyLabels,
+			})
+			if err != nil {
+				result.MetadataErrors = append(result.MetadataErrors,
+					fmt.Sprintf("creating auto-convoy: %v", err))
+			} else {
+				parentID := convoy.ID
+				if err := deps.Store.Update(beadID, beads.UpdateOpts{ParentID: &parentID}); err != nil {
+					result.MetadataErrors = append(result.MetadataErrors,
+						fmt.Sprintf("linking bead to convoy: %v", err))
+				} else {
+					result.ConvoyID = convoy.ID
+				}
 			}
 		}
 	}
@@ -758,11 +825,34 @@ func DoSlingBatch(opts SlingOpts, deps SlingDeps, querier BeadChildQuerier) (Sli
 		return DoSling(opts, deps, querier)
 	}
 
+	containerQuerier := BeadQuerier(querier)
 	b, err := querier.Get(opts.BeadOrFormula)
 	if err != nil {
-		singleOpts := opts
-		singleOpts.IsFormula = false
-		return DoSling(singleOpts, deps, querier)
+		if !errors.Is(err, beads.ErrNotFound) {
+			return SlingResult{Target: a.QualifiedName()}, &BeadLookupError{
+				BeadID:   opts.BeadOrFormula,
+				StoreRef: deps.StoreRef,
+				Err:      err,
+			}
+		}
+		if selected, ok := selectedStoreContainer(opts, deps); ok {
+			b = selected
+			// The caller's querier could not see the container, so deps.Store
+			// becomes authoritative for both validation and child expansion.
+			querier = deps.Store
+			containerQuerier = deps.Store
+		} else {
+			singleOpts := opts
+			singleOpts.IsFormula = false
+			return DoSling(singleOpts, deps, querier)
+		}
+	}
+	if b.Type == "epic" || beads.IsContainerType(b.Type) {
+		if shouldValidateExistingBead(opts) {
+			if err := validateExistingBeadInQuerier(opts.BeadOrFormula, deps.StoreRef, containerQuerier); err != nil {
+				return SlingResult{Target: a.QualifiedName()}, err
+			}
+		}
 	}
 	if b.Type == "epic" {
 		return SlingResult{}, fmt.Errorf("bead %s is an epic; first-class support is for convoys only", b.ID)
@@ -771,7 +861,9 @@ func DoSlingBatch(opts SlingOpts, deps SlingDeps, querier BeadChildQuerier) (Sli
 	if !beads.IsContainerType(b.Type) {
 		singleOpts := opts
 		singleOpts.IsFormula = false
-		return DoSling(singleOpts, deps, querier)
+		singleDeps := deps
+		singleDeps.ValidationQuerier = containerQuerier
+		return DoSling(singleOpts, singleDeps, querier)
 	}
 
 	children, err := querier.List(beads.ListQuery{
@@ -798,8 +890,8 @@ func DoSlingBatch(opts SlingOpts, deps SlingDeps, querier BeadChildQuerier) (Sli
 
 	// Cross-rig guard on container.
 	if !opts.Force && !opts.DryRun {
-		if msg := CheckCrossRig(b.ID, a, deps.Cfg); msg != "" {
-			return SlingResult{}, fmt.Errorf("%s", msg)
+		if err := CrossRigRouteError(b.ID, a, deps.Cfg); err != nil {
+			return SlingResult{}, err
 		}
 	}
 
@@ -974,4 +1066,15 @@ func DoSlingBatch(opts SlingOpts, deps SlingDeps, querier BeadChildQuerier) (Sli
 		return batchResult, errors.Join(joined...)
 	}
 	return batchResult, nil
+}
+
+func selectedStoreContainer(opts SlingOpts, deps SlingDeps) (beads.Bead, bool) {
+	if deps.Store == nil {
+		return beads.Bead{}, false
+	}
+	b, err := deps.Store.Get(opts.BeadOrFormula)
+	if err != nil {
+		return beads.Bead{}, false
+	}
+	return b, b.Type == "epic" || beads.IsContainerType(b.Type)
 }

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gastownhall/gascity/internal/api"
@@ -45,9 +47,23 @@ type controllerState struct {
 	startedAt     time.Time
 	ct            crashTracker  // nil if crash tracking disabled
 	pokeCh        chan struct{} // nil when poke is not available; triggers immediate reconciler tick
+	configDirty   *atomic.Bool  // optional dirty flag shared with the reconciler reload path
 	services      workspacesvc.Registry
 	extmsgSvc     *extmsg.Services
 	adapterReg    *extmsg.AdapterRegistry
+	updateMu      sync.Mutex // serializes rebuild+swap so stale reloads cannot overtake newer mutations
+
+	// True after an API config mutation refreshes controller state ahead of the
+	// runtime reload loop. Runtime reloads that would drop newly bound rigs are
+	// ignored until the loop observes and applies the same or a newer config.
+	configMutationPending atomic.Bool
+}
+
+type configMutationSnapshot struct {
+	cityPath   string
+	files      map[string][]byte
+	existed    map[string]bool
+	agentFiles map[string]struct{}
 }
 
 // newControllerState creates a controllerState with per-rig stores.
@@ -120,6 +136,9 @@ func wrapWithCachingStore(ctx context.Context, store beads.Store, ep events.Prov
 	if err := cs.PrimeActive(); err != nil {
 		log.Printf("caching-store: pre-prime failed: %v", err)
 	}
+	if ctx.Done() == nil {
+		return cs
+	}
 	// Full prime runs async — backfills remaining beads for List()
 	// callers (convergence reconcile, sweep, API handlers).
 	go func() {
@@ -166,7 +185,7 @@ func (cs *controllerState) buildStores(cfg *config.City) map[string]beads.Store 
 		if sharedLegacyFileStore != nil && scopeProvider == "file" && !scopeUsesFileStoreContract(scopeRoot) {
 			store = sharedLegacyFileStore
 		} else {
-			store = cs.openRigStore(scopeProvider, rig.Name, scopeRoot, rig.EffectivePrefix())
+			store = cs.openRigStore(scopeProvider, rig.Name, scopeRoot, rig.EffectivePrefix(), cfg)
 		}
 		stores[rig.Name] = wrapWithCachingStore(cs.cacheCtx, store, cs.eventProv)
 	}
@@ -174,7 +193,7 @@ func (cs *controllerState) buildStores(cfg *config.City) map[string]beads.Store 
 }
 
 // openRigStore creates a bead store for a rig path using the given provider.
-func (cs *controllerState) openRigStore(provider, rigName, rigPath, prefix string) beads.Store {
+func (cs *controllerState) openRigStore(provider, rigName, rigPath, prefix string, cfg *config.City) beads.Store {
 	scopeRoot := resolveStoreScopeRoot(cs.cityPath, rigPath)
 	if strings.HasPrefix(provider, "exec:") {
 		s := beadsexec.NewStore(strings.TrimPrefix(provider, "exec:"))
@@ -194,7 +213,7 @@ func (cs *controllerState) openRigStore(provider, rigName, rigPath, prefix strin
 		}
 		return store
 	default: // "bd" or unrecognized
-		return bdStoreForRig(scopeRoot, cs.cityPath, cs.cfg)
+		return bdStoreForRig(scopeRoot, cs.cityPath, cfg)
 	}
 }
 
@@ -236,11 +255,6 @@ func (cs *controllerState) applyBeadEventToStores(evt events.Event) {
 	if len(evt.Payload) == 0 {
 		return
 	}
-	// Skip events we emitted ourselves (reconciler-detected changes).
-	if evt.Actor == "cache-reconcile" {
-		return
-	}
-
 	cs.mu.RLock()
 	stores := make([]beads.Store, 0, len(cs.beadStores)+1)
 	for _, s := range cs.beadStores {
@@ -256,12 +270,17 @@ func (cs *controllerState) applyBeadEventToStores(evt events.Event) {
 			cached.ApplyEvent(evt.Type, evt.Payload)
 		}
 	}
-	cs.Poke()
+	if evt.Actor != "cache-reconcile" {
+		cs.Poke()
+	}
 }
 
 // update replaces the config, session provider, and reopens stores.
 // Stores are built outside the lock to avoid blocking readers during I/O.
 func (cs *controllerState) update(cfg *config.City, sp runtime.Provider) {
+	cs.updateMu.Lock()
+	defer cs.updateMu.Unlock()
+
 	// Build new stores outside the lock (may do file I/O / subprocess spawns).
 	stores := cs.buildStores(cfg)
 	// Reopen city-level store for session beads and mail.
@@ -292,6 +311,119 @@ func (cs *controllerState) update(cfg *config.City, sp runtime.Provider) {
 	}
 	// Keep prior non-nil store/provider if reopen fails.
 	cs.mu.Unlock()
+}
+
+func (cs *controllerState) updateFromRuntime(cfg *config.City, sp runtime.Provider) {
+	if cs.configMutationPending.Load() && cs.runtimeUpdateDropsPendingRigs(cfg) {
+		return
+	}
+	if cs.configMutationPending.Load() && cs.runtimeUpdateCanReuseCurrentStores(cfg) {
+		cs.updateConfigAndProviderOnly(cfg, sp)
+		cs.configMutationPending.Store(false)
+		return
+	}
+	cs.update(cfg, sp)
+	cs.configMutationPending.Store(false)
+}
+
+func (cs *controllerState) updateConfigAndProviderOnly(cfg *config.City, sp runtime.Provider) {
+	cs.updateMu.Lock()
+	defer cs.updateMu.Unlock()
+
+	cs.mu.Lock()
+	cs.cfg = cfg
+	cs.sp = sp
+	cs.mu.Unlock()
+}
+
+func (cs *controllerState) runtimeUpdateCanReuseCurrentStores(next *config.City) bool {
+	cs.mu.RLock()
+	current := cs.cfg
+	cityStore := cs.cityBeadStore
+	stores := make(map[string]beads.Store, len(cs.beadStores))
+	for name, store := range cs.beadStores {
+		stores[name] = store
+	}
+	cs.mu.RUnlock()
+
+	if cityStore == nil || !sameStoreTopology(cs.cityPath, current, next) {
+		return false
+	}
+	for _, rig := range next.Rigs {
+		if strings.TrimSpace(rig.Path) == "" {
+			continue
+		}
+		if stores[rig.Name] == nil {
+			return false
+		}
+	}
+	return true
+}
+
+func (cs *controllerState) runtimeUpdateDropsPendingRigs(next *config.City) bool {
+	cs.mu.RLock()
+	current := cs.cfg
+	cs.mu.RUnlock()
+	return configDropsBoundRigs(current, next)
+}
+
+type storeTopologyRig struct {
+	path   string
+	prefix string
+}
+
+func sameStoreTopology(cityPath string, current, next *config.City) bool {
+	if current == nil || next == nil {
+		return false
+	}
+	if config.EffectiveHQPrefix(current) != config.EffectiveHQPrefix(next) {
+		return false
+	}
+	currentRigs := storeTopologyRigs(cityPath, current.Rigs)
+	nextRigs := storeTopologyRigs(cityPath, next.Rigs)
+	if len(currentRigs) != len(nextRigs) {
+		return false
+	}
+	for name, currentRig := range currentRigs {
+		if nextRig, ok := nextRigs[name]; !ok || nextRig != currentRig {
+			return false
+		}
+	}
+	return true
+}
+
+func storeTopologyRigs(cityPath string, rigs []config.Rig) map[string]storeTopologyRig {
+	result := make(map[string]storeTopologyRig, len(rigs))
+	for _, rig := range rigs {
+		path := strings.TrimSpace(rig.Path)
+		if path != "" {
+			path = resolveStoreScopeRoot(cityPath, path)
+		}
+		result[rig.Name] = storeTopologyRig{
+			path:   path,
+			prefix: rig.EffectivePrefix(),
+		}
+	}
+	return result
+}
+
+func configDropsBoundRigs(current, next *config.City) bool {
+	if current == nil || next == nil {
+		return false
+	}
+	nextRigPaths := make(map[string]string, len(next.Rigs))
+	for _, rig := range next.Rigs {
+		nextRigPaths[rig.Name] = strings.TrimSpace(rig.Path)
+	}
+	for _, rig := range current.Rigs {
+		if strings.TrimSpace(rig.Path) == "" {
+			continue
+		}
+		if nextRigPaths[rig.Name] == "" {
+			return true
+		}
+	}
+	return false
 }
 
 // --- api.State implementation ---
@@ -449,20 +581,24 @@ func (cs *controllerState) Orders() []orders.Order {
 // EnableOrder creates or updates an override with enabled=true.
 func (cs *controllerState) EnableOrder(name, rig string) error {
 	enabled := true
-	return cs.editor.MergeOrderOverride(config.OrderOverride{
-		Name:    name,
-		Rig:     rig,
-		Enabled: &enabled,
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.MergeOrderOverride(config.OrderOverride{
+			Name:    name,
+			Rig:     rig,
+			Enabled: &enabled,
+		})
 	})
 }
 
 // DisableOrder creates or updates an override with enabled=false.
 func (cs *controllerState) DisableOrder(name, rig string) error {
 	enabled := false
-	return cs.editor.MergeOrderOverride(config.OrderOverride{
-		Name:    name,
-		Rig:     rig,
-		Enabled: &enabled,
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.MergeOrderOverride(config.OrderOverride{
+			Name:    name,
+			Rig:     rig,
+			Enabled: &enabled,
+		})
 	})
 }
 
@@ -511,104 +647,282 @@ func (cs *controllerState) ResumeCity() error {
 
 // CreateAgent adds a new agent to city.toml.
 func (cs *controllerState) CreateAgent(a config.Agent) error {
-	return cs.editor.CreateAgent(a)
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.CreateAgent(a)
+	})
 }
 
 // UpdateAgent partially updates an existing agent definition in city.toml.
 func (cs *controllerState) UpdateAgent(name string, patch api.AgentUpdate) error {
-	return cs.editor.UpdateAgent(name, configedit.AgentUpdate{
-		Provider:  patch.Provider,
-		Scope:     patch.Scope,
-		Suspended: patch.Suspended,
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.UpdateAgent(name, configedit.AgentUpdate{
+			Provider:  patch.Provider,
+			Scope:     patch.Scope,
+			Suspended: patch.Suspended,
+		})
 	})
 }
 
 // DeleteAgent removes an agent from city.toml.
 func (cs *controllerState) DeleteAgent(name string) error {
-	return cs.editor.DeleteAgent(name)
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.DeleteAgent(name)
+	})
 }
 
 // CreateRig adds a new rig to city.toml.
 func (cs *controllerState) CreateRig(r config.Rig) error {
-	return cs.editor.CreateRig(r)
+	if err := cs.initializeRigStoreForCreate(r); err != nil {
+		return err
+	}
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.CreateRig(r)
+	})
+}
+
+func (cs *controllerState) initializeRigStoreForCreate(r config.Rig) error {
+	cityPath := strings.TrimSpace(cs.cityPath)
+	rigPath := strings.TrimSpace(r.Path)
+	if cityPath == "" || rigPath == "" {
+		return nil
+	}
+
+	cs.mu.RLock()
+	cfg := cs.cfg
+	cs.mu.RUnlock()
+	if cfg != nil {
+		for _, existing := range cfg.Rigs {
+			if existing.Name == r.Name {
+				return fmt.Errorf("%w: rig %q", configedit.ErrAlreadyExists, r.Name)
+			}
+		}
+	}
+
+	scopeRoot := resolveStoreScopeRoot(cityPath, rigPath)
+	if _, err := initDirIfReady(cityPath, scopeRoot, r.EffectivePrefix()); err != nil {
+		return fmt.Errorf("initializing rig %q beads: %w", r.Name, err)
+	}
+	return nil
 }
 
 // UpdateRig partially updates a rig in city.toml.
 func (cs *controllerState) UpdateRig(name string, patch api.RigUpdate) error {
-	return cs.editor.UpdateRig(name, configedit.RigUpdate{
-		Path:      patch.Path,
-		Prefix:    patch.Prefix,
-		Suspended: patch.Suspended,
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.UpdateRig(name, configedit.RigUpdate{
+			Path:      patch.Path,
+			Prefix:    patch.Prefix,
+			Suspended: patch.Suspended,
+		})
 	})
 }
 
 // DeleteRig removes a rig from city.toml.
 func (cs *controllerState) DeleteRig(name string) error {
-	return cs.editor.DeleteRig(name)
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.DeleteRig(name)
+	})
 }
 
 // CreateProvider adds a new city-level provider to city.toml.
 func (cs *controllerState) CreateProvider(name string, spec config.ProviderSpec) error {
-	return cs.editor.CreateProvider(name, spec)
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.CreateProvider(name, spec)
+	})
 }
 
 // UpdateProvider partially updates an existing city-level provider.
 func (cs *controllerState) UpdateProvider(name string, patch api.ProviderUpdate) error {
-	return cs.editor.UpdateProvider(name, configedit.ProviderUpdate{
-		DisplayName:        patch.DisplayName,
-		Base:               patch.Base,
-		Command:            patch.Command,
-		Args:               patch.Args,
-		ArgsAppend:         patch.ArgsAppend,
-		PromptMode:         patch.PromptMode,
-		PromptFlag:         patch.PromptFlag,
-		ReadyDelayMs:       patch.ReadyDelayMs,
-		Env:                patch.Env,
-		OptionsSchemaMerge: patch.OptionsSchemaMerge,
-		OptionsSchema:      patch.OptionsSchema,
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.UpdateProvider(name, configedit.ProviderUpdate{
+			DisplayName:        patch.DisplayName,
+			Base:               patch.Base,
+			Command:            patch.Command,
+			ACPCommand:         patch.ACPCommand,
+			Args:               patch.Args,
+			ACPArgs:            patch.ACPArgs,
+			ArgsAppend:         patch.ArgsAppend,
+			PromptMode:         patch.PromptMode,
+			PromptFlag:         patch.PromptFlag,
+			ReadyDelayMs:       patch.ReadyDelayMs,
+			Env:                patch.Env,
+			OptionsSchemaMerge: patch.OptionsSchemaMerge,
+			OptionsSchema:      patch.OptionsSchema,
+		})
 	})
 }
 
 // DeleteProvider removes a city-level provider from city.toml.
 func (cs *controllerState) DeleteProvider(name string) error {
-	return cs.editor.DeleteProvider(name)
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.DeleteProvider(name)
+	})
 }
 
 // SetAgentPatch creates or replaces an agent patch in city.toml.
 func (cs *controllerState) SetAgentPatch(patch config.AgentPatch) error {
-	return cs.editor.SetAgentPatch(patch)
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.SetAgentPatch(patch)
+	})
 }
 
 // DeleteAgentPatch removes an agent patch from city.toml.
 func (cs *controllerState) DeleteAgentPatch(name string) error {
-	return cs.editor.DeleteAgentPatch(name)
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.DeleteAgentPatch(name)
+	})
 }
 
 // SetRigPatch creates or replaces a rig patch in city.toml.
 func (cs *controllerState) SetRigPatch(patch config.RigPatch) error {
-	return cs.editor.SetRigPatch(patch)
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.SetRigPatch(patch)
+	})
 }
 
 // DeleteRigPatch removes a rig patch from city.toml.
 func (cs *controllerState) DeleteRigPatch(name string) error {
-	return cs.editor.DeleteRigPatch(name)
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.DeleteRigPatch(name)
+	})
 }
 
 // SetProviderPatch creates or replaces a provider patch in city.toml.
 func (cs *controllerState) SetProviderPatch(patch config.ProviderPatch) error {
-	return cs.editor.SetProviderPatch(patch)
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.SetProviderPatch(patch)
+	})
 }
 
 // DeleteProviderPatch removes a provider patch from city.toml.
 func (cs *controllerState) DeleteProviderPatch(name string) error {
-	return cs.editor.DeleteProviderPatch(name)
+	return cs.mutateAndPoke(func() error {
+		return cs.editor.DeleteProviderPatch(name)
+	})
+}
+
+func captureConfigMutationSnapshot(cityPath string) (*configMutationSnapshot, error) {
+	snapshot := &configMutationSnapshot{
+		cityPath:   cityPath,
+		files:      make(map[string][]byte),
+		existed:    make(map[string]bool),
+		agentFiles: make(map[string]struct{}),
+	}
+
+	capture := func(path string) error {
+		data, err := os.ReadFile(path)
+		switch {
+		case err == nil:
+			snapshot.files[path] = data
+			snapshot.existed[path] = true
+		case os.IsNotExist(err):
+			snapshot.existed[path] = false
+		default:
+			return fmt.Errorf("reading %s: %w", path, err)
+		}
+		return nil
+	}
+
+	for _, path := range []string{
+		filepath.Join(cityPath, "city.toml"),
+		filepath.Join(cityPath, ".gc", "site.toml"),
+	} {
+		if err := capture(path); err != nil {
+			return nil, err
+		}
+	}
+
+	agentFiles, err := filepath.Glob(filepath.Join(cityPath, "agents", "*", "agent.toml"))
+	if err != nil {
+		return nil, fmt.Errorf("listing agent overrides: %w", err)
+	}
+	for _, path := range agentFiles {
+		snapshot.agentFiles[path] = struct{}{}
+		if err := capture(path); err != nil {
+			return nil, err
+		}
+	}
+
+	return snapshot, nil
+}
+
+func (s *configMutationSnapshot) restore() error {
+	var restoreErr error
+
+	currentAgentFiles, err := filepath.Glob(filepath.Join(s.cityPath, "agents", "*", "agent.toml"))
+	if err != nil {
+		restoreErr = errors.Join(restoreErr, fmt.Errorf("listing current agent overrides: %w", err))
+	} else {
+		for _, path := range currentAgentFiles {
+			if _, existed := s.agentFiles[path]; existed {
+				continue
+			}
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				restoreErr = errors.Join(restoreErr, fmt.Errorf("removing %s: %w", path, err))
+			}
+		}
+	}
+
+	for path, existed := range s.existed {
+		if !existed {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				restoreErr = errors.Join(restoreErr, fmt.Errorf("removing %s: %w", path, err))
+			}
+			continue
+		}
+		if err := fsys.WriteFileAtomic(fsys.OSFS{}, path, s.files[path], 0o644); err != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("restoring %s: %w", path, err))
+		}
+	}
+
+	return restoreErr
 }
 
 func (cs *controllerState) mutateAndPoke(mutate func() error) error {
+	var snapshot *configMutationSnapshot
+	if cs.cityPath != "" {
+		var err error
+		snapshot, err = captureConfigMutationSnapshot(cs.cityPath)
+		if err != nil {
+			return fmt.Errorf("snapshotting current city config: %w", err)
+		}
+	}
 	if err := mutate(); err != nil {
 		return err
 	}
+	if err := cs.refreshConfigSnapshot(); err != nil {
+		if snapshot != nil {
+			if restoreErr := snapshot.restore(); restoreErr != nil {
+				restoreFailure := fmt.Errorf("restoring previous city config: %w", restoreErr)
+				return fmt.Errorf("refreshing updated city config: %w", errors.Join(err, restoreFailure))
+			}
+		}
+		return fmt.Errorf("refreshing updated city config: %w", err)
+	}
+	cs.configMutationPending.Store(true)
+	if cs.configDirty != nil {
+		cs.configDirty.Store(true)
+	}
 	cs.Poke()
+	return nil
+}
+
+func (cs *controllerState) refreshConfigSnapshot() error {
+	if cs.cityPath == "" || cs.cfg == nil {
+		return nil
+	}
+
+	tomlPath := filepath.Join(cs.cityPath, "city.toml")
+	nextCfg, _, err := config.LoadWithIncludes(fsys.OSFS{}, tomlPath, extraConfigFiles...)
+	if err != nil {
+		return fmt.Errorf("loading updated city config: %w", err)
+	}
+	applyFeatureFlags(nextCfg)
+	applyRuntimeCityIdentity(nextCfg, cs.cityName)
+
+	cs.mu.RLock()
+	sp := cs.sp
+	cs.mu.RUnlock()
+	cs.update(nextCfg, sp)
 	return nil
 }
 

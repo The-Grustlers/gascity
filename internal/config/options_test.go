@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -115,6 +116,101 @@ func TestResolveOptions_EffectiveDefaultsOverrideSchemaDefaults(t *testing.T) {
 		if args[i] != w {
 			t.Errorf("args[%d]=%q, want %q", i, args[i], w)
 		}
+	}
+}
+
+func TestReplaceSchemaFlagsStripsCodexAliases(t *testing.T) {
+	codex := BuiltinProviders()["codex"]
+	defaultArgs := []string{
+		"--dangerously-bypass-approvals-and-sandbox",
+		"--model", "gpt-5.5",
+		"-c", "model_reasoning_effort=xhigh",
+	}
+
+	got := ReplaceSchemaFlags(
+		`aimux run codex -- -m gpt-5.5 -c 'model_reasoning_effort="xhigh"'`,
+		codex.OptionsSchema,
+		defaultArgs,
+	)
+
+	if strings.Count(got, "gpt-5.5") != 1 {
+		t.Fatalf("ReplaceSchemaFlags() = %q, want one model flag", got)
+	}
+	if strings.Count(got, "model_reasoning_effort") != 1 {
+		t.Fatalf("ReplaceSchemaFlags() = %q, want one effort flag", got)
+	}
+	if !strings.Contains(got, "--model gpt-5.5") {
+		t.Fatalf("ReplaceSchemaFlags() = %q, want canonical model flag", got)
+	}
+	if strings.Contains(got, "-m gpt-5.5") || strings.Contains(got, `model_reasoning_effort=\"xhigh\"`) {
+		t.Fatalf("ReplaceSchemaFlags() = %q, retained non-canonical schema flag", got)
+	}
+}
+
+func TestCollectAllSchemaFlagsUsesDeclaredFlagAliases(t *testing.T) {
+	schema := []ProviderOption{
+		{
+			Key: "model",
+			Choices: []OptionChoice{
+				{
+					Value:       "opus",
+					FlagArgs:    []string{"--model", "opus"},
+					FlagAliases: [][]string{{"-m", "opus"}},
+				},
+			},
+		},
+	}
+
+	flags := CollectAllSchemaFlags(schema)
+	got := StripFlags("agent -m opus --other", flags)
+
+	if got != "agent --other" {
+		t.Fatalf("StripFlags() = %q, want alias stripped", got)
+	}
+}
+
+func TestCollectAllSchemaFlagsDoesNotInferUndeclaredProviderAliases(t *testing.T) {
+	schema := []ProviderOption{
+		{
+			Key: "model",
+			Choices: []OptionChoice{
+				{Value: "opus", FlagArgs: []string{"--model", "opus"}},
+			},
+		},
+	}
+
+	flags := CollectAllSchemaFlags(schema)
+	got := StripFlags("agent -m opus --other", flags)
+
+	if got != "agent -m opus --other" {
+		t.Fatalf("StripFlags() = %q, want undeclared alias preserved", got)
+	}
+}
+
+func TestStripArgsSliceInfersChoiceFromDeclaredAlias(t *testing.T) {
+	schema := []ProviderOption{
+		{
+			Key: "model",
+			Choices: []OptionChoice{
+				{
+					Value:       "opus",
+					FlagArgs:    []string{"--model", "opus"},
+					FlagAliases: [][]string{{"-m", "opus"}},
+				},
+			},
+		},
+	}
+	flags := CollectAllSchemaFlags(schema)
+	inferred := make(map[string]string)
+
+	got := stripArgsSlice([]string{"run", "-m", "opus", "--other"}, flags, schema, inferred)
+
+	want := []string{"run", "--other"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("stripArgsSlice() = %v, want %v", got, want)
+	}
+	if inferred["model"] != "opus" {
+		t.Fatalf("inferred model = %q, want opus", inferred["model"])
 	}
 }
 
@@ -714,6 +810,13 @@ func TestBuiltinProviders_CodexHasNilArgsAndOptionDefaults(t *testing.T) {
 		t.Errorf("codex OptionDefaults[permission_mode] = %q, want unrestricted",
 			codex.OptionDefaults["permission_mode"])
 	}
+	if codex.OptionDefaults["model"] != "gpt-5.5" {
+		t.Errorf("codex OptionDefaults[model] = %q, want gpt-5.5",
+			codex.OptionDefaults["model"])
+	}
+	if !schemaHasChoice(codex.OptionsSchema, "model", "gpt-5.5") {
+		t.Error("codex OptionsSchema missing model choice gpt-5.5")
+	}
 }
 
 func TestBuiltinProviders_GeminiHasNilArgsAndOptionDefaults(t *testing.T) {
@@ -768,4 +871,18 @@ func TestValidateOptionDefaults_InvalidValue(t *testing.T) {
 	if !strings.Contains(err.Error(), "not a valid choice") {
 		t.Errorf("unexpected error: %v", err)
 	}
+}
+
+func schemaHasChoice(schema []ProviderOption, key, value string) bool {
+	for _, opt := range schema {
+		if opt.Key != key {
+			continue
+		}
+		for _, choice := range opt.Choices {
+			if choice.Value == value {
+				return true
+			}
+		}
+	}
+	return false
 }

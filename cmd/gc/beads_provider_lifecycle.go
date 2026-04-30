@@ -370,6 +370,13 @@ func initAndHookDir(cityPath, dir, prefix string) error {
 	return nil
 }
 
+func shouldRetryExecBdInit(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "bd schema not visible")
+}
+
 // resolveRigPaths resolves relative rig paths to absolute (relative to
 // cityPath). Mutates rigs in place. Must be called after loading city config
 // and before any access to rigs[i].Path for filesystem operations. Required
@@ -428,6 +435,9 @@ func ensureBeadsProvider(cityPath string) error {
 // Called by gc stop after agents have been terminated.
 // For exec providers, fires "stop". For file providers, always available.
 func shutdownBeadsProvider(cityPath string) error {
+	if cityUsesBdStoreContract(cityPath) && strings.TrimSpace(os.Getenv("GC_DOLT")) == "skip" {
+		return clearManagedDoltRuntimeStateIfOwned(cityPath)
+	}
 	provider := beadsProvider(cityPath)
 	if strings.HasPrefix(provider, "exec:") {
 		if providerUsesBdStoreContract(provider) && isExternalDolt(cityPath) {
@@ -447,6 +457,13 @@ func shutdownBeadsProvider(cityPath string) error {
 // initBeadsForDir initializes bead store infrastructure in a directory.
 // Idempotent — skips if already initialized. Callers should use
 // initAndHookDir instead to ensure hooks are installed afterward.
+//
+// Every load-bearing exec path that invokes bd init locally ensures
+// BEADS_DIR=<dir>/.beads. bd init creates a .git/ as a side effect when
+// BEADS_DIR is unset (upstream gastownhall/beads cmd/bd/init.go), so generic
+// exec providers get the scope's bead directory in the subprocess env and
+// providers that run bd init elsewhere (for example gc-beads-k8s inside the
+// pod) must set it in their own wrapper before invoking bd init.
 func initBeadsForDir(cityPath, dir, prefix, doltDatabase string) error {
 	if cityUsesBdStoreContract(cityPath) && os.Getenv("GC_DOLT") == "skip" {
 		if err := seedDeferredManagedBeadsErr(cityPath, dir, prefix, doltDatabase); err != nil {
@@ -466,7 +483,9 @@ func initBeadsForDir(cityPath, dir, prefix, doltDatabase string) error {
 		script := strings.TrimPrefix(provider, "exec:")
 		if execProviderUsesCanonicalBdScopeFiles(provider) && !execProviderNeedsScopedDoltInit(provider) {
 			baseEnv := providerLifecycleProcessEnv(cityPath, provider)
-			overrides := map[string]string{}
+			overrides := map[string]string{
+				"BEADS_DIR": filepath.Join(dir, ".beads"),
+			}
 			canonicalDoltDatabase := strings.TrimSpace(doltDatabase)
 			if canonicalDoltDatabase == "" {
 				canonicalDoltDatabase = canonicalScopeDoltDatabase(cityPath, dir, prefix)
@@ -480,13 +499,50 @@ func initBeadsForDir(cityPath, dir, prefix, doltDatabase string) error {
 					return err
 				}
 			}
-			if err := runProviderOpWithEnv(script, overlayEnvEntries(baseEnv, overrides), args...); err != nil {
+			env := overlayEnvEntries(baseEnv, overrides)
+			if err := runProviderOpWithEnv(script, env, args...); err != nil {
+				if shouldRetryExecBdInit(err) {
+					for attempt := 0; attempt < 3; attempt++ {
+						time.Sleep(time.Second)
+						retryErr := runProviderOpWithEnv(script, env, args...)
+						if retryErr == nil {
+							return finalizeCanonicalBdScopeInit(cityPath, dir, prefix, canonicalDoltDatabase)
+						}
+						if !shouldRetryExecBdInit(retryErr) {
+							return retryErr
+						}
+						err = retryErr
+					}
+				}
 				return err
 			}
 			return finalizeCanonicalBdScopeInit(cityPath, dir, prefix, canonicalDoltDatabase)
 		}
 		if !execProviderNeedsScopedDoltInit(provider) {
-			return runProviderOp(script, cityPath, args...)
+			baseEnv := cityRuntimeProcessEnv(cityPath)
+			if strings.TrimSpace(cityPath) == "" {
+				baseEnv = os.Environ()
+			}
+			env := overlayEnvEntries(baseEnv, map[string]string{
+				"BEADS_DIR": filepath.Join(dir, ".beads"),
+			})
+			if err := runProviderOpWithEnv(script, env, args...); err != nil {
+				if shouldRetryExecBdInit(err) {
+					for attempt := 0; attempt < 3; attempt++ {
+						time.Sleep(time.Second)
+						retryErr := runProviderOpWithEnv(script, env, args...)
+						if retryErr == nil {
+							return nil
+						}
+						if !shouldRetryExecBdInit(retryErr) {
+							return retryErr
+						}
+						err = retryErr
+					}
+				}
+				return err
+			}
+			return nil
 		}
 		target, err := resolveConfiguredExecStoreTarget(cityPath, dir)
 		if err != nil {
