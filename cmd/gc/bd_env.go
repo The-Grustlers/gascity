@@ -89,8 +89,19 @@ func applyCanonicalDoltAuthEnv(env map[string]string, cityPath, scopeRoot string
 
 func applyCanonicalScopeDoltEnv(env map[string]string, cityPath, scopeRoot string) (bool, error) {
 	target, ok, err := canonicalScopeDoltTarget(cityPath, scopeRoot)
-	if err != nil || !ok {
-		return ok, err
+	if err != nil {
+		if projected, projectedOK := k8sProjectedManagedDoltTargetFromEnv(); projectedOK {
+			if managed, managedErr := canonicalScopeUsesManagedCityEndpoint(cityPath, scopeRoot); managedErr == nil && managed {
+				target = projected
+				ok = true
+			}
+		}
+		if !ok {
+			return ok, err
+		}
+	}
+	if !ok {
+		return ok, nil
 	}
 	if !target.External {
 		if projected, projectedOK := k8sProjectedManagedDoltTargetFromEnv(); projectedOK {
@@ -101,6 +112,28 @@ func applyCanonicalScopeDoltEnv(env map[string]string, cityPath, scopeRoot strin
 	applyCanonicalDoltAuthEnv(env, cityPath, scopeRoot, target)
 	mirrorBeadsDoltEnv(env)
 	return true, nil
+}
+
+func canonicalScopeUsesManagedCityEndpoint(cityPath, scopeRoot string) (bool, error) {
+	resolved, err := contract.ResolveScopeConfigState(fsys.OSFS{}, cityPath, scopeRoot, "")
+	if err != nil {
+		return false, err
+	}
+	if resolved.Kind != contract.ScopeConfigAuthoritative {
+		return false, nil
+	}
+	switch resolved.State.EndpointOrigin {
+	case contract.EndpointOriginManagedCity:
+		return true, nil
+	case contract.EndpointOriginInheritedCity:
+		cityResolved, err := contract.ResolveScopeConfigState(fsys.OSFS{}, cityPath, cityPath, "")
+		if err != nil {
+			return false, err
+		}
+		return cityResolved.Kind == contract.ScopeConfigAuthoritative && cityResolved.State.EndpointOrigin == contract.EndpointOriginManagedCity, nil
+	default:
+		return false, nil
+	}
 }
 
 func applyCanonicalConfigStateDoltEnv(env map[string]string, cityPath, scopeRoot string, state contract.ConfigState) {
@@ -203,6 +236,11 @@ func managedLocalDoltHost(host string) bool {
 }
 
 func resolvedRuntimeCityDoltTarget(cityPath string, allowRecovery bool) (contract.DoltConnectionTarget, bool, error) {
+	if projected, projectedOK := k8sProjectedManagedDoltTargetFromEnv(); projectedOK {
+		if managed, managedErr := canonicalScopeUsesManagedCityEndpoint(cityPath, cityPath); managedErr == nil && managed {
+			return projected, true, nil
+		}
+	}
 	if target, ok, err := canonicalScopeDoltTarget(cityPath, cityPath); err != nil {
 		if !allowRecovery || !contract.IsManagedRuntimeUnavailable(err) {
 			return contract.DoltConnectionTarget{}, false, err
