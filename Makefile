@@ -481,7 +481,12 @@ docker-base: check-docker
 
 ## docker-agent: build base agent image (~5s on top of base). For prebaked images use: gc build-image
 docker-agent: check-docker
-	docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
+	@set -e; \
+		cp bin/gc gc; \
+		cp "$$(command -v bd)" bd; \
+		cp "$$(command -v br)" br; \
+		trap 'rm -f gc bd br' EXIT; \
+		docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
 	@if kubectl config current-context 2>/dev/null | grep -q '^kind-'; then \
 		cluster=$$(kubectl config current-context | sed 's/^kind-//'); \
 		echo "Loading gc-agent:latest into kind cluster '$$cluster'..."; \
