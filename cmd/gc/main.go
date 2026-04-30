@@ -187,6 +187,7 @@ func newRootCmd(stdout, stderr io.Writer) *cobra.Command {
 		newSessionCmd(stdout, stderr),
 		newConvergeCmd(stdout, stderr),
 		newWorkflowCmd(stdout, stderr),
+		newClaudeOAuthLoopCmd(stdout, stderr),
 		newRuntimeCmd(stdout, stderr),
 		newFormulaCmd(stdout, stderr),
 		newBdCmd(stdout, stderr),
