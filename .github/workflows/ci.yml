@@ -359,11 +359,12 @@ jobs:
             command: |
               ./scripts/test-integration-shard rest-full-5-of-8
               ./scripts/test-integration-shard rest-full-6-of-8
-          - shard_name: rest-full-7-8-of-8
+          - shard_name: rest-full-7-of-8
             timeout_minutes: 35
-            command: |
-              ./scripts/test-integration-shard rest-full-7-of-8
-              ./scripts/test-integration-shard rest-full-8-of-8
+            command: ./scripts/test-integration-shard rest-full-7-of-8
+          - shard_name: rest-full-8-of-8
+            timeout_minutes: 35
+            command: ./scripts/test-integration-shard rest-full-8-of-8
     env:
       DOLT_VERSION: "1.86.6"
       BD_VERSION: "v1.0.3"

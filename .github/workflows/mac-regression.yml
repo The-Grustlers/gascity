@@ -398,11 +398,12 @@ jobs:
             command: |
               ./scripts/test-integration-shard rest-full-5-of-8
               ./scripts/test-integration-shard rest-full-6-of-8
-          - shard_name: full-7-8-of-8
+          - shard_name: full-7-of-8
             timeout_minutes: 45
-            command: |
-              ./scripts/test-integration-shard rest-full-7-of-8
-              ./scripts/test-integration-shard rest-full-8-of-8
+            command: ./scripts/test-integration-shard rest-full-7-of-8
+          - shard_name: full-8-of-8
+            timeout_minutes: 45
+            command: ./scripts/test-integration-shard rest-full-8-of-8
     env:
       ANTHROPIC_BASE_URL: https://api.synthetic.new/anthropic
       ANTHROPIC_AUTH_TOKEN: ${{ secrets.SYNTHETIC_API_KEY }}
