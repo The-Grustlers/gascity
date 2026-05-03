@@ -226,20 +226,24 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 	if !p.prebaked {
 		wsWait = `while [ ! -f /workspace/.gc-workspace-ready ]; do sleep 0.5; done; `
 	}
+	tmuxProviderEnv := `-e CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" ` +
+		`-e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" ` +
+		`-e ANTHROPIC_AUTH_TOKEN="$ANTHROPIC_AUTH_TOKEN" ` +
+		`-e GITHUB_TOKEN="$GITHUB_TOKEN" `
 
 	var tmuxCmd string
 	if linuxUsername != "" {
 		// Run tmux session as the dynamic user via su.
 		tmuxCmd = fmt.Sprintf(
 			"%s%s%s%sCMD=$(echo '%s' | base64 -d) && "+
-				`su - %s -c "cd %s && tmux new-session -d -s %s \"$CMD\" && sleep infinity"`,
+				`su - %s -c "cd %s && tmux new-session -d %s-s %s \"$CMD\" && sleep infinity"`,
 			userSetup, credCopy, wsWait, preStartCmds, cmdB64,
-			linuxUsername, podWorkDir, tmuxSession,
+			linuxUsername, podWorkDir, tmuxProviderEnv, tmuxSession,
 		)
 	} else {
 		tmuxCmd = fmt.Sprintf(
-			"%s%s%sCMD=$(echo '%s' | base64 -d) && tmux new-session -d -s %s \"$CMD\" && sleep infinity",
-			credCopy, wsWait, preStartCmds, cmdB64, tmuxSession,
+			"%s%s%sCMD=$(echo '%s' | base64 -d) && tmux new-session -d %s-s %s \"$CMD\" && sleep infinity",
+			credCopy, wsWait, preStartCmds, cmdB64, tmuxProviderEnv, tmuxSession,
 		)
 	}
 
