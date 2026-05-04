@@ -1,5 +1,5 @@
 import type { SessionRecord } from "../api";
-import { api, cityScope } from "../api";
+import { api, cityScope, mutationHeaders } from "../api";
 import { byId, clear, el } from "../util/dom";
 import { calculateActivity, formatTimestamp, statusBadgeClass, truncate } from "../util/legacy";
 import { connectAgentOutput, type AgentOutputMessage, type SSEHandle } from "../sse";
@@ -26,14 +26,14 @@ export async function renderCrew(): Promise<void> {
   const pooledBody = byId("pooled-body");
   if (!crewLoading || !crewTable || !crewEmpty || !crewBody || !riggedBody || !pooledBody) return;
 
-  setCrewEmptyMessage("No crew configured");
+  setCrewEmptyMessage("No sessions yet");
   crewLoading.style.display = "block";
   crewTable.style.display = "none";
   crewEmpty.style.display = "none";
   clear(crewBody);
 
   const { data, error } = await api.GET("/v0/city/{cityName}/sessions", {
-    params: { path: { cityName: city }, query: { state: "active", peek: true } },
+    params: { path: { cityName: city }, query: { peek: true } },
   });
   if (error || !data?.items) {
     crewLoading.textContent = "Failed to load crew";
@@ -45,6 +45,7 @@ export async function renderCrew(): Promise<void> {
   const sessions = data.items;
   const pending = await Promise.all(
     sessions.map(async (session) => {
+      if (!session.running) return false;
       const res = await api.GET("/v0/city/{cityName}/session/{id}/pending", {
         params: { path: { cityName: city, id: session.id } },
       });
@@ -83,7 +84,9 @@ export async function renderCrew(): Promise<void> {
         ]),
       ]),
       el("td", {}, [
-        attachButton(session.template),
+        attachButton(session),
+        " ",
+        messageButton(session),
         " ",
         logButton(session.id, session.template),
       ]),
@@ -96,7 +99,7 @@ export async function renderCrew(): Promise<void> {
   if (crew.length > 0) {
     crewTable.style.display = "table";
   } else {
-    setCrewEmptyMessage("No crew configured");
+    setCrewEmptyMessage("No sessions yet");
     crewEmpty.style.display = "block";
   }
 
@@ -133,20 +136,48 @@ function setCrewEmptyMessage(message: string): void {
 function classifyCrewState(session: SessionRecord, hasPending: boolean): string {
   if (hasPending) return "questions";
   if (session.active_bead) return "spinning";
-  if (!session.running) return "finished";
+  if (!session.running) return session.state || "stopped";
   return "idle";
 }
 
-function attachButton(template: string): HTMLElement {
-  const btn = el("button", { class: "attach-btn", type: "button" }, ["📎 Attach"]);
+function attachButton(session: SessionRecord): HTMLElement {
+  const btn = el("button", { class: "attach-btn", type: "button" }, ["Attach"]);
   btn.addEventListener("click", async () => {
-    const command = `gc agent attach ${template}`;
+    const command = `gc session attach ${session.id}`;
     try {
       await navigator.clipboard.writeText(command);
       showToast("success", "Attach command copied", command);
     } catch {
       showToast("error", "Copy failed", command);
     }
+  });
+  return btn;
+}
+
+function messageButton(session: SessionRecord): HTMLElement {
+  const btn = el("button", { class: "attach-btn", type: "button" }, ["Message"]);
+  btn.addEventListener("click", async () => {
+    const city = cityScope();
+    if (!city) {
+      showToast("info", "No city selected", "Select a city to message a session");
+      return;
+    }
+    const raw = window.prompt(`Message for ${session.template}`);
+    if (raw === null) return;
+    const message = raw.trim();
+    if (!message) {
+      showToast("error", "Missing message", "Message text is required");
+      return;
+    }
+    const res = await api.POST("/v0/city/{cityName}/session/{id}/submit", {
+      params: { path: { cityName: city, id: session.id }, header: mutationHeaders },
+      body: { message, intent: "default" },
+    });
+    if (res.error) {
+      showToast("error", "Message failed", res.error.detail ?? "Could not message session");
+      return;
+    }
+    showToast("success", "Message sent", session.template);
   });
   return btn;
 }

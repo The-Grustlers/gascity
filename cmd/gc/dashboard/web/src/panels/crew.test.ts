@@ -31,7 +31,7 @@ describe("crew empty states", () => {
     syncCityScopeFromLocation();
   });
 
-  it("shows no crew configured when the city has zero crew sessions", async () => {
+  it("shows no sessions when the city has zero crew sessions", async () => {
     vi.spyOn(api, "GET").mockImplementation(async (path: string) => {
       if (path === "/v0/city/{cityName}/sessions") {
         return { data: { items: [] } } as never;
@@ -42,8 +42,93 @@ describe("crew empty states", () => {
     await renderCrew();
 
     expect((document.getElementById("crew-empty") as HTMLElement).style.display).toBe("block");
-    expect(document.getElementById("crew-empty")?.textContent).toContain("No crew configured");
+    expect(document.getElementById("crew-empty")?.textContent).toContain("No sessions yet");
     expect(document.getElementById("crew-empty")?.textContent).not.toContain("Select a city");
+  });
+
+  it("lists asleep sessions and does not call pending for stopped sessions", async () => {
+    const queries: Array<Record<string, unknown> | undefined> = [];
+    vi.spyOn(api, "GET").mockImplementation(async (path: string, options?: unknown) => {
+      if (path === "/v0/city/{cityName}/sessions") {
+        queries.push((options as { params?: { query?: Record<string, unknown> } } | undefined)?.params?.query);
+        return {
+          data: {
+            items: [{
+              active_bead: "",
+              attached: false,
+              id: "s-mayor",
+              last_active: "2026-04-18T20:00:00Z",
+              last_output: "",
+              pool: "",
+              rig: "",
+              running: false,
+              state: "asleep",
+              template: "mayor",
+            }],
+          },
+        } as never;
+      }
+      throw new Error(`unexpected GET ${path}`);
+    });
+
+    await renderCrew();
+
+    expect(queries).toEqual([{ peek: true }]);
+    expect((document.getElementById("crew-table") as HTMLElement).style.display).toBe("table");
+    expect(document.getElementById("crew-tbody")?.textContent).toContain("mayor");
+    expect(document.getElementById("crew-tbody")?.textContent).toContain("asleep");
+  });
+
+  it("copies current session attach commands and submits messages", async () => {
+    const writeText = vi.fn();
+    Object.assign(navigator, { clipboard: { writeText } });
+    vi.spyOn(window, "prompt").mockReturnValue("hello mayor");
+    const posts: Array<{ body?: unknown; path: string; session?: string }> = [];
+
+    vi.spyOn(api, "GET").mockImplementation(async (path: string) => {
+      if (path === "/v0/city/{cityName}/sessions") {
+        return {
+          data: {
+            items: [{
+              active_bead: "",
+              attached: true,
+              id: "s-mayor",
+              last_active: "2026-04-18T20:00:00Z",
+              last_output: "",
+              pool: "",
+              rig: "",
+              running: true,
+              state: "active",
+              template: "mayor",
+            }],
+          },
+        } as never;
+      }
+      if (path === "/v0/city/{cityName}/session/{id}/pending") {
+        return { data: { pending: false } } as never;
+      }
+      throw new Error(`unexpected GET ${path}`);
+    });
+    vi.spyOn(api, "POST").mockImplementation(async (path: string, options?: unknown) => {
+      const params = (options as { body?: unknown; params?: { path?: { id?: string } } } | undefined);
+      posts.push({ body: params?.body, path, session: params?.params?.path?.id });
+      return { data: { status: "accepted", id: "s-mayor", queued: false, intent: "default" } } as never;
+    });
+
+    await renderCrew();
+    document.querySelectorAll<HTMLButtonElement>(".attach-btn")[0]?.click();
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("gc session attach s-mayor");
+    });
+
+    document.querySelectorAll<HTMLButtonElement>(".attach-btn")[1]?.click();
+    await waitFor(() => {
+      expect(posts).toEqual([{
+        body: { message: "hello mayor", intent: "default" },
+        path: "/v0/city/{cityName}/session/{id}/submit",
+        session: "s-mayor",
+      }]);
+    });
   });
 
   it("loads older transcript pages without losing the drawer loading sentinel", async () => {

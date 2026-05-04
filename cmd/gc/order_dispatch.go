@@ -237,11 +237,23 @@ func (m *memoryOrderDispatcher) dispatch(ctx context.Context, cityPath string, n
 			continue
 		}
 
+		labels := []string{"order-run:" + scoped, labelOrderTracking}
+		if a.Trigger == "event" && m.ep != nil {
+			if headSeq, err := m.ep.LatestSeq(); err == nil && headSeq > 0 {
+				labels = append(labels,
+					fmt.Sprintf("order:%s", scoped),
+					fmt.Sprintf("seq:%d", headSeq),
+				)
+			}
+		}
+
 		// Create tracking bead synchronously BEFORE dispatch goroutine.
-		// This prevents the cooldown trigger from re-firing on the next tick.
+		// This prevents the trigger from re-firing on the next tick. Event
+		// orders also persist their cursor here so exec orders dedupe the
+		// same way formula orders do.
 		trackingBead, err := store.Create(beads.Bead{
 			Title:  "order:" + scoped,
-			Labels: []string{"order-run:" + scoped, labelOrderTracking},
+			Labels: labels,
 		})
 		if err != nil {
 			logDispatchError(m.stderr, "gc: order dispatch: creating tracking bead for %s: %v", scoped, err)

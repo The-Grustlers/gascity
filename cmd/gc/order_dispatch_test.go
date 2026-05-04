@@ -738,6 +738,59 @@ func TestOrderDispatchExecDue(t *testing.T) {
 	}
 }
 
+func TestOrderDispatchEventExecPersistsCursor(t *testing.T) {
+	store := beads.NewMemStore()
+	eventLog := events.NewFake()
+	eventLog.Record(events.Event{Type: events.SessionWoke, Actor: "gc", Subject: "mayor"})
+	headSeq, err := eventLog.LatestSeq()
+	if err != nil {
+		t.Fatalf("LatestSeq(): %v", err)
+	}
+
+	runCount := 0
+	fakeExec := func(_ context.Context, _, _ string, _ []string) ([]byte, error) {
+		runCount++
+		return nil, nil
+	}
+
+	aa := []orders.Order{{
+		Name:    "session-pane-sync",
+		Trigger: "event",
+		On:      events.SessionWoke,
+		Exec:    "scripts/sync.sh",
+	}}
+	ad := buildOrderDispatcherFromListExec(aa, store, eventLog, fakeExec, nil)
+	mad := ad.(*memoryOrderDispatcher)
+
+	mad.dispatch(context.Background(), t.TempDir(), time.Now())
+	time.Sleep(50 * time.Millisecond)
+
+	if runCount != 1 {
+		t.Fatalf("runCount after first dispatch = %d, want 1", runCount)
+	}
+	all := trackingBeads(t, store, "order-run:session-pane-sync")
+	if len(all) != 1 {
+		t.Fatalf("tracking beads after first dispatch = %d, want 1", len(all))
+	}
+	if !slicesContain(all[0].Labels, "order:session-pane-sync") {
+		t.Fatalf("tracking bead labels = %v, want order cursor label", all[0].Labels)
+	}
+	if !slicesContain(all[0].Labels, fmt.Sprintf("seq:%d", headSeq)) {
+		t.Fatalf("tracking bead labels = %v, want seq:%d", all[0].Labels, headSeq)
+	}
+
+	mad.dispatch(context.Background(), t.TempDir(), time.Now().Add(10*time.Second))
+	time.Sleep(50 * time.Millisecond)
+
+	if runCount != 1 {
+		t.Fatalf("runCount after second dispatch = %d, want 1", runCount)
+	}
+	all = trackingBeads(t, store, "order-run:session-pane-sync")
+	if len(all) != 1 {
+		t.Fatalf("tracking beads after second dispatch = %d, want cached cursor suppression", len(all))
+	}
+}
+
 func TestOrderDispatchExecFailure(t *testing.T) {
 	store := beads.NewMemStore()
 	var rec memRecorder

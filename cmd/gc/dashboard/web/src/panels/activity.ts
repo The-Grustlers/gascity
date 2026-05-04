@@ -220,6 +220,7 @@ function toEntryFromRecord(record: CityEventRecord | SupervisorEventRecord): Act
 
 function toActivityEntry(record: DashboardEventRecord, eventID?: string): ActivityEntry | null {
   if (!record.type) return null;
+  if (isOrderTrackingBeadEvent(record)) return null;
   const scope = recordCity(record) ?? cityScope();
   const seq = typeof record.seq === "number" ? record.seq : 0;
   return {
@@ -234,6 +235,11 @@ function toActivityEntry(record: DashboardEventRecord, eventID?: string): Activi
     seq,
     rig: extractRig(record.actor) || ("city" in record ? (record.city || "") : ""),
   };
+}
+
+function isOrderTrackingBeadEvent(record: DashboardEventRecord): boolean {
+  if (!record.type.startsWith("bead.")) return false;
+  return typeof record.message === "string" && record.message.startsWith("order:");
 }
 
 function normalizeEntries(nextEntries: ActivityEntry[]): ActivityEntry[] {
@@ -292,6 +298,7 @@ function stableEventID(record: DashboardEventRecord, eventID?: string): string {
 }
 
 export function eventTypeFromMessage(msg: DashboardEventMessage): string {
+  if (msg.event !== "heartbeat" && isOrderTrackingBeadEvent(msg.data)) return "";
   return semanticEventType(msg);
 }
 

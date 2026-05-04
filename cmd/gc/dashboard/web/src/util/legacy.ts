@@ -160,6 +160,7 @@ export function statusBadgeClass(status: string | undefined | null): string {
     case "warning":
       return "badge-yellow";
     case "closed":
+    case "asleep":
     case "stopped":
       return "badge-muted";
     case "error":
