@@ -91,3 +91,40 @@ func TestCORSRejectsNonLocalhostOrigin(t *testing.T) {
 		})
 	}
 }
+
+func TestCORSAllowsConfiguredDashboardOrigin(t *testing.T) {
+	t.Setenv(allowedOriginsEnv, "http://gr7n-node-01:8080, http://100.96.12.40:8080/")
+	state := newFakeState(t)
+	h := newTestCityHandler(t, state)
+
+	req := httptest.NewRequest(http.MethodOptions, "/v0/cities", nil)
+	req.Header.Set("Origin", "http://gr7n-node-01:8080")
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("preflight status = %d, want 204; body=%s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "http://gr7n-node-01:8080" {
+		t.Errorf("Allow-Origin = %q, want configured origin", got)
+	}
+}
+
+func TestCORSConfiguredOriginRequiresExactMatch(t *testing.T) {
+	t.Setenv(allowedOriginsEnv, "http://gr7n-node-01:8080")
+	state := newFakeState(t)
+	h := newTestCityHandler(t, state)
+
+	req := httptest.NewRequest(http.MethodOptions, "/v0/cities", nil)
+	req.Header.Set("Origin", "http://gr7n-node-01.evil.example:8080")
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("Allow-Origin = %q, want empty for non-exact match", got)
+	}
+}

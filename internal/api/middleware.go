@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"log"
 	"net/http"
+	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/gastownhall/gascity/internal/telemetry"
@@ -96,12 +98,15 @@ func withRecovery(next http.Handler) http.Handler {
 	})
 }
 
-// withCORS adds restricted CORS headers for localhost dashboard access.
-// Only allows localhost origins to prevent browser-origin attacks on mutation endpoints.
+const allowedOriginsEnv = "GC_API_ALLOWED_ORIGINS"
+
+// withCORS adds restricted CORS headers for dashboard access.
+// Localhost is allowed for developer dashboards. Additional exact origins may
+// be supplied through GC_API_ALLOWED_ORIGINS for private-network deployments.
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if isLocalhostOrigin(origin) {
+		if isAllowedCORSOrigin(origin) {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Last-Event-ID, X-GC-Request")
@@ -113,6 +118,23 @@ func withCORS(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func isAllowedCORSOrigin(origin string) bool {
+	return isLocalhostOrigin(origin) || isConfiguredCORSOrigin(origin, os.Getenv(allowedOriginsEnv))
+}
+
+func isConfiguredCORSOrigin(origin, configured string) bool {
+	if origin == "" || configured == "" {
+		return false
+	}
+	for _, item := range strings.Split(configured, ",") {
+		allowed := strings.TrimRight(strings.TrimSpace(item), "/")
+		if allowed != "" && origin == allowed {
+			return true
+		}
+	}
+	return false
 }
 
 // isMutationMethod returns true for HTTP methods that modify state.
