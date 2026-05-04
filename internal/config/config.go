@@ -36,13 +36,25 @@ const (
 	// Wrapped in `sh -c` so any appended prompt suffix is ignored as $0.
 	// The control lane is kept resident and blocks on workflow-relevant city
 	// events instead of exiting after each one-shot drain.
-	ControlDispatcherStartCommand = `sh -c 'export GC_WORKFLOW_TRACE="${GC_WORKFLOW_TRACE:-${GC_CITY}/control-dispatcher-trace.log}"; exec "${GC_BIN:-gc}" convoy control --serve --follow ` + ControlDispatcherAgentName + `'`
+	//
+	// The trace log default is under .gc/runtime/ so it sits inside the
+	// controller's fsnotify exclusion (cmd/gc/controller.go shouldIgnoreConfigWatchEvent
+	// excludes the .gc and .beads path segments). Placing it at city root
+	// caused every append to fire markDirty() through the watcher debouncer,
+	// which kept the patrol loop in continuous reconciliation and blew patrol
+	// cycle duration well past the configured patrol_interval. See
+	// engdocs/design/session-reconciler-tracing.md for the canonical
+	// .gc/runtime/ convention for trace data.
+	ControlDispatcherStartCommand = `sh -c 'export GC_WORKFLOW_TRACE="${GC_WORKFLOW_TRACE:-${GC_CITY}/.gc/runtime/control-dispatcher-trace.log}"; mkdir -p "${GC_CITY}/.gc/runtime"; exec "${GC_BIN:-gc}" convoy control --serve --follow ` + ControlDispatcherAgentName + `'`
 )
 
 // ControlDispatcherStartCommandFor returns the start command for a
-// control-dispatcher agent with the given qualified name.
+// control-dispatcher agent with the given qualified name. The trace log
+// default lives under .gc/runtime/ to stay inside the controller's
+// fsnotify exclusion; see ControlDispatcherStartCommand for the full
+// rationale.
 func ControlDispatcherStartCommandFor(qualifiedName string) string {
-	return `sh -c 'export GC_WORKFLOW_TRACE="${GC_WORKFLOW_TRACE:-${GC_CITY}/control-dispatcher-trace.log}"; exec "${GC_BIN:-gc}" convoy control --serve --follow ` + qualifiedName + `'`
+	return `sh -c 'export GC_WORKFLOW_TRACE="${GC_WORKFLOW_TRACE:-${GC_CITY}/.gc/runtime/control-dispatcher-trace.log}"; mkdir -p "${GC_CITY}/.gc/runtime"; exec "${GC_BIN:-gc}" convoy control --serve --follow ` + qualifiedName + `'`
 }
 
 // BindingQualifiedName returns the binding-qualified agent identity without a

@@ -4814,3 +4814,55 @@ schedule = "0 3 * * *"
 		t.Fatalf("Trigger = %#v, want cron", cfg.Orders.Overrides[0].Trigger)
 	}
 }
+
+// TestControlDispatcherStartCommandTracesUnderGCRuntime pins the trace-log
+// default location for the built-in control-dispatcher worker.
+//
+// The control-dispatcher writes to ${GC_WORKFLOW_TRACE} every few seconds
+// while serving workflow control beads. The default path must live under
+// .gc/runtime/ so that the controller's recursive fsnotify watcher
+// (cmd/gc/controller.go shouldIgnoreConfigWatchEvent) ignores writes to it
+// — that function excludes the .gc and .beads path segments. Placing the
+// default at city root caused every append to fire markDirty() through the
+// 200ms debouncer, keeping patrol cycles in continuous reconciliation and
+// driving cycle duration well past the configured patrol_interval.
+//
+// Regression guard: do not move the trace default out of .gc/runtime/
+// without a paired update to the controller's watcher exclusion list.
+func TestControlDispatcherStartCommandTracesUnderGCRuntime(t *testing.T) {
+	const (
+		wantTracePath = "${GC_CITY}/.gc/runtime/control-dispatcher-trace.log"
+		wantMkdirSnip = `mkdir -p "${GC_CITY}/.gc/runtime"`
+		oldTracePath  = "${GC_CITY}/control-dispatcher-trace.log"
+		qualifiedName = "qcore/control-dispatcher"
+	)
+
+	t.Run("city-level constant", func(t *testing.T) {
+		got := ControlDispatcherStartCommand
+		if !strings.Contains(got, wantTracePath) {
+			t.Errorf("ControlDispatcherStartCommand missing %q\n got: %s", wantTracePath, got)
+		}
+		if !strings.Contains(got, wantMkdirSnip) {
+			t.Errorf("ControlDispatcherStartCommand missing %q (needed so .gc/runtime/ exists on first start)\n got: %s", wantMkdirSnip, got)
+		}
+		// Guard against accidental revert: the old city-root path must not
+		// reappear as a substring (the new path contains it as a suffix, so
+		// match the trailing form including the leading slash).
+		if strings.Contains(got, `"${GC_WORKFLOW_TRACE:-`+oldTracePath+`"`) {
+			t.Errorf("ControlDispatcherStartCommand still references the old city-root trace path %q\n got: %s", oldTracePath, got)
+		}
+	})
+
+	t.Run("qualified-name builder", func(t *testing.T) {
+		got := ControlDispatcherStartCommandFor(qualifiedName)
+		if !strings.Contains(got, wantTracePath) {
+			t.Errorf("ControlDispatcherStartCommandFor missing %q\n got: %s", wantTracePath, got)
+		}
+		if !strings.Contains(got, wantMkdirSnip) {
+			t.Errorf("ControlDispatcherStartCommandFor missing %q\n got: %s", wantMkdirSnip, got)
+		}
+		if !strings.Contains(got, "--follow "+qualifiedName) {
+			t.Errorf("ControlDispatcherStartCommandFor must --follow the qualified name %q\n got: %s", qualifiedName, got)
+		}
+	})
+}
