@@ -48,8 +48,8 @@ func TestInjectSupervisorURL(t *testing.T) {
 	}
 }
 
-// TestStaticHandlerServesIndex confirms the handler injects the URL
-// into the served index and that dashboard.js is reachable.
+// TestStaticHandlerServesIndex confirms the handler serves same-origin index
+// HTML and that dashboard.js is reachable.
 func TestStaticHandlerServesIndex(t *testing.T) {
 	h, err := NewStaticHandler("http://127.0.0.1:8372")
 	if err != nil {
@@ -63,8 +63,8 @@ func TestStaticHandlerServesIndex(t *testing.T) {
 		t.Fatalf("GET /: %d %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `<meta name="supervisor-url" content="http://127.0.0.1:8372">`) {
-		t.Errorf("index missing injected supervisor-url meta; body:\n%s", body)
+	if !strings.Contains(body, `<meta name="supervisor-url" content="">`) {
+		t.Errorf("index should use same-origin supervisor URL; body:\n%s", body)
 	}
 
 	// Bundle.
@@ -87,6 +87,42 @@ func TestStaticHandlerServesIndex(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `<meta name="supervisor-url"`) {
 		t.Errorf("fallback did not serve SPA index")
+	}
+}
+
+func TestStaticHandlerProxiesSupervisorAPI(t *testing.T) {
+	var seenPath string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenPath = r.URL.Path
+		if got := r.Header.Get("X-Forwarded-Host"); got == "" {
+			t.Error("proxy did not set X-Forwarded-Host")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	h, err := NewStaticHandler(upstream.URL)
+	if err != nil {
+		t.Fatalf("NewStaticHandler: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /health: %d %s", rec.Code, rec.Body.String())
+	}
+	if seenPath != "/health" {
+		t.Fatalf("proxied path = %q, want /health", seenPath)
+	}
+	if !strings.Contains(rec.Body.String(), `"status":"ok"`) {
+		t.Fatalf("proxy body = %s", rec.Body.String())
+	}
+}
+
+func TestStaticHandlerRejectsInvalidSupervisorURL(t *testing.T) {
+	if _, err := NewStaticHandler("127.0.0.1:8372"); err == nil {
+		t.Fatal("NewStaticHandler accepted supervisor URL without scheme")
 	}
 }
 
