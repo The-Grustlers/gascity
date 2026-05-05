@@ -1229,12 +1229,17 @@ exit 0
 
 func runScript(t *testing.T, script string, env map[string]string) {
 	t.Helper()
-	cmd := exec.Command(script)
-	cmd.Env = mergeTestEnv(env)
-	out, err := cmd.CombinedOutput()
+	out, err := runScriptResult(t, script, env)
 	if err != nil {
 		t.Fatalf("%s failed: %v\n%s", filepath.Base(script), err, out)
 	}
+}
+
+func runScriptResult(t *testing.T, script string, env map[string]string) ([]byte, error) {
+	t.Helper()
+	cmd := exec.Command(script)
+	cmd.Env = mergeTestEnv(env)
+	return cmd.CombinedOutput()
 }
 
 func writeExecutable(t *testing.T, path, body string) {
@@ -1323,10 +1328,16 @@ func jsonlExportEnv(t *testing.T, cityDir, binDir, stateDir, archiveRepo, gcLog,
 // nudge stream.
 func writeJsonlExportGCStub(t *testing.T, binDir string) {
 	t.Helper()
+	writeJsonlExportGCStubWithMailExitCode(t, binDir, 0)
+}
+
+func writeJsonlExportGCStubWithMailExitCode(t *testing.T, binDir string, mailExitCode int) {
+	t.Helper()
 	writeExecutable(t, filepath.Join(binDir, "gc"), `#!/bin/sh
 printf '%s\n' "$*" >> "$GC_CALL_LOG"
 if [ "$1" = "mail" ] && [ "$2" = "send" ]; then
     printf '%s\n' "$*" >> "$GC_MAIL_LOG"
+    exit `+strconv.Itoa(mailExitCode)+`
 fi
 exit 0
 `)
@@ -1386,7 +1397,11 @@ func writeMultiRecordDoltStub(t *testing.T, binDir string, currentCount int) {
 	for i := 0; i < currentCount; i++ {
 		rows = append(rows, fmt.Sprintf(`{"id":"c%d","title":"cur-%d"}`, i, i))
 	}
-	issuesPayload := `{"rows":[` + strings.Join(rows, ",") + `]}`
+	writeIssuesPayloadDoltStub(t, binDir, `{"rows":[`+strings.Join(rows, ",")+`]}`)
+}
+
+func writeIssuesPayloadDoltStub(t *testing.T, binDir, issuesPayload string) {
+	t.Helper()
 	body := "#!/bin/sh\n" +
 		"case \"$*\" in\n" +
 		"  *\"SHOW DATABASES\"*)\n" +
@@ -1401,6 +1416,67 @@ func writeMultiRecordDoltStub(t *testing.T, binDir string, currentCount int) {
 		"esac\n" +
 		"exit 0\n"
 	writeExecutable(t, filepath.Join(binDir, "dolt"), body)
+}
+
+func writeIssueRowsDoltStub(t *testing.T, binDir string, rows []string) {
+	t.Helper()
+	writeIssuesPayloadDoltStub(t, binDir, `{"rows":[`+strings.Join(rows, ",")+`]}`)
+}
+
+func writeGitSubcommandFailureStub(t *testing.T, binDir, realGit, subcommand string) {
+	t.Helper()
+	writeExecutable(t, filepath.Join(binDir, "git"), fmt.Sprintf(`#!/bin/sh
+for arg in "$@"; do
+    if [ "$arg" = "%s" ]; then
+        echo "simulated git %s failure" >&2
+        exit 1
+    fi
+done
+exec '%s' "$@"
+`, subcommand, subcommand, realGit))
+}
+
+func initSeedArchiveWithoutLocalIdentity(t *testing.T, archiveRepo string, prevCount int) string {
+	t.Helper()
+	dbDir := filepath.Join(archiveRepo, "beads")
+	if err := os.MkdirAll(dbDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rows := make([]string, 0, prevCount)
+	for i := 0; i < prevCount; i++ {
+		rows = append(rows, fmt.Sprintf(`{"id":"p%d","title":"prev-%d"}`, i, i))
+	}
+	body := `{"rows":[` + strings.Join(rows, ",") + `]}` + "\n"
+	if err := os.WriteFile(filepath.Join(dbDir, "issues.jsonl"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	steps := [][]string{
+		{"-c", "init.defaultBranch=main", "init", "-q"},
+		{"add", "-A"},
+		{"commit", "-q", "-m", "seed"},
+	}
+	commitEnv := append(os.Environ(),
+		"GIT_AUTHOR_NAME=seed-author",
+		"GIT_AUTHOR_EMAIL=seed-author@example.invalid",
+		"GIT_COMMITTER_NAME=seed-committer",
+		"GIT_COMMITTER_EMAIL=seed-committer@example.invalid",
+	)
+	for _, args := range steps {
+		full := append([]string{"-C", archiveRepo}, args...)
+		cmd := exec.Command("git", full...)
+		if len(args) > 0 && args[len(args)-1] == "seed" {
+			cmd.Env = commitEnv
+		}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	cmd := exec.Command("git", "-C", archiveRepo, "rev-parse", "HEAD")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse: %v\n%s", err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func TestJsonlExportCountsRecordsViaJq(t *testing.T) {
@@ -1557,5 +1633,374 @@ func TestJsonlExportFirstRunWithDisabledFloorSkipsSpikeCheck(t *testing.T) {
 	}
 	if !strings.Contains(string(gcData), "DOG_DONE: jsonl") {
 		t.Fatalf("expected DOG_DONE nudge in gc log:\n%s", gcData)
+	}
+}
+
+func TestJsonlExportScrubTrueFiltersRowsWithoutDroppingWholePayload(t *testing.T) {
+	cityDir := t.TempDir()
+	binDir := t.TempDir()
+	stateDir := t.TempDir()
+	gcLog := filepath.Join(t.TempDir(), "gc.log")
+	mailLog := filepath.Join(t.TempDir(), "gc-mail.log")
+	archiveRepo := filepath.Join(cityDir, "archive")
+
+	initSeedArchive(t, archiveRepo, 12)
+	rows := make([]string, 0, 13)
+	rows = append(rows, `{"id":"bd-100","title":"real-leading-prefix"}`)
+	for i := 1; i < 12; i++ {
+		rows = append(rows, fmt.Sprintf(`{"id":"prod-%d","title":"real-%d"}`, i, i))
+	}
+	rows = append(rows, `{"id":"prod-test","title":"Test Issue 99"}`)
+	writeIssueRowsDoltStub(t, binDir, rows)
+	writeJsonlExportGCStub(t, binDir)
+
+	env := jsonlExportEnv(t, cityDir, binDir, stateDir, archiveRepo, gcLog, mailLog)
+	env["GC_JSONL_SCRUB"] = "true"
+
+	runScript(t, filepath.Join(exampleDir(), "packs", "maintenance", "assets", "scripts", "jsonl-export.sh"), env)
+
+	mailData, err := os.ReadFile(mailLog)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("ReadFile(mail log): %v", err)
+	}
+	if strings.Contains(string(mailData), "ESCALATION: JSONL spike") {
+		t.Fatalf("row-level scrub should preserve legitimate rows and avoid false spikes; mail log:\n%s", mailData)
+	}
+
+	exported, err := os.ReadFile(filepath.Join(archiveRepo, "beads", "issues.jsonl"))
+	if err != nil {
+		t.Fatalf("ReadFile(issues.jsonl): %v", err)
+	}
+	if got := strings.Count(string(exported), `"id":`); got != 12 {
+		t.Fatalf("expected scrubbed export to retain 12 legitimate rows, got %d rows:\n%s", got, exported)
+	}
+	if !strings.Contains(string(exported), `"id":"bd-100"`) {
+		t.Fatalf("expected scrubbed export to preserve the legitimate bd-100 row, got:\n%s", exported)
+	}
+	if strings.Contains(string(exported), "Test Issue 99") {
+		t.Fatalf("expected scrubbed export to remove the test row, got:\n%s", exported)
+	}
+
+	legacyExported, err := os.ReadFile(filepath.Join(archiveRepo, "beads.jsonl"))
+	if err != nil {
+		t.Fatalf("ReadFile(beads.jsonl): %v", err)
+	}
+	if got := strings.Count(string(legacyExported), `"id":`); got != 12 {
+		t.Fatalf("expected legacy flat export to retain 12 legitimate rows, got %d rows:\n%s", got, legacyExported)
+	}
+	if !strings.Contains(string(legacyExported), `"id":"bd-100"`) {
+		t.Fatalf("expected legacy flat export to preserve the legitimate bd-100 row, got:\n%s", legacyExported)
+	}
+	if strings.Contains(string(legacyExported), "Test Issue 99") {
+		t.Fatalf("expected legacy flat export to remove the test row, got:\n%s", legacyExported)
+	}
+
+	gcData, err := os.ReadFile(gcLog)
+	if err != nil {
+		t.Fatalf("ReadFile(gc log): %v", err)
+	}
+	if !strings.Contains(string(gcData), "records: 12") {
+		t.Fatalf("expected DOG_DONE summary to report the scrubbed record count, got:\n%s", gcData)
+	}
+}
+
+func TestJsonlExportHaltCommitAdvancesBaselineWithoutLocalGitIdentity(t *testing.T) {
+	cityDir := t.TempDir()
+	binDir := t.TempDir()
+	stateDir := t.TempDir()
+	gcLog := filepath.Join(t.TempDir(), "gc.log")
+	mailLog := filepath.Join(t.TempDir(), "gc-mail.log")
+	archiveRepo := filepath.Join(cityDir, "archive")
+
+	prevHead := initSeedArchiveWithoutLocalIdentity(t, archiveRepo, 100)
+	writeMultiRecordDoltStub(t, binDir, 10)
+	writeJsonlExportGCStub(t, binDir)
+
+	env := jsonlExportEnv(t, cityDir, binDir, stateDir, archiveRepo, gcLog, mailLog)
+
+	runScript(t, filepath.Join(exampleDir(), "packs", "maintenance", "assets", "scripts", "jsonl-export.sh"), env)
+
+	revOut, revErr := exec.Command("git", "-C", archiveRepo, "rev-parse", "HEAD").CombinedOutput()
+	if revErr != nil {
+		t.Fatalf("git rev-parse: %v\n%s", revErr, revOut)
+	}
+	if newHead := strings.TrimSpace(string(revOut)); newHead == prevHead {
+		t.Fatalf("HEAD did not advance without repo-local git identity; baseline stayed frozen at %s", prevHead)
+	}
+
+	gcData, readErr := os.ReadFile(gcLog)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		t.Fatalf("ReadFile(gc log): %v", readErr)
+	}
+	if !strings.Contains(string(gcData), "HALTED on spike detection") {
+		t.Fatalf("expected HALT success nudge after baseline advance, got:\n%s", gcData)
+	}
+}
+
+func TestJsonlExportDeletedHeadBaselineSkipsPreviousCountLookup(t *testing.T) {
+	cityDir := t.TempDir()
+	binDir := t.TempDir()
+	stateDir := t.TempDir()
+	gcLog := filepath.Join(t.TempDir(), "gc.log")
+	mailLog := filepath.Join(t.TempDir(), "gc-mail.log")
+	archiveRepo := filepath.Join(cityDir, "archive")
+
+	initSeedArchive(t, archiveRepo, 3)
+	steps := [][]string{
+		{"rm", "-q", "beads/issues.jsonl"},
+		{"commit", "-q", "-m", "delete issues baseline"},
+	}
+	for _, args := range steps {
+		cmd := exec.Command("git", append([]string{"-C", archiveRepo}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+
+	writeMultiRecordDoltStub(t, binDir, 5)
+	writeJsonlExportGCStub(t, binDir)
+
+	env := jsonlExportEnv(t, cityDir, binDir, stateDir, archiveRepo, gcLog, mailLog)
+
+	runScript(t, filepath.Join(exampleDir(), "packs", "maintenance", "assets", "scripts", "jsonl-export.sh"), env)
+
+	if mailData, _ := os.ReadFile(mailLog); strings.Contains(string(mailData), "ESCALATION: JSONL spike") {
+		t.Fatalf("deleted HEAD baseline should behave like no baseline; mail log:\n%s", mailData)
+	}
+	gcData, err := os.ReadFile(gcLog)
+	if err != nil {
+		t.Fatalf("ReadFile(gc log): %v", err)
+	}
+	if !strings.Contains(string(gcData), "DOG_DONE: jsonl") {
+		t.Fatalf("expected DOG_DONE summary after deleted HEAD baseline, got:\n%s", gcData)
+	}
+}
+
+func TestJsonlExportScrubFailureDoesNotCommitBrokenOutputs(t *testing.T) {
+	cityDir := t.TempDir()
+	binDir := t.TempDir()
+	stateDir := t.TempDir()
+	gcLog := filepath.Join(t.TempDir(), "gc.log")
+	mailLog := filepath.Join(t.TempDir(), "gc-mail.log")
+	archiveRepo := filepath.Join(cityDir, "archive")
+
+	prevHead := initSeedArchive(t, archiveRepo, 3)
+	writeIssuesPayloadDoltStub(t, binDir, `{bad json`)
+	writeJsonlExportGCStub(t, binDir)
+
+	env := jsonlExportEnv(t, cityDir, binDir, stateDir, archiveRepo, gcLog, mailLog)
+	env["GC_JSONL_SCRUB"] = "true"
+
+	runScript(t, filepath.Join(exampleDir(), "packs", "maintenance", "assets", "scripts", "jsonl-export.sh"), env)
+
+	revOut, err := exec.Command("git", "-C", archiveRepo, "rev-parse", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse: %v\n%s", err, revOut)
+	}
+	if newHead := strings.TrimSpace(string(revOut)); newHead != prevHead {
+		t.Fatalf("scrub failure must not advance HEAD: got %s want %s", newHead, prevHead)
+	}
+
+	statusOut, err := exec.Command("git", "-C", archiveRepo, "status", "--short").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, statusOut)
+	}
+	if strings.TrimSpace(string(statusOut)) != "" {
+		t.Fatalf("scrub failure must leave the archive worktree clean, got:\n%s", statusOut)
+	}
+
+	gcData, err := os.ReadFile(gcLog)
+	if err != nil {
+		t.Fatalf("ReadFile(gc log): %v", err)
+	}
+	if !strings.Contains(string(gcData), "failed: beads ") {
+		t.Fatalf("expected scrub failure to report failed dbs, got:\n%s", gcData)
+	}
+}
+
+func TestJsonlExportMalformedPayloadWithoutScrubDoesNotCommitBrokenOutputs(t *testing.T) {
+	cityDir := t.TempDir()
+	binDir := t.TempDir()
+	stateDir := t.TempDir()
+	gcLog := filepath.Join(t.TempDir(), "gc.log")
+	mailLog := filepath.Join(t.TempDir(), "gc-mail.log")
+	archiveRepo := filepath.Join(cityDir, "archive")
+
+	prevHead := initSeedArchive(t, archiveRepo, 3)
+	writeIssuesPayloadDoltStub(t, binDir, `{bad json`)
+	writeJsonlExportGCStub(t, binDir)
+
+	env := jsonlExportEnv(t, cityDir, binDir, stateDir, archiveRepo, gcLog, mailLog)
+	env["GC_JSONL_SCRUB"] = "false"
+
+	runScript(t, filepath.Join(exampleDir(), "packs", "maintenance", "assets", "scripts", "jsonl-export.sh"), env)
+
+	revOut, err := exec.Command("git", "-C", archiveRepo, "rev-parse", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse: %v\n%s", err, revOut)
+	}
+	if newHead := strings.TrimSpace(string(revOut)); newHead != prevHead {
+		t.Fatalf("malformed payload without scrub must not advance HEAD: got %s want %s", newHead, prevHead)
+	}
+
+	statusOut, err := exec.Command("git", "-C", archiveRepo, "status", "--short").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, statusOut)
+	}
+	if strings.TrimSpace(string(statusOut)) != "" {
+		t.Fatalf("malformed payload without scrub must leave the archive worktree clean, got:\n%s", statusOut)
+	}
+
+	gcData, err := os.ReadFile(gcLog)
+	if err != nil {
+		t.Fatalf("ReadFile(gc log): %v", err)
+	}
+	if !strings.Contains(string(gcData), "failed: beads ") {
+		t.Fatalf("expected malformed payload without scrub to report failed dbs, got:\n%s", gcData)
+	}
+}
+
+func TestJsonlExportHaltStagingFailureExitsWithoutAdvancingBaseline(t *testing.T) {
+	cityDir := t.TempDir()
+	binDir := t.TempDir()
+	stateDir := t.TempDir()
+	gcLog := filepath.Join(t.TempDir(), "gc.log")
+	mailLog := filepath.Join(t.TempDir(), "gc-mail.log")
+	archiveRepo := filepath.Join(cityDir, "archive")
+
+	prevHead := initSeedArchive(t, archiveRepo, 100)
+	writeMultiRecordDoltStub(t, binDir, 10)
+	writeJsonlExportGCStub(t, binDir)
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("LookPath(git): %v", err)
+	}
+	writeGitSubcommandFailureStub(t, binDir, realGit, "add")
+
+	env := jsonlExportEnv(t, cityDir, binDir, stateDir, archiveRepo, gcLog, mailLog)
+
+	out, runErr := runScriptResult(t, filepath.Join(exampleDir(), "packs", "maintenance", "assets", "scripts", "jsonl-export.sh"), env)
+	if runErr == nil {
+		t.Fatalf("expected script to fail when git add fails on HALT path; output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "staging archive outputs failed") {
+		t.Fatalf("expected staging failure diagnostic, got:\n%s", out)
+	}
+
+	revOut, err := exec.Command("git", "-C", archiveRepo, "rev-parse", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse: %v\n%s", err, revOut)
+	}
+	if newHead := strings.TrimSpace(string(revOut)); newHead != prevHead {
+		t.Fatalf("staging failure must not advance HEAD: got %s want %s", newHead, prevHead)
+	}
+
+	statusOut, err := exec.Command("git", "-C", archiveRepo, "status", "--short").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, statusOut)
+	}
+	if strings.TrimSpace(string(statusOut)) != "" {
+		t.Fatalf("staging failure must leave the archive worktree clean, got:\n%s", statusOut)
+	}
+}
+
+func TestJsonlExportHaltCommitFailureLeavesArchiveClean(t *testing.T) {
+	cityDir := t.TempDir()
+	binDir := t.TempDir()
+	stateDir := t.TempDir()
+	gcLog := filepath.Join(t.TempDir(), "gc.log")
+	mailLog := filepath.Join(t.TempDir(), "gc-mail.log")
+	archiveRepo := filepath.Join(cityDir, "archive")
+
+	prevHead := initSeedArchive(t, archiveRepo, 100)
+	writeMultiRecordDoltStub(t, binDir, 10)
+	writeJsonlExportGCStub(t, binDir)
+
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("LookPath(git): %v", err)
+	}
+	writeGitSubcommandFailureStub(t, binDir, realGit, "commit")
+
+	env := jsonlExportEnv(t, cityDir, binDir, stateDir, archiveRepo, gcLog, mailLog)
+
+	out, runErr := runScriptResult(t, filepath.Join(exampleDir(), "packs", "maintenance", "assets", "scripts", "jsonl-export.sh"), env)
+	if runErr == nil {
+		t.Fatalf("expected script to fail when git commit fails on HALT path; output:\n%s", out)
+	}
+	if !strings.Contains(string(out), "HALT baseline commit failed") {
+		t.Fatalf("expected commit failure diagnostic, got:\n%s", out)
+	}
+
+	revOut, err := exec.Command("git", "-C", archiveRepo, "rev-parse", "HEAD").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git rev-parse: %v\n%s", err, revOut)
+	}
+	if newHead := strings.TrimSpace(string(revOut)); newHead != prevHead {
+		t.Fatalf("commit failure must not advance HEAD: got %s want %s", newHead, prevHead)
+	}
+
+	statusOut, err := exec.Command("git", "-C", archiveRepo, "status", "--short").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v\n%s", err, statusOut)
+	}
+	if strings.TrimSpace(string(statusOut)) != "" {
+		t.Fatalf("commit failure must leave the archive worktree clean, got:\n%s", statusOut)
+	}
+}
+
+func TestJsonlExportHaltMailFailurePersistsPendingAlertAndRetriesNextRun(t *testing.T) {
+	cityDir := t.TempDir()
+	binDir := t.TempDir()
+	stateDir := t.TempDir()
+	gcLog := filepath.Join(t.TempDir(), "gc.log")
+	mailLog := filepath.Join(t.TempDir(), "gc-mail.log")
+	archiveRepo := filepath.Join(cityDir, "archive")
+	stateFile := filepath.Join(stateDir, "jsonl-export-state.json")
+
+	initSeedArchive(t, archiveRepo, 100)
+	writeMultiRecordDoltStub(t, binDir, 10)
+	writeJsonlExportGCStubWithMailExitCode(t, binDir, 1)
+
+	env := jsonlExportEnv(t, cityDir, binDir, stateDir, archiveRepo, gcLog, mailLog)
+
+	runScript(t, filepath.Join(exampleDir(), "packs", "maintenance", "assets", "scripts", "jsonl-export.sh"), env)
+
+	stateData, err := os.ReadFile(stateFile)
+	if err != nil {
+		t.Fatalf("ReadFile(state file): %v", err)
+	}
+	if !strings.Contains(string(stateData), `"pending_spike_alert"`) {
+		t.Fatalf("expected pending spike alert after mail failure, got:\n%s", stateData)
+	}
+
+	mailData, err := os.ReadFile(mailLog)
+	if err != nil {
+		t.Fatalf("ReadFile(mail log): %v", err)
+	}
+	if !strings.Contains(string(mailData), "ESCALATION: JSONL spike") {
+		t.Fatalf("expected initial failed mail attempt to be logged, got:\n%s", mailData)
+	}
+
+	writeMultiRecordDoltStub(t, binDir, 10)
+	writeJsonlExportGCStub(t, binDir)
+
+	runScript(t, filepath.Join(exampleDir(), "packs", "maintenance", "assets", "scripts", "jsonl-export.sh"), env)
+
+	stateData, err = os.ReadFile(stateFile)
+	if err != nil {
+		t.Fatalf("ReadFile(state file): %v", err)
+	}
+	if strings.Contains(string(stateData), `"pending_spike_alert"`) {
+		t.Fatalf("expected pending spike alert to clear after retry, got:\n%s", stateData)
+	}
+
+	mailData, err = os.ReadFile(mailLog)
+	if err != nil {
+		t.Fatalf("ReadFile(mail log): %v", err)
+	}
+	if got := strings.Count(string(mailData), "ESCALATION: JSONL spike"); got != 2 {
+		t.Fatalf("expected one failed attempt and one retry delivery, got %d entries:\n%s", got, mailData)
 	}
 }
