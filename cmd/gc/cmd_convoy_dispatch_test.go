@@ -1612,6 +1612,139 @@ func TestRunControlDispatcherWithStoreRoutesRalphTraceWarningToStderr(t *testing
 	}
 }
 
+func TestRunWorkflowServeDedupsTraceWarningsAcrossNestedControlDispatch(t *testing.T) {
+	cityDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte("[workspace]\nname = \"test-city\"\n\n[daemon]\nformula_v2 = true\n"), 0o644); err != nil {
+		t.Fatalf("write city.toml: %v", err)
+	}
+	checkPath := filepath.Join(cityDir, "pass-check.sh")
+	if err := os.WriteFile(checkPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write pass-check.sh: %v", err)
+	}
+	t.Setenv("GC_CITY", cityDir)
+	t.Setenv("GC_WORKFLOW_TRACE", filepath.Join(t.TempDir(), "missing", "workflow-trace.log"))
+
+	prevCityFlag := cityFlag
+	prevList := workflowServeList
+	prevControl := controlDispatcherServe
+	prevInterval := workflowServeIdlePollInterval
+	prevAttempts := workflowServeIdlePollAttempts
+	cityFlag = ""
+	workflowServeIdlePollInterval = 0
+	workflowServeIdlePollAttempts = 0
+	t.Cleanup(func() {
+		cityFlag = prevCityFlag
+		workflowServeList = prevList
+		controlDispatcherServe = prevControl
+		workflowServeIdlePollInterval = prevInterval
+		workflowServeIdlePollAttempts = prevAttempts
+	})
+
+	store := beads.NewMemStore()
+	newCheckBead := func(stepID string) string {
+		t.Helper()
+		workflow, err := store.Create(beads.Bead{
+			Title: "workflow " + stepID,
+			Type:  "task",
+			Metadata: map[string]string{
+				"gc.kind":             "workflow",
+				"gc.formula_contract": "graph.v2",
+			},
+		})
+		if err != nil {
+			t.Fatalf("create workflow bead for %s: %v", stepID, err)
+		}
+		logical, err := store.Create(beads.Bead{
+			Title: "logical " + stepID,
+			Type:  "task",
+			Metadata: map[string]string{
+				"gc.kind":         "ralph",
+				"gc.step_id":      stepID,
+				"gc.max_attempts": "1",
+				"gc.root_bead_id": workflow.ID,
+			},
+		})
+		if err != nil {
+			t.Fatalf("create logical bead for %s: %v", stepID, err)
+		}
+		run, err := store.Create(beads.Bead{
+			Title: "run " + stepID,
+			Type:  "task",
+			Metadata: map[string]string{
+				"gc.kind":            "run",
+				"gc.step_id":         stepID,
+				"gc.ralph_step_id":   stepID,
+				"gc.attempt":         "1",
+				"gc.step_ref":        stepID + ".run.1",
+				"gc.root_bead_id":    workflow.ID,
+				"gc.logical_bead_id": logical.ID,
+			},
+		})
+		if err != nil {
+			t.Fatalf("create run bead for %s: %v", stepID, err)
+		}
+		check, err := store.Create(beads.Bead{
+			Title: "check " + stepID,
+			Type:  "task",
+			Metadata: map[string]string{
+				"gc.kind":            "check",
+				"gc.step_id":         stepID,
+				"gc.ralph_step_id":   stepID,
+				"gc.attempt":         "1",
+				"gc.step_ref":        stepID + ".check.1",
+				"gc.check_mode":      "exec",
+				"gc.check_path":      checkPath,
+				"gc.check_timeout":   "30s",
+				"gc.max_attempts":    "1",
+				"gc.root_bead_id":    workflow.ID,
+				"gc.logical_bead_id": logical.ID,
+			},
+		})
+		if err != nil {
+			t.Fatalf("create check bead for %s: %v", stepID, err)
+		}
+		if err := store.DepAdd(check.ID, run.ID, "blocks"); err != nil {
+			t.Fatalf("add check->run dep for %s: %v", stepID, err)
+		}
+		if err := store.DepAdd(logical.ID, check.ID, "blocks"); err != nil {
+			t.Fatalf("add logical->check dep for %s: %v", stepID, err)
+		}
+		return check.ID
+	}
+
+	checkOneID := newCheckBead("implement-a")
+	checkTwoID := newCheckBead("implement-b")
+	sequence := [][]hookBead{
+		{{ID: checkOneID, Metadata: map[string]string{"gc.kind": "check"}}},
+		{{ID: checkTwoID, Metadata: map[string]string{"gc.kind": "check"}}},
+	}
+	workflowServeList = func(_, _ string, _ map[string]string) ([]hookBead, error) {
+		if len(sequence) == 0 {
+			return nil, nil
+		}
+		next := sequence[0]
+		sequence = sequence[1:]
+		return next, nil
+	}
+	controlDispatcherServe = func(cityPath, storePath, beadID string, stdout, stderr io.Writer) error {
+		bead, err := store.Get(beadID)
+		if err != nil {
+			return err
+		}
+		return runControlDispatcherWithStore(cityPath, storePath, store, bead, beadID, stdout, stderr)
+	}
+
+	var stderr bytes.Buffer
+	if err := runWorkflowServe("", false, io.Discard, &stderr); err != nil {
+		t.Fatalf("runWorkflowServe: %v", err)
+	}
+
+	got := stderr.String()
+	if count := strings.Count(got, "opening workflow trace"); count != 1 {
+		t.Fatalf("warning count = %d, want 1 across nested control dispatch; stderr=%q", count, got)
+	}
+}
+
 func TestWorkflowServeControlReadyQueryUsesControlTiers(t *testing.T) {
 	query := workflowServeControlReadyQuery(config.Agent{Name: config.ControlDispatcherAgentName})
 	if strings.Contains(query, "GC_SESSION_ORIGIN") {

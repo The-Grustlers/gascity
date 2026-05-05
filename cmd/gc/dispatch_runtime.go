@@ -78,7 +78,11 @@ var (
 	workflowServeWakeSweepInterval = 1 * time.Second
 	workflowServeMaxIdleSleep      = 30 * time.Second
 	workflowServeWaitForWake       = waitForRelevantWorkflowWakeWithTrace
-	workflowTraceWarnings          = struct {
+	// The trace helper is intentionally process-global because workflowTracef
+	// does not carry per-invocation context. Nested installs (serve ->
+	// runControlDispatcherWithStore) reuse the active dedup map so one bad trace
+	// path warns once per command invocation instead of once per control bead.
+	workflowTraceWarnings = struct {
 		mu     sync.Mutex
 		writer io.Writer
 		warned map[string]struct{}
@@ -184,13 +188,16 @@ func workflowTraceWarnOpenFailure(path string, err error) {
 func useWorkflowTraceWarnings(writer io.Writer) func() {
 	workflowTraceWarnings.mu.Lock()
 	prevWriter := workflowTraceWarnings.writer
-	workflowTraceWarnings.writer = writer
-	workflowTraceWarnings.warned = map[string]struct{}{}
+	prevWarned := workflowTraceWarnings.warned
+	if writer != workflowTraceWarnings.writer || workflowTraceWarnings.warned == nil {
+		workflowTraceWarnings.writer = writer
+		workflowTraceWarnings.warned = map[string]struct{}{}
+	}
 	workflowTraceWarnings.mu.Unlock()
 	return func() {
 		workflowTraceWarnings.mu.Lock()
 		workflowTraceWarnings.writer = prevWriter
-		workflowTraceWarnings.warned = map[string]struct{}{}
+		workflowTraceWarnings.warned = prevWarned
 		workflowTraceWarnings.mu.Unlock()
 	}
 }
