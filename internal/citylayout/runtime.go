@@ -18,6 +18,12 @@ func RuntimeDataDir(cityRoot string) string {
 	return RuntimePath(cityRoot, "runtime")
 }
 
+// ControlDispatcherTraceDefaultPath returns the default control-dispatcher
+// workflow trace file under the canonical runtime root.
+func ControlDispatcherTraceDefaultPath(cityRoot string) string {
+	return filepath.Join(RuntimeDataDir(cityRoot), "control-dispatcher-trace.log")
+}
+
 // RuntimePacksDir returns the canonical root for pack-owned runtime state.
 func RuntimePacksDir(cityRoot string) string {
 	return RuntimePath(cityRoot, "runtime", "packs")
@@ -61,6 +67,7 @@ func CityRuntimeEnv(cityRoot string) []string {
 		"GC_CITY=" + cityRoot,
 		"GC_CITY_PATH=" + cityRoot,
 		"GC_CITY_RUNTIME_DIR=" + runtimeDir,
+		"GC_CONTROL_DISPATCHER_TRACE_DEFAULT=" + ControlDispatcherTraceDefaultPath(cityRoot),
 	}
 }
 
@@ -68,9 +75,10 @@ func CityRuntimeEnv(cityRoot string) []string {
 func CityRuntimeEnvMap(cityRoot string) map[string]string {
 	runtimeDir := RuntimeDataDir(cityRoot)
 	return map[string]string{
-		"GC_CITY":             cityRoot,
-		"GC_CITY_PATH":        cityRoot,
-		"GC_CITY_RUNTIME_DIR": runtimeDir,
+		"GC_CITY":                             cityRoot,
+		"GC_CITY_PATH":                        cityRoot,
+		"GC_CITY_RUNTIME_DIR":                 runtimeDir,
+		"GC_CONTROL_DISPATCHER_TRACE_DEFAULT": ControlDispatcherTraceDefaultPath(cityRoot),
 	}
 }
 

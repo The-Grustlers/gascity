@@ -4832,30 +4832,17 @@ schedule = "0 3 * * *"
 // without a paired update to the controller's watcher exclusion list.
 func TestControlDispatcherStartCommandTracesUnderGCRuntime(t *testing.T) {
 	const (
-		wantRuntimeDir     = "${GC_CITY_RUNTIME_DIR:-${GC_CITY}/" + citylayout.RuntimeDataRoot + "}"
-		wantTraceExport    = `export GC_WORKFLOW_TRACE="${GC_WORKFLOW_TRACE:-$default_trace_dir/control-dispatcher-trace.log}"`
-		wantDefaultDirInit = `default_trace_dir="` + wantRuntimeDir + `"`
-		wantHiddenRoot     = `hidden_runtime_root="${GC_CITY}/.gc"`
-		wantCityRootGuard  = `"$GC_CITY"|"$GC_CITY"/*) default_trace_dir="${GC_CITY}/` + citylayout.RuntimeDataRoot + `"`
-		wantTraceDirExpr   = `trace_dir="${GC_WORKFLOW_TRACE%/*}"`
-		wantMkdirSnip      = `mkdir -p "$trace_dir"`
-		oldTracePath       = "${GC_CITY}/control-dispatcher-trace.log"
-		qualifiedName      = "qcore/control-dispatcher"
+		wantTraceExport  = `export GC_WORKFLOW_TRACE="${GC_WORKFLOW_TRACE:-${GC_CONTROL_DISPATCHER_TRACE_DEFAULT:-${GC_CITY}/` + citylayout.RuntimeDataRoot + `/control-dispatcher-trace.log}}"`
+		wantTraceDirExpr = `trace_dir="${GC_WORKFLOW_TRACE%/*}"`
+		wantMkdirSnip    = `mkdir -p "$trace_dir"`
+		oldTracePath     = "${GC_CITY}/control-dispatcher-trace.log"
+		qualifiedName    = "qcore/control-dispatcher"
 	)
 
 	t.Run("city-level constant", func(t *testing.T) {
 		got := ControlDispatcherStartCommand
-		if !strings.Contains(got, "GC_CITY_RUNTIME_DIR") {
-			t.Errorf("ControlDispatcherStartCommand must route through GC_CITY_RUNTIME_DIR so runtime-root overrides stay canonical\n got: %s", got)
-		}
-		if !strings.Contains(got, wantDefaultDirInit) {
-			t.Errorf("ControlDispatcherStartCommand missing %q so GC_CITY_RUNTIME_DIR overrides can be inspected before use\n got: %s", wantDefaultDirInit, got)
-		}
-		if !strings.Contains(got, wantHiddenRoot) {
-			t.Errorf("ControlDispatcherStartCommand missing %q so runtime-root overrides stay inside the watcher-excluded .gc subtree\n got: %s", wantHiddenRoot, got)
-		}
-		if !strings.Contains(got, wantCityRootGuard) {
-			t.Errorf("ControlDispatcherStartCommand missing %q so only in-city overrides outside .gc are coerced back under the hidden runtime root\n got: %s", wantCityRootGuard, got)
+		if !strings.Contains(got, "GC_CONTROL_DISPATCHER_TRACE_DEFAULT") {
+			t.Errorf("ControlDispatcherStartCommand must route through GC_CONTROL_DISPATCHER_TRACE_DEFAULT so runtime-root trust decisions happen in Go\n got: %s", got)
 		}
 		if !strings.Contains(got, wantTraceExport) {
 			t.Errorf("ControlDispatcherStartCommand missing %q\n got: %s", wantTraceExport, got)
@@ -4873,17 +4860,8 @@ func TestControlDispatcherStartCommandTracesUnderGCRuntime(t *testing.T) {
 
 	t.Run("qualified-name builder", func(t *testing.T) {
 		got := ControlDispatcherStartCommandFor(qualifiedName)
-		if !strings.Contains(got, "GC_CITY_RUNTIME_DIR") {
-			t.Errorf("ControlDispatcherStartCommandFor must route through GC_CITY_RUNTIME_DIR so runtime-root overrides stay canonical\n got: %s", got)
-		}
-		if !strings.Contains(got, wantDefaultDirInit) {
-			t.Errorf("ControlDispatcherStartCommandFor missing %q so GC_CITY_RUNTIME_DIR overrides can be inspected before use\n got: %s", wantDefaultDirInit, got)
-		}
-		if !strings.Contains(got, wantHiddenRoot) {
-			t.Errorf("ControlDispatcherStartCommandFor missing %q so runtime-root overrides stay inside the watcher-excluded .gc subtree\n got: %s", wantHiddenRoot, got)
-		}
-		if !strings.Contains(got, wantCityRootGuard) {
-			t.Errorf("ControlDispatcherStartCommandFor missing %q so only in-city overrides outside .gc are coerced back under the hidden runtime root\n got: %s", wantCityRootGuard, got)
+		if !strings.Contains(got, "GC_CONTROL_DISPATCHER_TRACE_DEFAULT") {
+			t.Errorf("ControlDispatcherStartCommandFor must route through GC_CONTROL_DISPATCHER_TRACE_DEFAULT so runtime-root trust decisions happen in Go\n got: %s", got)
 		}
 		if !strings.Contains(got, wantTraceExport) {
 			t.Errorf("ControlDispatcherStartCommandFor missing %q\n got: %s", wantTraceExport, got)
@@ -4916,11 +4894,11 @@ func TestControlDispatcherStartCommandExecResolvesRuntimeTracePath(t *testing.T)
 		}
 	})
 
-	t.Run("runtime root override", func(t *testing.T) {
+	t.Run("injected trusted default override", func(t *testing.T) {
 		cityDir := t.TempDir()
-		runtimeDir := filepath.Join(cityDir, ".gc", "custom-runtime")
+		runtimeDir := filepath.Join(t.TempDir(), "runtime-root")
 		tracePath, args := runControlDispatcherStartCommand(t, ControlDispatcherStartCommandFor("qcore/control-dispatcher"), cityDir, map[string]string{
-			"GC_CITY_RUNTIME_DIR": runtimeDir,
+			"GC_CONTROL_DISPATCHER_TRACE_DEFAULT": filepath.Join(runtimeDir, "control-dispatcher-trace.log"),
 		})
 		wantTracePath := filepath.Join(runtimeDir, "control-dispatcher-trace.log")
 		if tracePath != wantTracePath {
@@ -4934,52 +4912,13 @@ func TestControlDispatcherStartCommandExecResolvesRuntimeTracePath(t *testing.T)
 		}
 	})
 
-	t.Run("unsafe runtime root override falls back under .gc runtime", func(t *testing.T) {
+	t.Run("explicit trace override ignores injected default", func(t *testing.T) {
 		cityDir := t.TempDir()
-		runtimeDir := filepath.Join(cityDir, "runtime-outside-gc")
-		tracePath, args := runControlDispatcherStartCommand(t, ControlDispatcherStartCommand, cityDir, map[string]string{
-			"GC_CITY_RUNTIME_DIR": runtimeDir,
-		})
-		wantTracePath := filepath.Join(cityDir, citylayout.RuntimeDataRoot, "control-dispatcher-trace.log")
-		if tracePath != wantTracePath {
-			t.Fatalf("trace path = %q, want watcher-safe fallback %q", tracePath, wantTracePath)
-		}
-		if args != "convoy control --serve --follow "+ControlDispatcherAgentName {
-			t.Fatalf("args = %q, want follow command for %q", args, ControlDispatcherAgentName)
-		}
-		if _, err := os.Stat(wantTracePath); err != nil {
-			t.Fatalf("fallback trace file %q not created: %v", wantTracePath, err)
-		}
-	})
-
-	t.Run("trusted external runtime root override stays honored", func(t *testing.T) {
-		cityDir := t.TempDir()
-		runtimeDir := filepath.Join(t.TempDir(), "external-runtime")
-		tracePath, args := runControlDispatcherStartCommand(t, ControlDispatcherStartCommand, cityDir, map[string]string{
-			"GC_CITY_RUNTIME_DIR": runtimeDir,
-		})
-		wantTracePath := filepath.Join(runtimeDir, "control-dispatcher-trace.log")
-		if tracePath != wantTracePath {
-			t.Fatalf("trace path = %q, want trusted external override %q", tracePath, wantTracePath)
-		}
-		if args != "convoy control --serve --follow "+ControlDispatcherAgentName {
-			t.Fatalf("args = %q, want follow command for %q", args, ControlDispatcherAgentName)
-		}
-		if _, err := os.Stat(wantTracePath); err != nil {
-			t.Fatalf("external override trace file %q not created: %v", wantTracePath, err)
-		}
-	})
-
-	t.Run("explicit trace override ignores runtime-root conflicts", func(t *testing.T) {
-		cityDir := t.TempDir()
-		blockedRuntimeRoot := filepath.Join(t.TempDir(), "not-a-dir")
-		if err := os.WriteFile(blockedRuntimeRoot, []byte("blocked"), 0o644); err != nil {
-			t.Fatalf("write blocked runtime-root sentinel: %v", err)
-		}
+		injectedDefault := filepath.Join(t.TempDir(), "runtime-root", "control-dispatcher-trace.log")
 		overrideTrace := filepath.Join(t.TempDir(), "override-runtime", "dispatcher.log")
 		tracePath, args := runControlDispatcherStartCommand(t, ControlDispatcherStartCommand, cityDir, map[string]string{
-			"GC_CITY_RUNTIME_DIR": blockedRuntimeRoot,
-			"GC_WORKFLOW_TRACE":   overrideTrace,
+			"GC_CONTROL_DISPATCHER_TRACE_DEFAULT": injectedDefault,
+			"GC_WORKFLOW_TRACE":                   overrideTrace,
 		})
 		if tracePath != overrideTrace {
 			t.Fatalf("trace path = %q, want explicit override %q", tracePath, overrideTrace)

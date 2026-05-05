@@ -270,7 +270,10 @@ func warnLegacyWorkflowTracePath(cityPath string, stderr io.Writer) {
 	if !samePath(current, legacyTracePath) {
 		return
 	}
-	nextTracePath := filepath.Join(cityPath, citylayout.RuntimeDataRoot, "control-dispatcher-trace.log")
+	nextTracePath := strings.TrimSpace(os.Getenv("GC_CONTROL_DISPATCHER_TRACE_DEFAULT"))
+	if nextTracePath == "" {
+		nextTracePath = citylayout.ControlDispatcherTraceDefaultPath(cityPath)
+	}
 	fmt.Fprintf(stderr, "gc convoy control --serve: warning: legacy control-dispatcher trace path %q still in use; restart or recycle this session so it adopts %q\n", current, nextTracePath) //nolint:errcheck // best-effort stderr
 }
 

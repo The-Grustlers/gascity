@@ -514,6 +514,7 @@ func cityRuntimeEnvMapForCity(cityPath string) map[string]string {
 	if runtimeDir := trustedAmbientCityRuntimeDir(cityPath); runtimeDir != "" {
 		env["GC_CITY_RUNTIME_DIR"] = runtimeDir
 	}
+	env["GC_CONTROL_DISPATCHER_TRACE_DEFAULT"] = controlDispatcherTraceDefaultPathForRuntimeDir(cityPath, env["GC_CITY_RUNTIME_DIR"])
 	return env
 }
 
@@ -530,9 +531,22 @@ func trustedAmbientCityRuntimeDir(cityPath string) string {
 	return ""
 }
 
+func controlDispatcherTraceDefaultPathForRuntimeDir(cityPath, runtimeDir string) string {
+	canonicalRuntimeDir := citylayout.RuntimeDataDir(cityPath)
+	runtimeDir = strings.TrimSpace(runtimeDir)
+	if runtimeDir == "" {
+		runtimeDir = canonicalRuntimeDir
+	}
+	hiddenRoot := filepath.Join(cityPath, ".gc")
+	if pathIsWithin(cityPath, runtimeDir) && !pathIsWithin(hiddenRoot, runtimeDir) {
+		runtimeDir = canonicalRuntimeDir
+	}
+	return filepath.Join(runtimeDir, "control-dispatcher-trace.log")
+}
+
 func cityRuntimeProcessEnv(cityPath string) []string {
 	cityPath = normalizePathForCompare(cityPath)
-	overrides := citylayout.CityRuntimeEnvMap(cityPath)
+	overrides := cityRuntimeEnvMapForCity(cityPath)
 	if cityUsesBdStoreContract(cityPath) {
 		source := map[string]string{"BEADS_DOLT_AUTO_START": "0"}
 		if err := applyResolvedCityDoltEnv(source, cityPath, false); err != nil {

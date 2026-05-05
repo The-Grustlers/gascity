@@ -32,23 +32,16 @@ const (
 	// ControlDispatcherAgentName is the built-in deterministic control lane for
 	// graph.v2 workflow control beads.
 	ControlDispatcherAgentName = "control-dispatcher"
-	// controlDispatcherRuntimeDirExpr resolves to the canonical hidden runtime
-	// directory for a city, while still honoring explicit GC_CITY_RUNTIME_DIR
-	// overrides in tests and custom launchers.
-	controlDispatcherRuntimeDirExpr = `${GC_CITY_RUNTIME_DIR:-${GC_CITY}/` + citylayout.RuntimeDataRoot + `}`
-	// controlDispatcherDefaultRuntimeDirExpr is the watcher-safe default trace
-	// root for the control-dispatcher. The controller ignores the hidden .gc
+	// controlDispatcherDefaultTracePathExpr is the watcher-safe default trace
+	// target for the control-dispatcher. The controller ignores the hidden .gc
 	// subtree recursively, so defaults must stay under it to avoid self-triggered
 	// config-watch churn. The trace intentionally stays a flat, well-known file
 	// under .gc/runtime because operators and tests tail a single canonical path.
-	controlDispatcherDefaultRuntimeDirExpr = `${GC_CITY}/` + citylayout.RuntimeDataRoot
-	// controlDispatcherTraceInit exports the resolved trace path. Safe
-	// GC_CITY_RUNTIME_DIR overrides under ${GC_CITY}/.gc remain honored. An
-	// override elsewhere inside the city root would re-enter the watched tree,
-	// so those fall back to the hidden runtime root unless GC_WORKFLOW_TRACE is
-	// explicitly set. Overrides outside the city tree remain trusted because the
-	// controller only watches the city root.
-	controlDispatcherTraceInit = `default_trace_dir="` + controlDispatcherRuntimeDirExpr + `"; hidden_runtime_root="${GC_CITY}/.gc"; case "$default_trace_dir" in "$hidden_runtime_root"|"$hidden_runtime_root"/*) ;; "$GC_CITY"|"$GC_CITY"/*) default_trace_dir="` + controlDispatcherDefaultRuntimeDirExpr + `";; esac; export GC_WORKFLOW_TRACE="${GC_WORKFLOW_TRACE:-$default_trace_dir/control-dispatcher-trace.log}"`
+	controlDispatcherDefaultTracePathExpr = `${GC_CONTROL_DISPATCHER_TRACE_DEFAULT:-${GC_CITY}/` + citylayout.RuntimeDataRoot + `/control-dispatcher-trace.log}`
+	// controlDispatcherTraceInit exports the resolved trace path. Explicit
+	// GC_WORKFLOW_TRACE overrides win first; otherwise the runtime injects a
+	// precomputed watcher-safe default trace path for the current city/session.
+	controlDispatcherTraceInit = `export GC_WORKFLOW_TRACE="${GC_WORKFLOW_TRACE:-` + controlDispatcherDefaultTracePathExpr + `}"`
 	// controlDispatcherTraceDirInit creates the parent directory for the
 	// resolved trace path. This preserves explicit GC_WORKFLOW_TRACE overrides
 	// instead of unconditionally depending on the default runtime root.
