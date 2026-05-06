@@ -9,30 +9,41 @@ import (
 	"github.com/gastownhall/gascity/internal/formula"
 )
 
-var (
-	v2Mu          sync.Mutex
-	v2EnableCount int
-	v2SavedValue  bool
-)
+var v2Mu sync.Mutex
 
-// EnableV2ForTest enables graph.v2 formula compilation for the duration of the
-// test, restoring the previous value after the last concurrent enable cleanup.
-func EnableV2ForTest(tb testing.TB) {
+// LockV2ForTest acquires exclusive access to the process-global formula_v2
+// flag for the duration of the test and returns a setter for in-test updates.
+// It is non-reentrant: call it at most once per test goroutine.
+func LockV2ForTest(tb testing.TB) func(enabled bool) {
 	tb.Helper()
 	v2Mu.Lock()
-	if v2EnableCount == 0 {
-		v2SavedValue = formula.IsFormulaV2Enabled()
-	}
-	v2EnableCount++
-	formula.SetFormulaV2Enabled(true)
-	v2Mu.Unlock()
-
+	prev := formula.IsFormulaV2Enabled()
 	tb.Cleanup(func() {
-		v2Mu.Lock()
 		defer v2Mu.Unlock()
-		v2EnableCount--
-		if v2EnableCount == 0 {
-			formula.SetFormulaV2Enabled(v2SavedValue)
-		}
+		formula.SetFormulaV2Enabled(prev)
 	})
+	return func(enabled bool) {
+		formula.SetFormulaV2Enabled(enabled)
+	}
+}
+
+// HoldV2ForTest serializes a test against other formula_v2 mutators while
+// preserving the current flag value.
+func HoldV2ForTest(tb testing.TB) {
+	tb.Helper()
+	_ = LockV2ForTest(tb)
+}
+
+// SetV2ForTest sets graph.v2 formula compilation for the duration of the test,
+// restoring the previous value during cleanup.
+func SetV2ForTest(tb testing.TB, enabled bool) {
+	tb.Helper()
+	LockV2ForTest(tb)(enabled)
+}
+
+// EnableV2ForTest enables graph.v2 formula compilation for the duration of the
+// test, restoring the previous value during cleanup.
+func EnableV2ForTest(tb testing.TB) {
+	tb.Helper()
+	SetV2ForTest(tb, true)
 }
