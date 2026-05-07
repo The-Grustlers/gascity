@@ -170,7 +170,7 @@ func runSessionTerminalBridge(
 ) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	writer := &terminalWebSocketWriter{conn: conn}
 	cmd := exec.CommandContext(ctx, attach.Path, attach.Args...)
