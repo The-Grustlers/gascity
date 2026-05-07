@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 func TestProviderImplementsInterface(_ *testing.T) {
 	// Compile-time check is in provider.go, but verify at test time too.
 	var _ runtime.Provider = (*Provider)(nil)
+	var _ runtime.TerminalAttachSpecProvider = (*Provider)(nil)
 }
 
 func TestManagedServiceAliasDefaults(t *testing.T) {
@@ -257,6 +259,57 @@ func TestInterrupt(t *testing.T) {
 	}
 	if !found {
 		t.Error("no tmux send-keys C-c call recorded")
+	}
+}
+
+func TestTerminalAttachCommandUsesKubectlExecPTY(t *testing.T) {
+	fake := newFakeK8sOps()
+	p := newProviderWithOps(fake)
+	p.k8sContext = "dev-cluster"
+	addRunningPod(fake, "gc-test-agent", "gc-test-agent")
+
+	spec, err := p.TerminalAttachCommand("gc-test-agent")
+	if err != nil {
+		t.Fatalf("TerminalAttachCommand: %v", err)
+	}
+	if spec.Path != "script" {
+		t.Fatalf("TerminalAttachCommand path = %q, want script", spec.Path)
+	}
+	if len(spec.Args) != 3 || spec.Args[0] != "-qfc" || spec.Args[2] != "/dev/null" {
+		t.Fatalf("TerminalAttachCommand args = %#v, want script -qfc <cmd> /dev/null", spec.Args)
+	}
+	for _, want := range []string{
+		"kubectl --context dev-cluster -n test-ns exec -it gc-test-agent -- tmux -u attach-session -t main",
+	} {
+		if !strings.Contains(spec.Args[1], want) {
+			t.Fatalf("TerminalAttachCommand command = %q, want to contain %q", spec.Args[1], want)
+		}
+	}
+	if !reflect.DeepEqual(spec.Env, []string{"TERM=xterm-256color"}) {
+		t.Fatalf("TerminalAttachCommand env = %#v", spec.Env)
+	}
+}
+
+func TestTerminalResizeCommandUsesKubectlExec(t *testing.T) {
+	fake := newFakeK8sOps()
+	p := newProviderWithOps(fake)
+	addRunningPod(fake, "gc-test-agent", "gc-test-agent")
+
+	spec, err := p.TerminalResizeCommand("gc-test-agent", 120, 40)
+	if err != nil {
+		t.Fatalf("TerminalResizeCommand: %v", err)
+	}
+	wantArgs := []string{"-n", "test-ns", "exec", "gc-test-agent", "--", "tmux", "resize-window", "-t", "main", "-x", "120", "-y", "40"}
+	if spec.Path != "kubectl" || !reflect.DeepEqual(spec.Args, wantArgs) {
+		t.Fatalf("TerminalResizeCommand = %q %#v, want kubectl %#v", spec.Path, spec.Args, wantArgs)
+	}
+
+	empty, err := p.TerminalResizeCommand("gc-test-agent", 1, 40)
+	if err != nil {
+		t.Fatalf("TerminalResizeCommand small dimensions: %v", err)
+	}
+	if empty.Path != "" || len(empty.Args) != 0 {
+		t.Fatalf("TerminalResizeCommand small dimensions = %#v, want empty spec", empty)
 	}
 }
 

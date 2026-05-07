@@ -18,10 +18,14 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/gastownhall/gascity/internal/runtime"
+	"github.com/gastownhall/gascity/internal/shellquote"
 )
 
 // Compile-time interface check.
-var _ runtime.Provider = (*Provider)(nil)
+var (
+	_ runtime.Provider                   = (*Provider)(nil)
+	_ runtime.TerminalAttachSpecProvider = (*Provider)(nil)
+)
 
 // Provider is a native Kubernetes session provider using client-go.
 // Eliminates subprocess overhead by making direct API calls over reused
@@ -345,6 +349,50 @@ func (p *Provider) Attach(name string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// TerminalAttachCommand returns a PTY-backed kubectl exec command suitable for
+// browser terminal bridges. kubectl exec -it needs a controlling terminal, so
+// util-linux script(1) supplies the PTY around the kubectl attach command.
+func (p *Provider) TerminalAttachCommand(name string) (runtime.TerminalCommandSpec, error) {
+	ctx := context.Background()
+	podName, err := p.findRunningPod(ctx, name)
+	if err != nil {
+		return runtime.TerminalCommandSpec{}, fmt.Errorf("terminal attach: no running pod for session %q", name)
+	}
+
+	args := p.kubectlArgs()
+	args = append(args, "exec", "-it", podName, "--", "tmux", "-u", "attach-session", "-t", tmuxSession)
+	return runtime.TerminalCommandSpec{
+		Path: "script",
+		Args: []string{"-qfc", "kubectl " + shellquote.Join(args), "/dev/null"},
+		Env:  []string{"TERM=xterm-256color"},
+	}, nil
+}
+
+// TerminalResizeCommand returns a best-effort tmux resize command for a pod
+// session. The browser bridge runs this out-of-band when panes are fitted.
+func (p *Provider) TerminalResizeCommand(name string, cols, rows int) (runtime.TerminalCommandSpec, error) {
+	if cols < 2 || rows < 2 {
+		return runtime.TerminalCommandSpec{}, nil
+	}
+	ctx := context.Background()
+	podName, err := p.findRunningPod(ctx, name)
+	if err != nil {
+		return runtime.TerminalCommandSpec{}, fmt.Errorf("terminal resize: no running pod for session %q", name)
+	}
+
+	args := p.kubectlArgs()
+	args = append(args, "exec", podName, "--", "tmux", "resize-window", "-t", tmuxSession, "-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows))
+	return runtime.TerminalCommandSpec{Path: "kubectl", Args: args}, nil
+}
+
+func (p *Provider) kubectlArgs() []string {
+	args := []string{}
+	if p.k8sContext != "" {
+		args = append(args, "--context", p.k8sContext)
+	}
+	return append(args, "-n", p.namespace)
 }
 
 // ProcessAlive checks if the named processes are running inside the pod.
