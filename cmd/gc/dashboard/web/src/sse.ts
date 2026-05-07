@@ -213,6 +213,7 @@ export function connectCityEvents(
   city: string,
   onEvent: (msg: DashboardEventMessage) => void,
   opts?: SSEOptions,
+  afterSeq?: string,
 ): SSEHandle {
   const controller = new AbortController();
   opts?.onStatus?.("connecting");
@@ -225,6 +226,7 @@ export function connectCityEvents(
         const { stream } = await streamEvents({
         client,
         path: { cityName: city },
+        query: afterSeq ? { after_seq: afterSeq } : undefined,
         signal: controller.signal,
         onSseEvent: (frame) => {
           attempt = 0;

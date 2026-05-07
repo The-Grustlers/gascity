@@ -39,6 +39,7 @@ const CITY_SCOPED_PANEL_IDS = [
 
 let refreshInFlight: Promise<void> | null = null;
 let refreshQueued = false;
+let liveRefreshTimer: number | null = null;
 
 async function refreshAll(): Promise<void> {
   if (refreshPaused()) return;
@@ -81,10 +82,19 @@ function wireSSE(): void {
       // get dropped and panels stay stale after the modal closes.
       invalidateForEventType(eventType);
       if (refreshPaused()) return;
-      void refreshVisibleResources().catch((error) => reportUIError("Refresh failed", error));
+      scheduleLiveRefresh();
     },
     setConnectionBadge,
   );
+}
+
+function scheduleLiveRefresh(): void {
+  if (liveRefreshTimer !== null) return;
+  liveRefreshTimer = window.setTimeout(() => {
+    liveRefreshTimer = null;
+    if (refreshPaused()) return;
+    void refreshVisibleResources().catch((error) => reportUIError("Refresh failed", error));
+  }, 750);
 }
 
 function setConnectionBadge(status: "connecting" | "live" | "reconnecting"): void {

@@ -38,6 +38,8 @@ let handle: SSEHandle | null = null;
 let categoryFilter = "all";
 let rigFilter = "all";
 let agentFilter = "all";
+let streamAfterSeq = "";
+let renderTimer: number | null = null;
 
 export async function seedActivity(entriesFromAPI: ActivityEntry[]): Promise<void> {
   entries.splice(0, entries.length, ...normalizeEntries(entriesFromAPI));
@@ -56,6 +58,7 @@ export async function loadActivityHistory(): Promise<void> {
   const normalized = (res.data?.items ?? [])
     .map((item) => toEntryFromRecord(item))
     .filter((item): item is ActivityEntry => item !== null);
+  streamAfterSeq = eventIndexFromResponse(res.response) || latestSeq(normalized) || streamAfterSeq;
   await seedActivity(normalized);
 }
 
@@ -67,7 +70,7 @@ export function startActivityStream(
   handle?.close();
   const opts = onStatus ? { onStatus } : undefined;
   const connect = city
-    ? (listener: (msg: DashboardEventMessage) => void) => connectCityEvents(city, listener, opts)
+    ? (listener: (msg: DashboardEventMessage) => void) => connectCityEvents(city, listener, opts, streamAfterSeq)
     : (listener: (msg: DashboardEventMessage) => void) => connectEvents(listener, opts);
   handle = connect((msg) => {
     const eventType = eventTypeFromMessage(msg);
@@ -79,7 +82,8 @@ export function startActivityStream(
       return;
     }
     entries.splice(0, entries.length, ...normalizeEntries([entry, ...entries]));
-    renderActivity();
+    streamAfterSeq = latestSeq([entry]) || streamAfterSeq;
+    scheduleRenderActivity();
   });
 }
 
@@ -89,6 +93,10 @@ export function stopActivityStream(): void {
 }
 
 export function renderActivity(): void {
+  if (renderTimer !== null) {
+    window.clearTimeout(renderTimer);
+    renderTimer = null;
+  }
   renderFilters();
   const feed = byId("activity-feed");
   if (!feed) return;
@@ -135,6 +143,14 @@ export function renderActivity(): void {
     ]));
   });
   feed.append(timeline);
+}
+
+function scheduleRenderActivity(): void {
+  if (renderTimer !== null) return;
+  renderTimer = window.setTimeout(() => {
+    renderTimer = null;
+    renderActivity();
+  }, 250);
 }
 
 export function installActivityInteractions(): void {
@@ -252,6 +268,16 @@ function normalizeEntries(nextEntries: ActivityEntry[]): ActivityEntry[] {
   return [...deduped.values()]
     .sort(compareEntries)
     .slice(0, MAX_ENTRIES);
+}
+
+function eventIndexFromResponse(response: Response | undefined): string {
+  const raw = response?.headers.get("X-Gc-Index") ?? "";
+  return /^\d+$/.test(raw) && raw !== "0" ? raw : "";
+}
+
+function latestSeq(nextEntries: ActivityEntry[]): string {
+  const latest = nextEntries.reduce((max, entry) => Math.max(max, entry.seq), 0);
+  return latest > 0 ? String(latest) : "";
 }
 
 function compareEntries(a: ActivityEntry, b: ActivityEntry): number {

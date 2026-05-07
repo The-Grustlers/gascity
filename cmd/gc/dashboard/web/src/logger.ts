@@ -66,14 +66,18 @@ export function logError(scope: string, message: string, details?: unknown): voi
 function emit(level: DashboardLogLevel, scope: string, message: string, details?: unknown): void {
   const entry = makeEntry(level, scope, message, details);
   originalConsole[level](`[dashboard][${scope}] ${message}`, safeSerialize(details));
-  sendToServer(entry);
+  if (level !== "debug") {
+    sendToServer(entry);
+  }
 }
 
 function mirrorConsole(method: keyof typeof originalConsole, level: DashboardLogLevel): void {
   const original = originalConsole[method];
   console[method] = (...args: unknown[]) => {
     original(...args);
-    sendToServer(makeEntry(level, "console", extractMessage(args), args.length > 1 ? args.slice(1) : args[0]));
+    if (level !== "debug") {
+      sendToServer(makeEntry(level, "console", extractMessage(args), args.length > 1 ? args.slice(1) : args[0]));
+    }
   };
 }
 
