@@ -5,13 +5,16 @@ import {
   isInternalActivity,
   isInternalAlertActivity,
   isNoisyBeadActivity,
+  isQuietOrderActivity,
   renderActivity,
+  resetActivityFiltersForTest,
   seedActivity,
   type ActivityEntry,
 } from "./activity";
 
 describe("activity feed ordering", () => {
   beforeEach(() => {
+    resetActivityFiltersForTest();
     document.body.innerHTML = `
       <div id="activity-filters"></div>
       <span id="activity-count"></span>
@@ -20,6 +23,7 @@ describe("activity feed ordering", () => {
   });
 
   afterEach(async () => {
+    resetActivityFiltersForTest();
     await seedActivity([]);
   });
 
@@ -128,27 +132,107 @@ describe("activity feed ordering", () => {
   });
 
   it("classifies successful controller order events as internal activity", () => {
-    expect(isInternalActivity({
+    const fired = {
       actor: "controller",
       seq: 1,
       subject: "dolt-health",
       ts: "2026-04-02T10:00:00Z",
       type: "order.fired",
-    } as any)).toBe(true);
-    expect(isInternalActivity({
+    };
+    const completed = {
       actor: "controller",
       seq: 2,
       subject: "dolt-health",
       ts: "2026-04-02T10:01:00Z",
       type: "order.completed",
-    } as any)).toBe(true);
-    expect(isInternalActivity({
+    };
+    const failed = {
       actor: "controller",
       seq: 3,
       subject: "dolt-health",
       ts: "2026-04-02T10:02:00Z",
       type: "order.failed",
-    } as any)).toBe(false);
+    };
+
+    expect(isQuietOrderActivity(fired as any)).toBe(true);
+    expect(isInternalActivity(fired as any)).toBe(true);
+    expect(isQuietOrderActivity(completed as any)).toBe(true);
+    expect(isInternalActivity(completed as any)).toBe(true);
+    expect(isQuietOrderActivity(failed as any)).toBe(false);
+    expect(isInternalActivity(failed as any)).toBe(false);
+  });
+
+  it("hides routine orders behind the orders toggle while keeping failures visible", async () => {
+    await seedActivity([
+      {
+        category: "work",
+        id: "mc-city:1",
+        internal: true,
+        rig: "city",
+        scope: "mc-city",
+        seq: 1,
+        subject: "dolt-health",
+        ts: "2026-04-02T10:00:00Z",
+        type: "order.fired",
+      },
+      {
+        category: "work",
+        id: "mc-city:2",
+        internal: true,
+        rig: "city",
+        scope: "mc-city",
+        seq: 2,
+        subject: "dolt-health",
+        ts: "2026-04-02T10:01:00Z",
+        type: "order.completed",
+      },
+      {
+        category: "work",
+        id: "mc-city:3",
+        internal: true,
+        message: "order:dolt-health",
+        rig: "city",
+        scope: "mc-city",
+        seq: 3,
+        subject: "gc-order",
+        ts: "2026-04-02T10:02:00Z",
+        type: "bead.updated",
+      },
+      {
+        category: "work",
+        id: "mc-city:4",
+        rig: "city",
+        scope: "mc-city",
+        seq: 4,
+        subject: "dolt-health",
+        ts: "2026-04-02T10:03:00Z",
+        type: "order.failed",
+      },
+      {
+        category: "work",
+        id: "mc-city:5",
+        rig: "city",
+        scope: "mc-city",
+        seq: 5,
+        subject: "gc-human",
+        ts: "2026-04-02T10:04:00Z",
+        type: "bead.updated",
+      },
+    ]);
+    renderActivity();
+
+    expect(document.querySelectorAll(".tl-entry")).toHaveLength(2);
+    expect(document.querySelectorAll('[data-type="order.failed"]')).toHaveLength(1);
+    expect(document.querySelector(".tl-orders-count")?.textContent).toBe("3");
+    expect(document.getElementById("tl-internal-toggle")).toBeNull();
+
+    const toggle = document.getElementById("tl-orders-toggle") as HTMLInputElement;
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(document.querySelectorAll(".tl-entry")).toHaveLength(5);
+    expect(document.querySelectorAll('[data-order="true"]')).toHaveLength(3);
+    expect(document.getElementById("activity-count")?.textContent).toBe("5");
   });
 
   it("computes a city stream cursor from loaded history", () => {

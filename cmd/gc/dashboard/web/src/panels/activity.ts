@@ -40,6 +40,7 @@ let categoryFilter = "all";
 let rigFilter = "all";
 let agentFilter = "all";
 let showInternalActivity = false;
+let showOrderActivity = false;
 let streamCursor: { afterCursor?: string; afterSeq?: string } = {};
 
 export async function seedActivity(entriesFromAPI: ActivityEntry[]): Promise<void> {
@@ -100,6 +101,15 @@ export function activityStreamCursorFromRecordsForTest(
   return cursorFromRecords(records, city);
 }
 
+export function resetActivityFiltersForTest(): void {
+  categoryFilter = "all";
+  rigFilter = "all";
+  agentFilter = "all";
+  showInternalActivity = false;
+  showOrderActivity = false;
+  streamCursor = {};
+}
+
 export function stopActivityStream(): void {
   handle?.close();
   handle = null;
@@ -112,7 +122,9 @@ export function renderActivity(): void {
   clear(feed);
 
   const filtered = entries.filter((entry) => {
-    if (!showInternalActivity && entry.internal) return false;
+    const quietOrder = isQuietOrderActivityEntry(entry);
+    if (!showOrderActivity && quietOrder) return false;
+    if (!showInternalActivity && entry.internal && !quietOrder) return false;
     if (categoryFilter !== "all" && entry.category !== categoryFilter) return false;
     if (rigFilter !== "all" && entry.rig !== rigFilter) return false;
     if (agentFilter !== "all" && entry.actor !== agentFilter) return false;
@@ -134,6 +146,7 @@ export function renderActivity(): void {
       "data-rig": entry.rig,
       "data-agent": entry.actor ?? "",
       "data-type": entry.type,
+      "data-order": isQuietOrderActivityEntry(entry) ? "true" : "false",
       "data-ts": entry.ts,
     }, [
       el("div", { class: "tl-rail" }, [
@@ -182,7 +195,8 @@ function renderFilters(): void {
   if (!container) return;
   clear(container);
   if (entries.length === 0) return;
-  const hiddenInternalCount = entries.filter((entry) => entry.internal).length;
+  const quietOrderCount = entries.filter((entry) => isQuietOrderActivityEntry(entry)).length;
+  const hiddenInternalCount = entries.filter((entry) => entry.internal && !isQuietOrderActivityEntry(entry)).length;
   const alertCount = entries.filter((entry) => entry.alert).length;
   const rigs = [...new Set(entries.map((entry) => entry.rig).filter(Boolean))].sort();
   const agents = [...new Set(entries.map((entry) => entry.actor).filter(Boolean))].sort() as string[];
@@ -200,6 +214,20 @@ function renderFilters(): void {
   agents.forEach((agent) => agentSelect.append(el("option", { value: agent, selected: agent === agentFilter }, [formatAgentAddress(agent)])));
   agentSelect.addEventListener("change", () => {
     agentFilter = agentSelect.value;
+    renderActivity();
+  });
+
+  const orderControl = quietOrderCount > 0 ? el("label", { class: "tl-internal-control" }, [
+    el("input", {
+      checked: showOrderActivity,
+      id: "tl-orders-toggle",
+      type: "checkbox",
+    }),
+    el("span", {}, ["Orders"]),
+    el("span", { class: "tl-internal-count tl-orders-count" }, [String(quietOrderCount)]),
+  ]) : null;
+  orderControl?.querySelector<HTMLInputElement>("#tl-orders-toggle")?.addEventListener("change", (event) => {
+    showOrderActivity = (event.currentTarget as HTMLInputElement).checked;
     renderActivity();
   });
 
@@ -229,6 +257,7 @@ function renderFilters(): void {
     ]),
     el("div", { class: "tl-filter-group" }, [el("label", { for: "tl-rig-filter" }, ["Rig:"]), rigSelect]),
     el("div", { class: "tl-filter-group" }, [el("label", { for: "tl-agent-filter" }, ["Agent:"]), agentSelect]),
+    orderControl,
     internalControl,
   ]));
 }
@@ -290,7 +319,7 @@ export function isNoisyBeadActivity(record: DashboardEventRecord): boolean {
 
 export function isInternalActivity(record: DashboardEventRecord): boolean {
   if (isNoisyBeadActivity(record)) return true;
-  return isSuccessfulControllerOrderActivity(record);
+  return isQuietOrderActivity(record);
 }
 
 export function isInternalAlertActivity(record: DashboardEventRecord): boolean {
@@ -300,9 +329,15 @@ export function isInternalAlertActivity(record: DashboardEventRecord): boolean {
   return issueType === "session" || payloadStringArray(payload, "labels").includes("gc:session");
 }
 
-function isSuccessfulControllerOrderActivity(record: DashboardEventRecord): boolean {
-  if (record.actor !== "controller") return false;
-  return record.type === "order.fired" || record.type === "order.completed";
+export function isQuietOrderActivity(record: DashboardEventRecord): boolean {
+  if (isOrderTrackingBeadEvent(record)) return true;
+  if (!record.type.startsWith("order.")) return false;
+  return record.type !== "order.failed";
+}
+
+function isQuietOrderActivityEntry(entry: ActivityEntry): boolean {
+  if (entry.type.startsWith("order.")) return entry.type !== "order.failed";
+  return entry.type.startsWith("bead.") && typeof entry.message === "string" && entry.message.startsWith("order:");
 }
 
 function isOrderTrackingBeadEvent(record: DashboardEventRecord): boolean {
