@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   activityStreamCursorFromRecordsForTest,
+  isInternalActivity,
   isInternalAlertActivity,
   isNoisyBeadActivity,
   renderActivity,
@@ -124,6 +125,30 @@ describe("activity feed ordering", () => {
     expect(isInternalAlertActivity(sessionClose as any)).toBe(true);
     expect(isNoisyBeadActivity(humanWork as any)).toBe(false);
     expect(isInternalAlertActivity(humanWork as any)).toBe(false);
+  });
+
+  it("classifies successful controller order events as internal activity", () => {
+    expect(isInternalActivity({
+      actor: "controller",
+      seq: 1,
+      subject: "dolt-health",
+      ts: "2026-04-02T10:00:00Z",
+      type: "order.fired",
+    } as any)).toBe(true);
+    expect(isInternalActivity({
+      actor: "controller",
+      seq: 2,
+      subject: "dolt-health",
+      ts: "2026-04-02T10:01:00Z",
+      type: "order.completed",
+    } as any)).toBe(true);
+    expect(isInternalActivity({
+      actor: "controller",
+      seq: 3,
+      subject: "dolt-health",
+      ts: "2026-04-02T10:02:00Z",
+      type: "order.failed",
+    } as any)).toBe(false);
   });
 
   it("computes a city stream cursor from loaded history", () => {

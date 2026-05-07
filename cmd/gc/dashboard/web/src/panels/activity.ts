@@ -258,7 +258,7 @@ function toEntryFromRecord(record: CityEventRecord | SupervisorEventRecord): Act
 
 function toActivityEntry(record: DashboardEventRecord, eventID?: string): ActivityEntry | null {
   if (!record.type) return null;
-  const internal = isNoisyBeadActivity(record);
+  const internal = isInternalActivity(record);
   const scope = recordCity(record) ?? cityScope();
   const seq = typeof record.seq === "number" ? record.seq : 0;
   return {
@@ -288,11 +288,21 @@ export function isNoisyBeadActivity(record: DashboardEventRecord): boolean {
   return payloadStringArray(payload, "labels").includes("gc:session");
 }
 
+export function isInternalActivity(record: DashboardEventRecord): boolean {
+  if (isNoisyBeadActivity(record)) return true;
+  return isSuccessfulControllerOrderActivity(record);
+}
+
 export function isInternalAlertActivity(record: DashboardEventRecord): boolean {
   if (record.type !== "bead.closed" || record.actor !== "cache-reconcile") return false;
   const payload = beadPayload(eventPayload(record));
   const issueType = payloadString(payload, "issue_type") || payloadString(payload, "type");
   return issueType === "session" || payloadStringArray(payload, "labels").includes("gc:session");
+}
+
+function isSuccessfulControllerOrderActivity(record: DashboardEventRecord): boolean {
+  if (record.actor !== "controller") return false;
+  return record.type === "order.fired" || record.type === "order.completed";
 }
 
 function isOrderTrackingBeadEvent(record: DashboardEventRecord): boolean {

@@ -80,7 +80,7 @@ func (s *Server) humaHandleEventList(ctx context.Context, input *EventListInput)
 	// how many items match vs. fit the page.
 	total := len(wires)
 	if limit < len(wires) {
-		wires = wires[:limit]
+		wires = wires[len(wires)-limit:]
 	}
 	return &ListOutput[WireEvent]{
 		Index: index,

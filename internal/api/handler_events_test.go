@@ -38,6 +38,40 @@ func TestEventList(t *testing.T) {
 	}
 }
 
+func TestEventListLimitReturnsTail(t *testing.T) {
+	state := newFakeState(t)
+	ep := state.eventProv.(*events.Fake)
+	ep.Record(events.Event{Type: events.SessionWoke, Actor: "gc", Subject: "old"})
+	ep.Record(events.Event{Type: events.SessionStopped, Actor: "gc", Subject: "middle"})
+	ep.Record(events.Event{Type: events.SessionWoke, Actor: "gc", Subject: "new"})
+	h := newTestCityHandler(t, state)
+
+	req := httptest.NewRequest("GET", cityURL(state, "/events?limit=1"), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+
+	var resp struct {
+		Items []events.Event `json:"items"`
+		Total int            `json:"total"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Total != 3 {
+		t.Fatalf("Total = %d, want 3", resp.Total)
+	}
+	if len(resp.Items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(resp.Items))
+	}
+	if resp.Items[0].Subject != "new" {
+		t.Fatalf("subject = %q, want new", resp.Items[0].Subject)
+	}
+}
+
 func TestEventListFilterByType(t *testing.T) {
 	state := newFakeState(t)
 	ep := state.eventProv.(*events.Fake)
