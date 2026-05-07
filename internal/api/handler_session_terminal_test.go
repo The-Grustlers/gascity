@@ -95,6 +95,26 @@ func TestHandleSessionTerminalRejectsUnsupportedProvider(t *testing.T) {
 	}
 }
 
+func TestCheckSessionTerminalOriginAllowsForwardedDashboardHost(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://100.96.12.40:8372/v0/city/gr7n-city/session/gc-1/terminal", nil)
+	req.Header.Set("Origin", "https://city.gr7n.com")
+	req.Header.Set("X-Forwarded-Host", "city.gr7n.com")
+
+	if !checkSessionTerminalOrigin(req) {
+		t.Fatal("origin check rejected dashboard origin matching X-Forwarded-Host")
+	}
+}
+
+func TestCheckSessionTerminalOriginRejectsMismatchedForwardedHost(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://100.96.12.40:8372/v0/city/gr7n-city/session/gc-1/terminal", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	req.Header.Set("X-Forwarded-Host", "city.gr7n.com")
+
+	if checkSessionTerminalOrigin(req) {
+		t.Fatal("origin check accepted mismatched origin")
+	}
+}
+
 func readTerminalUntil(t *testing.T, conn *websocket.Conn, needle string) string {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
