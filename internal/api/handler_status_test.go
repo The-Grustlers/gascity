@@ -375,7 +375,7 @@ func TestHandleStatusUsesCachedWorkReadModel(t *testing.T) {
 	state := newFakeState(t)
 	store := &cachedOnlyListStoreForSessionTest{MemStore: beads.NewMemStore(), blockList: true}
 	state.stores["myrig"] = store
-	work, err := store.MemStore.Create(beads.Bead{
+	work, err := store.Create(beads.Bead{
 		Type:  "task",
 		Title: "cached ready work",
 	})
@@ -383,7 +383,7 @@ func TestHandleStatusUsesCachedWorkReadModel(t *testing.T) {
 		t.Fatalf("Create ready work: %v", err)
 	}
 	ready := "ready"
-	if err := store.MemStore.Update(work.ID, beads.UpdateOpts{Status: &ready}); err != nil {
+	if err := store.Update(work.ID, beads.UpdateOpts{Status: &ready}); err != nil {
 		t.Fatalf("Mark ready work: %v", err)
 	}
 	h := newTestCityHandler(t, state)

@@ -1718,11 +1718,11 @@ func resolveResumeCommand(command, sessionKey string, rp *config.ResolvedProvide
 
 // shouldPreserveConversationKey returns true when a session_key rotation
 // would orphan a recoverable conversation. Two requirements:
-//   1. wake_mode is NOT "fresh" — i.e., the user expects --resume semantics.
-//      Pool worker templates explicitly opt into fresh-on-wake; their session
-//      beads should rotate normally.
-//   2. The Claude conversation .jsonl exists on disk for the current
-//      session_key under the session's work_dir.
+//  1. wake_mode is NOT "fresh" — i.e., the user expects --resume semantics.
+//     Pool worker templates explicitly opt into fresh-on-wake; their session
+//     beads should rotate normally.
+//  2. The Claude conversation .jsonl exists on disk for the current
+//     session_key under the session's work_dir.
 //
 // Used at all session_key rotation callsites (ConfigDriftReset and
 // RestartRequest paths) to skip the rotation when both conditions hold.

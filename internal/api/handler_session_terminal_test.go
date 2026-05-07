@@ -53,7 +53,9 @@ func TestHandleSessionTerminalWebSocketAttachesAndPipesInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
-	defer conn.Close()
+	defer func() {
+		_ = conn.Close()
+	}()
 
 	if got := readTerminalUntil(t, conn, "terminal ready"); !strings.Contains(got, "terminal ready") {
 		t.Fatalf("initial terminal output = %q, want terminal ready", got)

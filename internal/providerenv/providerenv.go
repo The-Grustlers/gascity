@@ -1,3 +1,5 @@
+// Package providerenv prepares credential environment variables for managed
+// provider processes.
 package providerenv
 
 import (
@@ -116,7 +118,7 @@ func shouldSkipCredentialEnv(key, value string, fileValues map[string]string) bo
 	return false
 }
 
-func applyOAuthIncompatibleCredentialUnsets(env map[string]string, fileValues map[string]string) {
+func applyOAuthIncompatibleCredentialUnsets(env map[string]string, _ map[string]string) {
 	oauth := strings.TrimSpace(env["CLAUDE_CODE_OAUTH_TOKEN"])
 	if oauth == "" {
 		return

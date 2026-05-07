@@ -251,7 +251,7 @@ function toEntryFromRecord(record: CityEventRecord | SupervisorEventRecord): Act
 
 function toActivityEntry(record: DashboardEventRecord, eventID?: string): ActivityEntry | null {
   if (!record.type) return null;
-  if (isOrderTrackingBeadEvent(record)) return null;
+  if (isNoisyBeadActivity(record)) return null;
   const scope = recordCity(record) ?? cityScope();
   const seq = typeof record.seq === "number" ? record.seq : 0;
   return {
@@ -268,9 +268,47 @@ function toActivityEntry(record: DashboardEventRecord, eventID?: string): Activi
   };
 }
 
+export function isNoisyBeadActivity(record: DashboardEventRecord): boolean {
+  if (!record.type.startsWith("bead.")) return false;
+  if (isOrderTrackingBeadEvent(record)) return true;
+  if (record.actor === "cache-reconcile") return true;
+
+  const payload = beadPayload(eventPayload(record));
+  const issueType = payloadString(payload, "issue_type") || payloadString(payload, "type");
+  if (issueType === "session" || issueType === "message") return true;
+  return payloadStringArray(payload, "labels").includes("gc:session");
+}
+
 function isOrderTrackingBeadEvent(record: DashboardEventRecord): boolean {
   if (!record.type.startsWith("bead.")) return false;
   return typeof record.message === "string" && record.message.startsWith("order:");
+}
+
+function eventPayload(record: DashboardEventRecord): unknown {
+  return "payload" in record ? record.payload : undefined;
+}
+
+function beadPayload(payload: unknown): unknown {
+  if (!isUnknownRecord(payload)) return payload;
+  const bead = payload.bead;
+  return isUnknownRecord(bead) ? bead : payload;
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function payloadString(payload: unknown, key: string): string {
+  if (!isUnknownRecord(payload)) return "";
+  const value = payload[key];
+  return typeof value === "string" ? value : "";
+}
+
+function payloadStringArray(payload: unknown, key: string): string[] {
+  if (!isUnknownRecord(payload)) return [];
+  const value = payload[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
 }
 
 function normalizeEntries(nextEntries: ActivityEntry[]): ActivityEntry[] {

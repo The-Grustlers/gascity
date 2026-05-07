@@ -40,6 +40,27 @@ func (s *reconcileRaceStore) List(query ListQuery) ([]Bead, error) {
 	return append([]Bead(nil), s.stale...), nil
 }
 
+type omittingReconcileListStore struct {
+	Store
+	omitID string
+	omit   bool
+}
+
+func (s *omittingReconcileListStore) List(query ListQuery) ([]Bead, error) {
+	items, err := s.Store.List(query)
+	if err != nil || !s.omit || !query.AllowScan {
+		return items, err
+	}
+	filtered := items[:0]
+	for _, item := range items {
+		if item.ID == s.omitID {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered, nil
+}
+
 func TestCachingStoreReconciliationPreservesConcurrentMutation(t *testing.T) {
 	mem := NewMemStore()
 	original, err := mem.Create(Bead{Title: "before reconcile"})
@@ -178,6 +199,78 @@ func TestCachingStoreReconciliationSkipsReemitForAlreadyClosedBead(t *testing.T)
 	if stillCached {
 		t.Fatalf("closed bead %s should be evicted from cache after reconcile", bead.ID)
 	}
+}
+
+func TestCachingStoreReconciliationVerifiesMissingActiveBeadBeforeClose(t *testing.T) {
+	mem := NewMemStore()
+	omitted, err := mem.Create(Bead{Title: "still open"})
+	if err != nil {
+		t.Fatalf("Create(omitted): %v", err)
+	}
+	kept, err := mem.Create(Bead{Title: "still listed"})
+	if err != nil {
+		t.Fatalf("Create(kept): %v", err)
+	}
+
+	backing := &omittingReconcileListStore{Store: mem, omitID: omitted.ID}
+	var events []string
+	cs := NewCachingStoreForTest(backing, func(eventType, beadID string, _ json.RawMessage) {
+		events = append(events, eventType+":"+beadID)
+	})
+	if err := cs.Prime(context.Background()); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	backing.omit = true
+	events = nil
+
+	cs.runReconciliation()
+
+	for _, e := range events {
+		if e == "bead.closed:"+omitted.ID {
+			t.Fatalf("reconciliation emitted close for bead that Get still reports open; events=%v", events)
+		}
+	}
+	items, err := cs.List(ListQuery{AllowScan: true})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	got := map[string]bool{}
+	for _, item := range items {
+		got[item.ID] = true
+	}
+	if !got[omitted.ID] || !got[kept.ID] {
+		t.Fatalf("cached active IDs = %v, want omitted and kept IDs retained", got)
+	}
+}
+
+func TestCachingStoreReconciliationEmitsCloseWhenMissingBeadIsClosedInBacking(t *testing.T) {
+	mem := NewMemStore()
+	bead, err := mem.Create(Bead{Title: "externally closed"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	var events []string
+	cs := NewCachingStoreForTest(mem, func(eventType, beadID string, _ json.RawMessage) {
+		events = append(events, eventType+":"+beadID)
+	})
+	if err := cs.Prime(context.Background()); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+	if err := mem.Close(bead.ID); err != nil {
+		t.Fatalf("Close(backing): %v", err)
+	}
+	events = nil
+
+	cs.runReconciliation()
+
+	want := "bead.closed:" + bead.ID
+	for _, e := range events {
+		if e == want {
+			return
+		}
+	}
+	t.Fatalf("events = %v, want %q", events, want)
 }
 
 func TestCachingStoreReconciliationSkipsReemitForAlreadyClosedBeadWithConcurrentMutation(t *testing.T) {

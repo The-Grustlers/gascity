@@ -95,7 +95,7 @@ type panicListRunningProvider struct {
 	*runtime.Fake
 }
 
-func (p *panicListRunningProvider) ListRunning(prefix string) ([]string, error) {
+func (p *panicListRunningProvider) ListRunning(_ string) ([]string, error) {
 	panic("ListRunning should not be called when the session read model is available")
 }
 

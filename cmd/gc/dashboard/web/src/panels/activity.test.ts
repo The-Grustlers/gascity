@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { renderActivity, seedActivity, type ActivityEntry } from "./activity";
+import type { CityEventRecord } from "../api";
+import { isNoisyBeadActivity, renderActivity, seedActivity, type ActivityEntry } from "./activity";
 
 describe("activity feed ordering", () => {
   beforeEach(() => {
@@ -56,4 +57,35 @@ describe("activity feed ordering", () => {
     expect(document.querySelectorAll(".tl-entry")).toHaveLength(3);
     expect(document.getElementById("activity-count")?.textContent).toBe("3");
   });
+
+  it("hides internal bead plumbing from the human activity feed", () => {
+    expect(isNoisyBeadActivity(eventRecord({
+      actor: "cache-reconcile",
+      payload: { bead: { issue_type: "task", labels: [] } },
+    }))).toBe(true);
+    expect(isNoisyBeadActivity(eventRecord({
+      actor: "human",
+      payload: { bead: { issue_type: "session", labels: ["gc:session"] } },
+    }))).toBe(true);
+    expect(isNoisyBeadActivity(eventRecord({
+      actor: "human",
+      payload: { bead: { issue_type: "message", labels: [] } },
+    }))).toBe(true);
+    expect(isNoisyBeadActivity(eventRecord({
+      actor: "director",
+      payload: { bead: { issue_type: "task", labels: ["customer-visible"] } },
+    }))).toBe(false);
+  });
 });
+
+function eventRecord(overrides: Record<string, unknown>): CityEventRecord {
+  return ({
+    actor: "human",
+    payload: { bead: { issue_type: "task", labels: [] } },
+    seq: 1,
+    subject: "gc-test",
+    ts: "2026-05-07T12:00:00Z",
+    type: "bead.updated",
+    ...overrides,
+  } as unknown) as CityEventRecord;
+}

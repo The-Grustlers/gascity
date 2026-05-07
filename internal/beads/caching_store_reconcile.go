@@ -2,6 +2,8 @@ package beads
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 )
 
@@ -89,6 +91,7 @@ func (c *CachingStore) runReconciliation() {
 	if depErr != nil {
 		c.recordProblem("refresh dep cache during reconcile", depErr)
 	}
+	c.recoverMissingActiveBeads(freshByID, depMap, depErr == nil)
 
 	c.mu.Lock()
 	if c.mutationSeq != startSeq {
@@ -242,4 +245,68 @@ func (c *CachingStore) runReconciliation() {
 	c.updateStatsLocked()
 	c.mu.Unlock()
 	c.notifyChanges(notifications)
+}
+
+// recoverMissingActiveBeads verifies cached active beads that were absent from
+// the full-list result. The bd list path is an eventually-consistent scan over
+// Dolt and can occasionally omit rows that bd show can still read. Treating
+// those omissions as closes creates synthetic bead.closed events and forces the
+// session manager to reassert the open state.
+func (c *CachingStore) recoverMissingActiveBeads(freshByID map[string]Bead, depMap map[string][]Dep, depsFresh bool) {
+	c.mu.RLock()
+	type candidate struct {
+		bead Bead
+		deps []Dep
+	}
+	candidates := make([]candidate, 0)
+	for id, old := range c.beads {
+		if _, exists := freshByID[id]; exists || old.Status == "closed" {
+			continue
+		}
+		candidates = append(candidates, candidate{
+			bead: cloneBead(old),
+			deps: cloneDeps(c.deps[id]),
+		})
+	}
+	c.mu.RUnlock()
+
+	if len(candidates) == 0 {
+		return
+	}
+
+	recoveredIDs := make([]string, 0, len(candidates))
+	for _, item := range candidates {
+		fresh, err := c.backing.Get(item.bead.ID)
+		switch {
+		case err == nil:
+			if fresh.Status == "closed" {
+				continue
+			}
+			freshByID[fresh.ID] = cloneBead(fresh)
+			if depsFresh {
+				depMap[fresh.ID] = cloneDeps(item.deps)
+				recoveredIDs = append(recoveredIDs, fresh.ID)
+			}
+		case errors.Is(err, ErrNotFound):
+			continue
+		default:
+			c.recordProblem("verify missing bead during reconcile", fmt.Errorf("%s: %w", item.bead.ID, err))
+			freshByID[item.bead.ID] = cloneBead(item.bead)
+			if depsFresh {
+				depMap[item.bead.ID] = cloneDeps(item.deps)
+			}
+		}
+	}
+	if !depsFresh || len(recoveredIDs) == 0 {
+		return
+	}
+
+	recoveredDeps, err := c.fetchDepsForIDs(recoveredIDs)
+	if err != nil {
+		c.recordProblem("refresh recovered dep cache during reconcile", err)
+		return
+	}
+	for id, deps := range recoveredDeps {
+		depMap[id] = cloneDeps(deps)
+	}
 }

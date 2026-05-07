@@ -255,10 +255,13 @@ func (cs *controllerState) applyBeadEventToStores(evt events.Event) {
 	if len(evt.Payload) == 0 {
 		return
 	}
+	cityOnly := beadEventPayloadIsCityOwned(evt.Payload)
 	cs.mu.RLock()
 	stores := make([]beads.Store, 0, len(cs.beadStores)+1)
-	for _, s := range cs.beadStores {
-		stores = append(stores, s)
+	if !cityOnly {
+		for _, s := range cs.beadStores {
+			stores = append(stores, s)
+		}
 	}
 	if cs.cityBeadStore != nil {
 		stores = append(stores, cs.cityBeadStore)
@@ -273,6 +276,45 @@ func (cs *controllerState) applyBeadEventToStores(evt events.Event) {
 	if evt.Actor != "cache-reconcile" {
 		cs.Poke()
 	}
+}
+
+func beadEventPayloadIsCityOwned(payload json.RawMessage) bool {
+	var raw struct {
+		Bead      *beadEventPayloadScope `json:"bead"`
+		IssueType string                 `json:"issue_type"`
+		Type      string                 `json:"type"`
+		Labels    []string               `json:"labels"`
+	}
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return false
+	}
+	bead := beadEventPayloadScope{
+		IssueType: raw.IssueType,
+		Type:      raw.Type,
+		Labels:    raw.Labels,
+	}
+	if raw.Bead != nil {
+		bead = *raw.Bead
+	}
+	kind := strings.TrimSpace(bead.IssueType)
+	if kind == "" {
+		kind = strings.TrimSpace(bead.Type)
+	}
+	if kind == "session" || kind == "message" {
+		return true
+	}
+	for _, label := range bead.Labels {
+		if label == sessionBeadLabel {
+			return true
+		}
+	}
+	return false
+}
+
+type beadEventPayloadScope struct {
+	IssueType string   `json:"issue_type"`
+	Type      string   `json:"type"`
+	Labels    []string `json:"labels"`
 }
 
 // update replaces the config, session provider, and reopens stores.

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/gastownhall/gascity/internal/beads"
@@ -69,6 +70,31 @@ type CityUnregisterFailedPayload = CityLifecyclePayload
 // CachingStore's reconcile loop when external changes are detected.
 type BeadEventPayload struct {
 	Bead beads.Bead `json:"bead"`
+}
+
+// UnmarshalJSON accepts both the current typed API shape
+// {"bead": {...}} and the legacy bd hook shape {...bead fields...}. The event
+// log stores hook payloads verbatim, so decoding has to tolerate both.
+func (p *BeadEventPayload) UnmarshalJSON(data []byte) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if _, wrapped := fields["bead"]; wrapped {
+		type wire BeadEventPayload
+		var decoded wire
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			return err
+		}
+		*p = BeadEventPayload(decoded)
+		return nil
+	}
+	var bead beads.Bead
+	if err := json.Unmarshal(data, &bead); err != nil {
+		return err
+	}
+	p.Bead = bead
+	return nil
 }
 
 // IsEventPayload marks BeadEventPayload as an events.Payload variant.

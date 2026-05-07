@@ -429,6 +429,52 @@ func TestControllerStateAppliesCacheReconcileBeadEventsToStores(t *testing.T) {
 	}
 }
 
+func TestControllerStateRoutesCityOwnedBeadEventsOnlyToCityStore(t *testing.T) {
+	ctx := context.Background()
+	rigCache := beads.NewCachingStoreForTest(beads.NewMemStore(), nil)
+	if err := rigCache.Prime(ctx); err != nil {
+		t.Fatalf("Prime rig cache: %v", err)
+	}
+	cityCache := beads.NewCachingStoreForTest(beads.NewMemStore(), nil)
+	if err := cityCache.Prime(ctx); err != nil {
+		t.Fatalf("Prime city cache: %v", err)
+	}
+	cs := &controllerState{
+		beadStores:    map[string]beads.Store{"alpha": rigCache},
+		cityBeadStore: cityCache,
+		pokeCh:        make(chan struct{}, 1),
+	}
+
+	payload := json.RawMessage(`{
+		"id": "gc-session-1",
+		"title": "mayor",
+		"status": "open",
+		"issue_type": "session",
+		"labels": ["gc:session", "agent:mayor"]
+	}`)
+	cs.applyBeadEventToStores(events.Event{
+		Type:    events.BeadUpdated,
+		Actor:   "human",
+		Subject: "gc-session-1",
+		Payload: payload,
+	})
+
+	rigItems, err := rigCache.List(beads.ListQuery{AllowScan: true})
+	if err != nil {
+		t.Fatalf("List rig cache: %v", err)
+	}
+	if len(rigItems) != 0 {
+		t.Fatalf("rig cache items = %+v, want no city-owned session bead", rigItems)
+	}
+	cityItems, err := cityCache.List(beads.ListQuery{AllowScan: true})
+	if err != nil {
+		t.Fatalf("List city cache: %v", err)
+	}
+	if len(cityItems) != 1 || cityItems[0].ID != "gc-session-1" {
+		t.Fatalf("city cache items = %+v, want gc-session-1", cityItems)
+	}
+}
+
 func TestControllerStateBuildStoresUsesScopeLocalFileStores(t *testing.T) {
 	t.Setenv("GC_BEADS", "file")
 

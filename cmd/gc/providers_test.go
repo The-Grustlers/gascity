@@ -68,9 +68,15 @@ func TestSessionProviderContextForCityUsesTargetCityAndEnvOverride(t *testing.T)
 
 func TestApplyK8sConfigEnvUsesTomlAsDefaults(t *testing.T) {
 	t.Setenv("GC_K8S_IMAGE", "ambient-image")
-	os.Unsetenv("GC_K8S_NAMESPACE")
-	os.Unsetenv("GC_K8S_PREBAKED")
-	os.Unsetenv("GC_K8S_HOSTPATH_RIG")
+	if err := os.Unsetenv("GC_K8S_NAMESPACE"); err != nil {
+		t.Fatalf("Unsetenv GC_K8S_NAMESPACE: %v", err)
+	}
+	if err := os.Unsetenv("GC_K8S_PREBAKED"); err != nil {
+		t.Fatalf("Unsetenv GC_K8S_PREBAKED: %v", err)
+	}
+	if err := os.Unsetenv("GC_K8S_HOSTPATH_RIG"); err != nil {
+		t.Fatalf("Unsetenv GC_K8S_HOSTPATH_RIG: %v", err)
+	}
 
 	restore := applyK8sConfigEnv(config.K8sConfig{
 		Namespace: "gc",

@@ -1410,7 +1410,7 @@ gc mail read <id>
 Reply to a message. The reply is addressed to the original sender.
 
 Inherits the thread ID from the original message for conversation tracking.
-Use --notify to nudge the recipient after replying.
+Replies nudge live session recipients by default; pass --notify=false for quiet inbox-only replies.
 Use -s/--subject for the reply subject and -m/--message for the reply body.
 
 ```
@@ -1420,7 +1420,7 @@ gc mail reply <id> [-s subject] [-m body] [flags]
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
 | `-m`, `--message` | string |  | reply body text |
-| `--notify` | bool |  | nudge the recipient after replying |
+| `--notify` | bool | `true` | nudge the recipient after replying (default: true) |
 | `-s`, `--subject` | string |  | reply subject line |
 
 ## gc mail send
@@ -1428,8 +1428,9 @@ gc mail reply <id> [-s subject] [-m body] [flags]
 Send a message to a session alias or human.
 
 Creates a message bead addressed to the recipient. The sender defaults
-to $GC_SESSION_ID, $GC_ALIAS, $GC_AGENT, or "human". Use --notify to nudge
-the recipient after sending. Use --from to override the sender identity.
+to $GC_SESSION_ID, $GC_ALIAS, $GC_AGENT, or "human". Live session recipients
+are nudged after sending by default; use --no-notify for quiet inbox-only mail.
+Use --from to override the sender identity.
 Use --to as an alternative to the positional &lt;to&gt; argument.
 Use -s/--subject for the summary line and -m/--message for the body text.
 Use --all to broadcast to all live sessions (excluding sender and "human").
@@ -1446,7 +1447,7 @@ gc mail send mayor "Build is green"
   gc mail send myrig/witness -s "Need investigation" -m "Attach logs from the last failed run"
   gc mail send --to mayor "Build is green"
   gc mail send human "Review needed for PR #42"
-  gc mail send polecat "Priority task" --notify
+  gc mail send polecat "Inbox-only note" --no-notify
   gc mail send --all "Status update: tests passing"
 ```
 
@@ -1455,7 +1456,8 @@ gc mail send mayor "Build is green"
 | `--all` | bool |  | broadcast to all live sessions (excludes sender and human) |
 | `--from` | string |  | sender identity (default: $GC_SESSION_ID, $GC_ALIAS, $GC_AGENT, or "human") |
 | `-m`, `--message` | string |  | message body text |
-| `--notify` | bool |  | nudge the recipient after sending |
+| `--no-notify` | bool |  | send without nudging the recipient |
+| `--notify` | bool | `true` | nudge the recipient after sending |
 | `-s`, `--subject` | string |  | message subject line |
 | `--to` | string |  | recipient address (alternative to positional argument) |
 
