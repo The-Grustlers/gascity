@@ -344,6 +344,42 @@ func TestHandleStatusBoundedPoolUsesCachedSessionState(t *testing.T) {
 	}
 }
 
+func TestHandleStatusUsesCachedWorkReadModel(t *testing.T) {
+	state := newFakeState(t)
+	store := &cachedOnlyListStoreForSessionTest{MemStore: beads.NewMemStore(), blockList: true}
+	state.stores["myrig"] = store
+	work, err := store.MemStore.Create(beads.Bead{
+		Type:  "task",
+		Title: "cached ready work",
+	})
+	if err != nil {
+		t.Fatalf("Create ready work: %v", err)
+	}
+	ready := "ready"
+	if err := store.MemStore.Update(work.ID, beads.UpdateOpts{Status: &ready}); err != nil {
+		t.Fatalf("Mark ready work: %v", err)
+	}
+	h := newTestCityHandler(t, state)
+
+	req := httptest.NewRequest("GET", cityURL(state, "/status"), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if store.listCalls != 0 {
+		t.Fatalf("/status called backing List %d time(s), want cached-only read model", store.listCalls)
+	}
+	var resp statusResponse
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Work.Ready != 1 {
+		t.Fatalf("Work.Ready = %d, want 1", resp.Work.Ready)
+	}
+}
+
 func TestHandleStatusOnlyUsesProviderLiveness(t *testing.T) {
 	state := newFakeState(t)
 	if err := state.sp.Start(context.Background(), "myrig--worker", runtime.Config{}); err != nil {

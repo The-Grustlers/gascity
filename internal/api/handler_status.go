@@ -111,7 +111,7 @@ func (s *Server) buildStatusBody() StatusBody {
 			continue
 		}
 		seenStores[key] = true
-		list, err := store.List(beads.ListQuery{AllowScan: true})
+		list, err := listStatusWorkBeadsForReadModel(store)
 		if err != nil {
 			continue
 		}
@@ -162,6 +162,16 @@ func (s *Server) buildStatusBody() StatusBody {
 		Work:       wc,
 		Mail:       mc,
 	}
+}
+
+func listStatusWorkBeadsForReadModel(store beads.Store) ([]beads.Bead, error) {
+	query := beads.ListQuery{AllowScan: true}
+	if cached, ok := store.(cachedListStore); ok {
+		if rows, cacheOK := cached.CachedList(query); cacheOK {
+			return rows, nil
+		}
+	}
+	return store.List(query)
 }
 
 type statusSessionSnapshot struct {
