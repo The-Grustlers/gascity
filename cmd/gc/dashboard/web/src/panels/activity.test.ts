@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   activityStreamCursorFromRecordsForTest,
+  isInternalAlertActivity,
+  isNoisyBeadActivity,
   renderActivity,
   seedActivity,
   type ActivityEntry,
@@ -60,6 +62,68 @@ describe("activity feed ordering", () => {
     ]);
     expect(document.querySelectorAll(".tl-entry")).toHaveLength(3);
     expect(document.getElementById("activity-count")?.textContent).toBe("3");
+  });
+
+  it("hides internal bead plumbing until the internal toggle is enabled", async () => {
+    await seedActivity([
+      {
+        category: "work",
+        id: "mc-city:1",
+        rig: "city",
+        scope: "mc-city",
+        seq: 1,
+        ts: "2026-04-02T10:00:00Z",
+        type: "bead.updated",
+      },
+      {
+        alert: true,
+        category: "work",
+        id: "mc-city:2",
+        internal: true,
+        rig: "city",
+        scope: "mc-city",
+        seq: 2,
+        ts: "2026-04-02T10:01:00Z",
+        type: "bead.closed",
+      },
+    ]);
+    renderActivity();
+
+    expect(document.querySelectorAll(".tl-entry")).toHaveLength(1);
+    expect(document.getElementById("activity-count")?.textContent).toBe("1");
+    expect(document.querySelector(".tl-internal-count")?.textContent).toBe("1");
+    expect(document.querySelector(".tl-internal-alert")?.textContent).toBe("1 alert");
+
+    const toggle = document.getElementById("tl-internal-toggle") as HTMLInputElement;
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(document.querySelectorAll(".tl-entry")).toHaveLength(2);
+    expect(document.querySelectorAll(".activity-internal")).toHaveLength(1);
+    expect(document.querySelectorAll(".activity-alert")).toHaveLength(1);
+    expect(document.getElementById("activity-count")?.textContent).toBe("2");
+  });
+
+  it("classifies noisy bead payloads as internal activity", () => {
+    const sessionClose = {
+      actor: "cache-reconcile",
+      payload: { bead: { issue_type: "session", labels: ["gc:session"] } },
+      seq: 1,
+      ts: "2026-04-02T10:00:00Z",
+      type: "bead.closed",
+    };
+    const humanWork = {
+      actor: "human",
+      payload: { bead: { issue_type: "task", labels: [] } },
+      seq: 2,
+      ts: "2026-04-02T10:01:00Z",
+      type: "bead.updated",
+    };
+
+    expect(isNoisyBeadActivity(sessionClose as any)).toBe(true);
+    expect(isInternalAlertActivity(sessionClose as any)).toBe(true);
+    expect(isNoisyBeadActivity(humanWork as any)).toBe(false);
+    expect(isInternalAlertActivity(humanWork as any)).toBe(false);
   });
 
   it("computes a city stream cursor from loaded history", () => {
