@@ -29,6 +29,7 @@ var (
 	_ runtime.InteractionProvider           = (*Provider)(nil)
 	_ runtime.InterruptBoundaryWaitProvider = (*Provider)(nil)
 	_ runtime.InterruptedTurnResetProvider  = (*Provider)(nil)
+	_ runtime.TerminalAttachSpecProvider    = (*Provider)(nil)
 	_ runtime.TransportCapabilityProvider   = (*Provider)(nil)
 )
 
@@ -189,6 +190,46 @@ func (p *Provider) Attach(name string) error {
 		return fmt.Errorf("agent %q uses ACP transport (no terminal to attach to)", name)
 	}
 	return p.defaultSP.Attach(name)
+}
+
+func (p *Provider) terminalRoute(name string) runtime.Provider {
+	primary := p.route(name)
+	if primary.IsRunning(name) {
+		return primary
+	}
+	p.mu.RLock()
+	isACP := p.routes[name]
+	p.mu.RUnlock()
+	if isACP {
+		if p.defaultSP.IsRunning(name) {
+			return p.defaultSP
+		}
+		return primary
+	}
+	if p.acpSP.IsRunning(name) {
+		return p.acpSP
+	}
+	return primary
+}
+
+// TerminalAttachCommand delegates to the backend currently hosting the session
+// when it supports browser terminal attachment.
+func (p *Provider) TerminalAttachCommand(name string) (runtime.TerminalCommandSpec, error) {
+	provider, ok := p.terminalRoute(name).(runtime.TerminalAttachSpecProvider)
+	if !ok {
+		return runtime.TerminalCommandSpec{}, runtime.ErrInteractionUnsupported
+	}
+	return provider.TerminalAttachCommand(name)
+}
+
+// TerminalResizeCommand delegates to the backend currently hosting the session
+// when it supports browser terminal resizing.
+func (p *Provider) TerminalResizeCommand(name string, cols, rows int) (runtime.TerminalCommandSpec, error) {
+	provider, ok := p.terminalRoute(name).(runtime.TerminalAttachSpecProvider)
+	if !ok {
+		return runtime.TerminalCommandSpec{}, runtime.ErrInteractionUnsupported
+	}
+	return provider.TerminalResizeCommand(name, cols, rows)
 }
 
 // ProcessAlive delegates to the routed backend.

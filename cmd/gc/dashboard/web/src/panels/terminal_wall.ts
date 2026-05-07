@@ -4,17 +4,24 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 
 import type { SessionRecord } from "../api";
-import { api, cityScope, mutationHeaders } from "../api";
-import { connectAgentOutput, type AgentOutputMessage, type SSEHandle } from "../sse";
+import { api, cityScope, supervisorBaseURL } from "../api";
 import { byId, clear, el } from "../util/dom";
 import { reportUIError } from "../ui";
 
 type TerminalPane = {
+  decoder: TextDecoder;
   fit: FitAddon;
-  handle: SSEHandle;
+  inputDisposable: { dispose(): void };
   root: HTMLElement;
   sessionID: string;
+  socket: WebSocket;
+  status: HTMLElement;
   term: Terminal;
+};
+
+type TerminalControlFrame = {
+  data?: unknown;
+  type: string;
 };
 
 const panes = new Map<string, TerminalPane>();
@@ -32,7 +39,7 @@ export function installTerminalWallInteractions(): void {
   });
   window.addEventListener("resize", () => {
     for (const pane of panes.values()) {
-      pane.fit.fit();
+      fitAndResize(pane);
     }
   });
 }
@@ -54,7 +61,7 @@ export async function renderTerminalWall(): Promise<void> {
   if (!panel || !grid || !count || !status || !city) return;
 
   panel.style.display = "block";
-  status.textContent = "Loading session streams...";
+  status.textContent = "Loading terminal sessions...";
   const { data, error } = await api.GET("/v0/city/{cityName}/sessions", {
     params: { path: { cityName: city }, query: { peek: true } },
   });
@@ -68,7 +75,7 @@ export async function renderTerminalWall(): Promise<void> {
   count.textContent = String(running.length);
   status.textContent = running.length === 0
     ? "No running sessions to attach."
-    : `Attached to ${running.length} running session stream(s).`;
+    : `Attached to ${running.length} terminal session(s).`;
 
   const nextIDs = new Set(running.map((session) => session.id));
   closeMissingPanes(nextIDs);
@@ -85,7 +92,7 @@ export async function renderTerminalWall(): Promise<void> {
     const pane = panes.get(session.id) ?? createPane(city, session);
     panes.set(session.id, pane);
     grid.append(pane.root);
-    pane.fit.fit();
+    fitAndResize(pane);
   }
 }
 
@@ -97,7 +104,7 @@ export function closeTerminalWallExternal(): void {
   const count = byId("terminal-wall-count");
   if (count) count.textContent = "0";
   const status = byId("terminal-wall-status");
-  if (status) status.textContent = "No session streams attached.";
+  if (status) status.textContent = "No terminal sessions attached.";
 }
 
 async function toggleTerminalWall(): Promise<void> {
@@ -113,30 +120,20 @@ function createPane(city: string, session: SessionRecord): TerminalPane {
   const root = el("article", { class: "terminal-pane", "data-session-id": session.id });
   const title = session.display_name || session.title || session.template || session.id;
   const meta = [session.rig || "city", session.pool, session.model].filter(Boolean).join(" / ");
+  const status = el("span", { class: "badge badge-muted" }, ["Connecting"]);
   const header = el("div", { class: "terminal-pane-header" }, [
     el("div", {}, [
       el("h3", {}, [title]),
       el("p", {}, [meta || session.id]),
     ]),
-    el("span", { class: `badge ${session.attached ? "badge-green" : "badge-muted"}` }, [
-      session.attached ? "Attached" : "Detached",
-    ]),
+    status,
   ]);
   const mount = el("div", { class: "terminal-pane-screen" });
-  const form = el("form", { class: "terminal-pane-form" }, [
-    el("input", {
-      autocomplete: "off",
-      class: "terminal-pane-input",
-      placeholder: `Message ${session.template}`,
-      type: "text",
-    }),
-    el("button", { class: "terminal-pane-send", type: "submit" }, ["Send"]),
-  ]);
 
   const term = new Terminal({
     convertEol: true,
-    cursorBlink: false,
-    disableStdin: true,
+    cursorBlink: true,
+    disableStdin: false,
     fontFamily: "'SF Mono', Menlo, Monaco, Consolas, monospace",
     fontSize: 12,
     scrollback: 2000,
@@ -155,153 +152,135 @@ function createPane(city: string, session: SessionRecord): TerminalPane {
   });
   const fit = new FitAddon();
   term.loadAddon(fit);
-  root.append(header, mount, form);
+  root.append(header, mount);
   term.open(mount);
-  fit.fit();
-  term.writeln(`Gas City terminal stream: ${title}`);
+  term.writeln(`Gas City terminal: ${title}`);
   term.writeln(`session ${session.id}`);
   term.writeln("");
 
-  const handle = connectAgentOutput(
-    city,
-    session.id,
-    (msg) => writeStreamMessage(term, msg),
-    { format: "raw" },
+  const socket = new WebSocket(terminalWebSocketURL(city, session.id));
+  socket.binaryType = "arraybuffer";
+  const pane: TerminalPane = {
+    decoder: new TextDecoder(),
+    fit,
+    inputDisposable: { dispose() {} },
+    root,
+    sessionID: session.id,
+    socket,
+    status,
+    term,
+  };
+  pane.inputDisposable = term.onData((data) => {
+    sendTerminalInput(pane, data);
+  });
+
+  socket.addEventListener("open", () => {
+    setPaneStatus(pane, "Attached", "badge-green");
+    sendTerminalResize(pane);
+  });
+  socket.addEventListener("message", (event) => {
+    void handleTerminalMessage(pane, event.data as unknown);
+  });
+  socket.addEventListener("close", () => {
+    if (!panes.has(pane.sessionID)) return;
+    setPaneStatus(pane, "Closed", "badge-muted");
+  });
+  socket.addEventListener("error", (event) => {
+    setPaneStatus(pane, "Error", "badge-red");
+    reportUIError("Terminal websocket error", event);
+  });
+
+  return pane;
+}
+
+function terminalWebSocketURL(city: string, sessionID: string): string {
+  const base = supervisorBaseURL() || window.location.origin;
+  const url = new URL(
+    `/v0/city/${encodeURIComponent(city)}/session/${encodeURIComponent(sessionID)}/terminal`,
+    base,
   );
-
-  form.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const input = form.querySelector<HTMLInputElement>("input");
-    const message = input?.value.trim() ?? "";
-    if (!message) return;
-    if (input) input.value = "";
-    term.writeln(`\x1b[36mhuman>\x1b[0m ${message}`);
-    void submitTerminalMessage(city, session.id, message, term);
-  });
-
-  return { fit, handle, root, sessionID: session.id, term };
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
 }
 
-async function submitTerminalMessage(
-  city: string,
-  sessionID: string,
-  message: string,
-  term: Terminal,
-): Promise<void> {
-  const res = await api.POST("/v0/city/{cityName}/session/{id}/submit", {
-    params: { path: { cityName: city, id: sessionID }, header: mutationHeaders },
-    body: { message, intent: "default" },
-  });
-  if (res.error) {
-    term.writeln(`\x1b[31mmessage failed:\x1b[0m ${res.error.detail ?? "Could not message session"}`);
+function fitAndResize(pane: TerminalPane): void {
+  pane.fit.fit();
+  sendTerminalResize(pane);
+}
+
+function sendTerminalInput(pane: TerminalPane, data: string): void {
+  sendTerminalFrame(pane, { type: "input", data });
+}
+
+function sendTerminalResize(pane: TerminalPane): void {
+  const cols = Number.isFinite(pane.term.cols) ? pane.term.cols : 80;
+  const rows = Number.isFinite(pane.term.rows) ? pane.term.rows : 24;
+  sendTerminalFrame(pane, { type: "resize", cols, rows });
+}
+
+function sendTerminalFrame(pane: TerminalPane, frame: Record<string, unknown>): void {
+  if (pane.socket.readyState !== WebSocket.OPEN) return;
+  pane.socket.send(JSON.stringify(frame));
+}
+
+async function handleTerminalMessage(pane: TerminalPane, data: unknown): Promise<void> {
+  if (typeof data === "string") {
+    const control = parseTerminalControl(data);
+    if (control) {
+      handleTerminalControl(pane, control);
+      return;
+    }
+    pane.term.write(data);
     return;
   }
-  term.writeln("\x1b[32mmessage accepted\x1b[0m");
-}
-
-function writeStreamMessage(term: Terminal, msg: AgentOutputMessage): void {
-  if (msg.type === "heartbeat") return;
-  if (msg.type === "activity") {
-    const activity = field(msg.data, "activity");
-    if (typeof activity === "string") term.writeln(`\x1b[90mactivity: ${activity}\x1b[0m`);
+  if (isArrayBufferLike(data)) {
+    writeTerminalBytes(pane, data);
     return;
   }
-  if (msg.type === "pending") {
-    term.writeln("\x1b[33mpending interaction\x1b[0m");
-    return;
-  }
-  const text = streamText(msg.data);
-  if (!text) return;
-  for (const line of text.split("\n")) {
-    term.writeln(line);
-  }
-}
-
-function streamText(value: unknown): string {
-  if (!isRecord(value)) return textFromValue(value);
-  const turns = value.turns;
-  if (Array.isArray(turns)) {
-    return turns.map(turnText).filter(Boolean).join("\n");
-  }
-  const messages = value.messages;
-  if (Array.isArray(messages)) {
-    return messages.map(rawFrameText).filter(Boolean).join("\n");
-  }
-  return textFromValue(value);
-}
-
-function turnText(value: unknown): string {
-  if (!isRecord(value)) return "";
-  const role = typeof value.role === "string" ? value.role : "agent";
-  const text = typeof value.text === "string" ? value.text : "";
-  return text ? `\x1b[35m${role}>\x1b[0m ${text}` : "";
-}
-
-function rawFrameText(frame: unknown): string {
-  if (typeof frame === "string") return frame;
-  if (!isRecord(frame)) return textFromValue(frame);
-
-  const payload = isRecord(frame.payload) ? frame.payload : undefined;
-  if (payload) {
-    const payloadText = messageContentText(payload.message) || contentText(payload.content);
-    if (payloadText) return withRole(payload.role ?? payload.type, payloadText);
-  }
-
-  const messageText = messageContentText(frame.message);
-  if (messageText) return withRole(frame.type ?? field(frame.message, "role"), messageText);
-
-  const content = contentText(frame.content);
-  if (content) return withRole(frame.role ?? frame.type, content);
-
-  return textFromValue(frame);
-}
-
-function messageContentText(value: unknown): string {
-  if (typeof value === "string") {
+  if (data instanceof Blob) {
     try {
-      return messageContentText(JSON.parse(value) as unknown);
-    } catch {
-      return value;
+      writeTerminalBytes(pane, await data.arrayBuffer());
+    } catch (error) {
+      reportUIError("Terminal blob decode failed", error);
     }
   }
-  if (!isRecord(value)) return "";
-  return contentText(value.content);
 }
 
-function contentText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    return value.map(contentBlockText).filter(Boolean).join("\n");
+function handleTerminalControl(pane: TerminalPane, frame: TerminalControlFrame): void {
+  if (frame.type === "ready") {
+    setPaneStatus(pane, "Attached", "badge-green");
+    return;
   }
-  return "";
+  if (frame.type === "error") {
+    setPaneStatus(pane, "Error", "badge-red");
+    const detail = typeof frame.data === "string" ? frame.data : "terminal error";
+    pane.term.writeln(`\x1b[31m${detail}\x1b[0m`);
+  }
 }
 
-function contentBlockText(value: unknown): string {
-  if (!isRecord(value)) return textFromValue(value);
-  if (typeof value.text === "string") return value.text;
-  if (typeof value.content === "string") return value.content;
-  if (typeof value.name === "string") return `[${value.name}]`;
-  return "";
-}
-
-function textFromValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (value == null) return "";
+function parseTerminalControl(data: string): TerminalControlFrame | null {
   try {
-    return JSON.stringify(value);
-  } catch (error) {
-    reportUIError("Terminal stream stringify failed", error);
-    return "";
+    const parsed = JSON.parse(data) as unknown;
+    if (!isRecord(parsed) || typeof parsed.type !== "string") return null;
+    if (parsed.type !== "ready" && parsed.type !== "error") return null;
+    return { type: parsed.type, data: parsed.data };
+  } catch {
+    return null;
   }
 }
 
-function withRole(roleValue: unknown, text: string): string {
-  const role = typeof roleValue === "string" && roleValue ? roleValue : "agent";
-  return `\x1b[35m${role}>\x1b[0m ${text}`;
+function writeTerminalBytes(pane: TerminalPane, data: ArrayBuffer): void {
+  const text = pane.decoder.decode(new Uint8Array(data), { stream: true });
+  if (text) pane.term.write(text);
 }
 
-function field(value: unknown, key: string): unknown {
-  return isRecord(value) ? value[key] : undefined;
+function isArrayBufferLike(value: unknown): value is ArrayBuffer {
+  return value instanceof ArrayBuffer || Object.prototype.toString.call(value) === "[object ArrayBuffer]";
+}
+
+function setPaneStatus(pane: TerminalPane, label: string, className: string): void {
+  pane.status.className = `badge ${className}`;
+  pane.status.textContent = label;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -311,7 +290,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function closeMissingPanes(nextIDs: Set<string>): void {
   for (const [id, pane] of panes) {
     if (nextIDs.has(id)) continue;
-    pane.handle.close();
+    pane.inputDisposable.dispose();
+    if (pane.socket.readyState === WebSocket.CONNECTING || pane.socket.readyState === WebSocket.OPEN) {
+      pane.socket.close();
+    }
     pane.term.dispose();
     panes.delete(id);
   }

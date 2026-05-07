@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,6 +38,7 @@ var (
 	_ runtime.ImmediateNudgeProvider        = (*Provider)(nil)
 	_ runtime.InterruptBoundaryWaitProvider = (*Provider)(nil)
 	_ runtime.InterruptedTurnResetProvider  = (*Provider)(nil)
+	_ runtime.TerminalAttachSpecProvider    = (*Provider)(nil)
 )
 
 // NewProvider returns a [Provider] backed by a real tmux installation
@@ -546,6 +548,37 @@ func (p *Provider) Attach(name string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// TerminalAttachCommand returns a PTY-backed tmux attach command suitable for
+// bidirectional websocket bridges. tmux attach requires a controlling terminal,
+// so util-linux script(1) supplies the PTY and flushes output as it arrives.
+func (p *Provider) TerminalAttachCommand(name string) (runtime.TerminalCommandSpec, error) {
+	args := []string{"-u"}
+	if p.cfg.SocketName != "" {
+		args = append(args, "-L", p.cfg.SocketName)
+	}
+	args = append(args, "attach-session", "-t", name)
+	return runtime.TerminalCommandSpec{
+		Path: "script",
+		Args: []string{"-qfc", "tmux " + shellquote.Join(args), "/dev/null"},
+		Env:  []string{"TERM=xterm-256color"},
+	}, nil
+}
+
+// TerminalResizeCommand returns a best-effort tmux resize command for a
+// browser terminal pane. tmux sizes are session/window scoped, which matches
+// how the existing WezTerm replacement model views an attached session.
+func (p *Provider) TerminalResizeCommand(name string, cols, rows int) (runtime.TerminalCommandSpec, error) {
+	if cols < 2 || rows < 2 {
+		return runtime.TerminalCommandSpec{}, nil
+	}
+	args := []string{"-u"}
+	if p.cfg.SocketName != "" {
+		args = append(args, "-L", p.cfg.SocketName)
+	}
+	args = append(args, "resize-window", "-t", name, "-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows))
+	return runtime.TerminalCommandSpec{Path: "tmux", Args: args}, nil
 }
 
 // Tmux returns the underlying [Tmux] instance for advanced operations

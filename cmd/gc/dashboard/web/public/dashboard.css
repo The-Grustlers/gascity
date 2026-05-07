@@ -186,43 +186,13 @@
         }
 
         .terminal-pane-screen {
-            height: 320px;
+            height: 360px;
             padding: 6px;
             background: #06090d;
         }
 
         .terminal-pane-screen .xterm {
             height: 100%;
-        }
-
-        .terminal-pane-form {
-            display: grid;
-            grid-template-columns: minmax(0, 1fr) auto;
-            gap: 8px;
-            padding: 8px;
-            border-top: 1px solid var(--border);
-            background: var(--bg-dark);
-        }
-
-        .terminal-pane-input {
-            min-width: 0;
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            background: var(--bg-card);
-            color: var(--text-primary);
-            padding: 7px 8px;
-            font: inherit;
-        }
-
-        .terminal-pane-send {
-            border: 1px solid var(--border-accent);
-            border-radius: 4px;
-            background: var(--cyan);
-            color: var(--bg-dark);
-            cursor: pointer;
-            font: inherit;
-            font-weight: 700;
-            padding: 7px 10px;
         }
 
         .terminal-wall-empty {

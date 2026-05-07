@@ -79,6 +79,63 @@ func TestAttachReturnsErrorForACP(t *testing.T) {
 	}
 }
 
+type terminalProvider struct {
+	*runtime.Fake
+	label string
+}
+
+func (p *terminalProvider) TerminalAttachCommand(name string) (runtime.TerminalCommandSpec, error) {
+	return runtime.TerminalCommandSpec{Path: p.label + "-attach", Args: []string{name}}, nil
+}
+
+func (p *terminalProvider) TerminalResizeCommand(name string, cols, rows int) (runtime.TerminalCommandSpec, error) {
+	return runtime.TerminalCommandSpec{Path: p.label + "-resize", Args: []string{name, fmt.Sprint(cols), fmt.Sprint(rows)}}, nil
+}
+
+func TestTerminalAttachCommandRoutesToDefault(t *testing.T) {
+	defaultSP := &terminalProvider{Fake: runtime.NewFake(), label: "default"}
+	acpSP := runtime.NewFake()
+	p := New(defaultSP, acpSP)
+
+	spec, err := p.TerminalAttachCommand("normal-agent")
+	if err != nil {
+		t.Fatalf("TerminalAttachCommand: %v", err)
+	}
+	if spec.Path != "default-attach" {
+		t.Fatalf("Path = %q, want default-attach", spec.Path)
+	}
+}
+
+func TestTerminalAttachCommandFallsBackToRunningDefaultWhenRouteIsStale(t *testing.T) {
+	defaultSP := &terminalProvider{Fake: runtime.NewFake(), label: "default"}
+	acpSP := runtime.NewFake()
+	p := New(defaultSP, acpSP)
+	p.RouteACP("normal-agent")
+	if err := defaultSP.Start(context.Background(), "normal-agent", runtime.Config{}); err != nil {
+		t.Fatalf("default Start: %v", err)
+	}
+
+	spec, err := p.TerminalAttachCommand("normal-agent")
+	if err != nil {
+		t.Fatalf("TerminalAttachCommand: %v", err)
+	}
+	if spec.Path != "default-attach" {
+		t.Fatalf("Path = %q, want default-attach", spec.Path)
+	}
+}
+
+func TestTerminalAttachCommandUnsupportedForACPSession(t *testing.T) {
+	defaultSP := &terminalProvider{Fake: runtime.NewFake(), label: "default"}
+	acpSP := runtime.NewFake()
+	p := New(defaultSP, acpSP)
+	p.RouteACP("headless-agent")
+
+	_, err := p.TerminalAttachCommand("headless-agent")
+	if !errors.Is(err, runtime.ErrInteractionUnsupported) {
+		t.Fatalf("TerminalAttachCommand error = %v, want ErrInteractionUnsupported", err)
+	}
+}
+
 func TestListRunningMergesBothBackends(t *testing.T) {
 	defaultSP := runtime.NewFake()
 	acpSP := runtime.NewFake()

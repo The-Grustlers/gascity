@@ -193,6 +193,22 @@ type Provider interface {
 	Capabilities() ProviderCapabilities
 }
 
+// TerminalCommandSpec describes an external command used to bridge a live
+// provider session to an interactive terminal client.
+type TerminalCommandSpec struct {
+	Path string
+	Args []string
+	Env  []string
+}
+
+// TerminalAttachSpecProvider is an optional extension for providers that can
+// expose a real terminal attachment command for browser-based websocket
+// bridges.
+type TerminalAttachSpecProvider interface {
+	TerminalAttachCommand(name string) (TerminalCommandSpec, error)
+	TerminalResizeCommand(name string, cols, rows int) (TerminalCommandSpec, error)
+}
+
 // PendingInteraction describes a blocking interaction raised by a session.
 // This is an optional capability exposed by providers that support
 // structured approvals, questions, or other turn-blocking prompts.
