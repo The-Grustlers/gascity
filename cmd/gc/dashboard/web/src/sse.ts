@@ -312,6 +312,7 @@ export function connectAgentOutput(
   city: string,
   sessionID: string,
   onEvent: (msg: AgentOutputMessage) => void,
+  options: { format?: "conversation" | "raw" } = {},
 ): SSEHandle {
   const controller = new AbortController();
   (async () => {
@@ -319,6 +320,7 @@ export function connectAgentOutput(
       const { stream } = await streamSession({
         client,
         path: { cityName: city, id: sessionID },
+        query: options.format ? { format: options.format } : undefined,
         signal: controller.signal,
         onSseEvent: (frame) => {
           // Session frames carry heterogeneous typed payloads per
