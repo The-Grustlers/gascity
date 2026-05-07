@@ -138,10 +138,11 @@ type SupervisorCityUnregisterOutput struct {
 
 // SupervisorEventListInput is the input for GET /v0/events (supervisor scope).
 type SupervisorEventListInput struct {
-	Type  string `query:"type" required:"false" doc:"Filter by event type."`
-	Actor string `query:"actor" required:"false" doc:"Filter by actor."`
-	Since string `query:"since" required:"false" doc:"Filter to events within the last Go duration (e.g. \"5m\")."`
-	Limit int    `query:"limit" minimum:"0" required:"false" doc:"Maximum number of trailing events to return. 0 = no limit. Used by 'gc events --seq' to compute the head cursor cheaply."`
+	Type     string `query:"type" required:"false" doc:"Filter by event type."`
+	Actor    string `query:"actor" required:"false" doc:"Filter by actor."`
+	Since    string `query:"since" required:"false" doc:"Filter to events within the last Go duration (e.g. \"5m\")."`
+	AfterSeq string `query:"after_seq" required:"false" doc:"Only return per-city events with seq greater than this cursor."`
+	Limit    int    `query:"limit" minimum:"0" required:"false" doc:"Maximum number of trailing events to return. 0 = no limit. Used by 'gc events --seq' to compute the head cursor cheaply."`
 }
 
 // SupervisorEventListOutput is the response for GET /v0/events (supervisor scope).
@@ -461,6 +462,11 @@ func (sm *SupervisorMux) humaHandleEventList(_ context.Context, input *Superviso
 		return nil, err
 	} else if ok {
 		filter.Since = time.Now().Add(-d)
+	}
+	if afterSeq, ok, err := parseEventAfterSeq(input.AfterSeq); err != nil {
+		return nil, err
+	} else if ok {
+		filter.AfterSeq = afterSeq
 	}
 	evts, err := mux.ListAll(filter)
 	if err != nil {

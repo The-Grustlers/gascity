@@ -6031,6 +6031,10 @@ export type GetV0CityByCityNameEventsData = {
          * Filter events since duration ago (Go duration string, e.g. 5m).
          */
         since?: string;
+        /**
+         * Only return events with seq greater than this cursor.
+         */
+        after_seq?: string;
     };
     url: '/v0/city/{cityName}/events';
 };
@@ -9913,6 +9917,10 @@ export type GetV0EventsData = {
          * Filter to events within the last Go duration (e.g. "5m").
          */
         since?: string;
+        /**
+         * Only return per-city events with seq greater than this cursor.
+         */
+        after_seq?: string;
         /**
          * Maximum number of trailing events to return. 0 = no limit. Used by 'gc events --seq' to compute the head cursor cheaply.
          */

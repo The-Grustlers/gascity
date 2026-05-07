@@ -75,6 +75,50 @@ func TestEventListRejectsInvalidSince(t *testing.T) {
 	}
 }
 
+func TestEventListFilterByAfterSeq(t *testing.T) {
+	state := newFakeState(t)
+	ep := state.eventProv.(*events.Fake)
+	for _, subject := range []string{"gc-1", "gc-2", "gc-3", "gc-4", "gc-5"} {
+		ep.Record(events.Event{Type: events.BeadUpdated, Actor: "human", Subject: subject})
+	}
+	h := newTestCityHandler(t, state)
+
+	req := httptest.NewRequest("GET", cityURL(state, "/events?after_seq=3&limit=50"), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var resp struct {
+		Items []events.Event `json:"items"`
+		Total int            `json:"total"`
+	}
+	json.NewDecoder(rec.Body).Decode(&resp) //nolint:errcheck
+	if resp.Total != 2 {
+		t.Fatalf("Total = %d, want 2", resp.Total)
+	}
+	if got := []uint64{resp.Items[0].Seq, resp.Items[1].Seq}; got[0] != 4 || got[1] != 5 {
+		t.Fatalf("seqs = %v, want [4 5]", got)
+	}
+}
+
+func TestEventListRejectsInvalidAfterSeq(t *testing.T) {
+	state := newFakeState(t)
+	h := newTestCityHandler(t, state)
+
+	req := httptest.NewRequest("GET", cityURL(state, "/events?after_seq=nope"), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "invalid after_seq") {
+		t.Fatalf("body = %q, want invalid after_seq", rec.Body.String())
+	}
+}
+
 func TestEventStream(t *testing.T) {
 	state := newFakeState(t)
 	ep := state.eventProv.(*events.Fake)

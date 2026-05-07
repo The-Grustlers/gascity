@@ -15,9 +15,10 @@ type EventListInput struct {
 	CityScope
 	BlockingParam
 	PaginationParam
-	Type  string `query:"type" required:"false" doc:"Filter by event type."`
-	Actor string `query:"actor" required:"false" doc:"Filter by actor."`
-	Since string `query:"since" required:"false" doc:"Filter events since duration ago (Go duration string, e.g. 5m)."`
+	Type     string `query:"type" required:"false" doc:"Filter by event type."`
+	Actor    string `query:"actor" required:"false" doc:"Filter by actor."`
+	Since    string `query:"since" required:"false" doc:"Filter events since duration ago (Go duration string, e.g. 5m)."`
+	AfterSeq string `query:"after_seq" required:"false" doc:"Only return events with seq greater than this cursor."`
 }
 
 // EventEmitRequest is the request body for POST /v0/city/{cityName}/events.

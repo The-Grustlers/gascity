@@ -4025,6 +4025,9 @@ type GetV0CityByCityNameEventsParams struct {
 
 	// Since Filter events since duration ago (Go duration string, e.g. 5m).
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
+
+	// AfterSeq Only return events with seq greater than this cursor.
+	AfterSeq *string `form:"after_seq,omitempty" json:"after_seq,omitempty"`
 }
 
 // EmitEventParams defines parameters for EmitEvent.
@@ -4649,6 +4652,9 @@ type GetV0EventsParams struct {
 
 	// Since Filter to events within the last Go duration (e.g. "5m").
 	Since *string `form:"since,omitempty" json:"since,omitempty"`
+
+	// AfterSeq Only return per-city events with seq greater than this cursor.
+	AfterSeq *string `form:"after_seq,omitempty" json:"after_seq,omitempty"`
 
 	// Limit Maximum number of trailing events to return. 0 = no limit. Used by 'gc events --seq' to compute the head cursor cheaply.
 	Limit *int64 `form:"limit,omitempty" json:"limit,omitempty"`
@@ -13271,6 +13277,22 @@ func NewGetV0CityByCityNameEventsRequest(server string, cityName string, params 
 
 		}
 
+		if params.AfterSeq != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", false, "after_seq", *params.AfterSeq, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
 		queryURL.RawQuery = queryValues.Encode()
 	}
 
@@ -19432,6 +19454,22 @@ func NewGetV0EventsRequest(server string, params *GetV0EventsParams) (*http.Requ
 		if params.Since != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", false, "since", *params.Since, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+				return nil, err
+			} else {
+				for k, v := range parsed {
+					for _, v2 := range v {
+						queryValues.Add(k, v2)
+					}
+				}
+			}
+
+		}
+
+		if params.AfterSeq != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", false, "after_seq", *params.AfterSeq, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
 				return nil, err
 			} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
 				return nil, err

@@ -33,6 +33,8 @@ export interface ActivityEntry {
 type DashboardEventRecord = CityEventRecord | SupervisorEventRecord | CityEventStreamEnvelope | SupervisorEventStreamEnvelope;
 
 const MAX_ENTRIES = 150;
+const HISTORY_LIMIT = 100;
+const HISTORY_TAIL_WINDOW = 50;
 const entries: ActivityEntry[] = [];
 let handle: SSEHandle | null = null;
 let categoryFilter = "all";
@@ -50,15 +52,28 @@ export async function loadActivityHistory(): Promise<void> {
   const city = cityScope();
   const res = city
     ? await api.GET("/v0/city/{cityName}/events", {
-        params: { path: { cityName: city }, query: { since: "1h", limit: 100 } },
+        params: { path: { cityName: city }, query: { since: "1h", limit: HISTORY_LIMIT } },
       })
     : await api.GET("/v0/events", {
         params: { query: { since: "1h" } },
       });
-  const normalized = (res.data?.items ?? [])
+  let normalized = (res.data?.items ?? [])
     .map((item) => toEntryFromRecord(item))
     .filter((item): item is ActivityEntry => item !== null);
-  streamAfterSeq = eventIndexFromResponse(res.response) || latestSeq(normalized) || streamAfterSeq;
+  let streamCursor = eventIndexFromResponse(res.response) || latestSeq(normalized) || streamAfterSeq;
+
+  if (city && streamCursor !== "" && normalized.length < HISTORY_TAIL_WINDOW) {
+    const tail = await api.GET("/v0/events", {
+      params: { query: { limit: HISTORY_TAIL_WINDOW } },
+    });
+    const tailEntries = (tail.data?.items ?? [])
+      .map((item) => toEntryFromRecord(item))
+      .filter((item): item is ActivityEntry => item !== null && item.scope === city);
+    normalized = normalizeEntries([...normalized, ...tailEntries]);
+    streamCursor = maxSeqString(streamCursor, latestSeq(tailEntries));
+  }
+
+  streamAfterSeq = streamCursor || streamAfterSeq;
   await seedActivity(normalized);
 }
 
@@ -278,6 +293,14 @@ function eventIndexFromResponse(response: Response | undefined): string {
 function latestSeq(nextEntries: ActivityEntry[]): string {
   const latest = nextEntries.reduce((max, entry) => Math.max(max, entry.seq), 0);
   return latest > 0 ? String(latest) : "";
+}
+
+function maxSeqString(...seqs: string[]): string {
+  const max = seqs.reduce((current, seq) => {
+    const value = Number.parseInt(seq, 10);
+    return Number.isFinite(value) ? Math.max(current, value) : current;
+  }, 0);
+  return max > 0 ? String(max) : "";
 }
 
 function compareEntries(a: ActivityEntry, b: ActivityEntry): number {

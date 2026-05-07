@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,11 @@ func (s *Server) humaHandleEventList(ctx context.Context, input *EventListInput)
 		return nil, err
 	} else if ok {
 		filter.Since = time.Now().Add(-d)
+	}
+	if afterSeq, ok, err := parseEventAfterSeq(input.AfterSeq); err != nil {
+		return nil, err
+	} else if ok {
+		filter.AfterSeq = afterSeq
 	}
 
 	evts, err := ep.List(filter)
@@ -98,6 +104,18 @@ func parseEventSince(value string) (time.Duration, bool, error) {
 		return 0, false, huma.Error400BadRequest("invalid since duration: " + err.Error())
 	}
 	return d, true, nil
+}
+
+func parseEventAfterSeq(value string) (uint64, bool, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false, nil
+	}
+	seq, err := strconv.ParseUint(value, 10, 64)
+	if err != nil {
+		return 0, false, huma.Error400BadRequest("invalid after_seq: " + err.Error())
+	}
+	return seq, true, nil
 }
 
 // humaHandleEventEmit is the Huma-typed handler for POST /v0/events.

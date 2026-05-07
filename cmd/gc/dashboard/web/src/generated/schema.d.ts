@@ -7394,6 +7394,8 @@ export interface operations {
                 actor?: string;
                 /** @description Filter events since duration ago (Go duration string, e.g. 5m). */
                 since?: string;
+                /** @description Only return events with seq greater than this cursor. */
+                after_seq?: string;
             };
             header?: never;
             path: {
@@ -11373,6 +11375,8 @@ export interface operations {
                 actor?: string;
                 /** @description Filter to events within the last Go duration (e.g. "5m"). */
                 since?: string;
+                /** @description Only return per-city events with seq greater than this cursor. */
+                after_seq?: string;
                 /** @description Maximum number of trailing events to return. 0 = no limit. Used by 'gc events --seq' to compute the head cursor cheaply. */
                 limit?: number;
             };
