@@ -18,6 +18,9 @@
           <button class="cmd-btn" id="open-palette-btn">
             <span>⌘</span> Commands <kbd>⌘K</kbd>
           </button>
+          <button class="cmd-btn" id="toggle-terminal-wall-btn" disabled>
+            Terminal View
+          </button>
           <span class="refresh-info" id="refresh-info">
             <span id="connection-status">Connecting...</span>
           </span>
@@ -146,6 +149,21 @@
             <div class="empty-state" id="crew-empty" style="display: none;">
               <p>No crew configured</p>
             </div>
+          </div>
+        </div>
+
+        <div class="panel panel-full" id="terminal-wall-panel" style="display: none;">
+          <div class="panel-header">
+            <h2>Terminal View</h2>
+            <span class="count" id="terminal-wall-count">0</span>
+            <button class="log-drawer-btn" id="terminal-wall-refresh-btn">Refresh</button>
+            <button class="log-drawer-close-btn" id="terminal-wall-close-btn">Close</button>
+          </div>
+          <div class="panel-body terminal-wall-body">
+            <div class="terminal-wall-toolbar">
+              <span id="terminal-wall-status">No session streams attached.</span>
+            </div>
+            <div id="terminal-wall-grid" class="terminal-wall-grid"></div>
           </div>
         </div>
 

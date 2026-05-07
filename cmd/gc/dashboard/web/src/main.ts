@@ -2,6 +2,12 @@ import { cityScope } from "./api";
 import { renderCityTabs } from "./panels/cities";
 import { renderStatus } from "./panels/status";
 import { renderCrew, installCrewInteractions, closeLogDrawerExternal } from "./panels/crew";
+import {
+  closeTerminalWallExternal,
+  installTerminalWallInteractions,
+  renderTerminalWall,
+  syncTerminalWallControl,
+} from "./panels/terminal_wall";
 import { renderIssues, installIssueInteractions } from "./panels/issues";
 import { renderMail, installMailInteractions } from "./panels/mail";
 import { renderConvoys, installConvoyInteractions } from "./panels/convoys";
@@ -35,6 +41,7 @@ const CITY_SCOPED_PANEL_IDS = [
   "beads-panel",
   "assigned-panel",
   "agent-log-drawer",
+  "terminal-wall-panel",
 ];
 
 let refreshInFlight: Promise<void> | null = null;
@@ -114,6 +121,7 @@ function installInteractions(): void {
   installPanelAffordances();
   installSharedModals();
   installCrewInteractions();
+  installTerminalWallInteractions();
   installIssueInteractions();
   installMailInteractions();
   installConvoyInteractions();
@@ -150,6 +158,7 @@ function syncCityScopedControls(): void {
   setControlState("new-issue-btn", hasCity, "Select a city to create a bead");
   setControlState("compose-mail-btn", hasCity, "Select a city to compose mail");
   setControlState("open-assign-btn", hasCity, "Select a city to assign work");
+  syncTerminalWallControl(hasCity);
 }
 
 function setControlState(id: string, enabled: boolean, disabledTitle: string): void {
@@ -177,6 +186,7 @@ function installCityScopeNavigation(): void {
     // Same rationale as navigateCityScope: tear down city-owned
     // subviews before we leave the current scope.
     closeLogDrawerExternal();
+    closeTerminalWallExternal();
     syncCityScopeFromLocation();
     invalidateAll();
     void refreshVisibleResources().catch((error) => reportUIError("Refresh failed", error));
@@ -193,6 +203,7 @@ async function navigateCityScope(nextURL: string): Promise<void> {
   // this a drawer open at click time keeps its stream alive into the
   // next scope and pauseCount stays > 0 → every refresh is skipped.
   closeLogDrawerExternal();
+  closeTerminalWallExternal();
   window.history.pushState({}, "", nextURL);
   syncCityScopeFromLocation();
   invalidateAll();
@@ -258,7 +269,10 @@ async function runRefreshVisibleResources(force = false): Promise<void> {
   // which cascades into a console full of errors for the user. Let
   // renderStatus surface the "city not running" banner instead.
   if (hasRunningCity) {
-    queueRefresh(tasks, dirty, "crew", () => renderCrew());
+    queueRefresh(tasks, dirty, "crew", async () => {
+      await renderCrew();
+      await renderTerminalWall();
+    });
     queueRefresh(tasks, dirty, "issues", () => renderIssues());
     queueRefresh(tasks, dirty, "mail", () => renderMail());
     queueRefresh(tasks, dirty, "convoys", () => renderConvoys());
