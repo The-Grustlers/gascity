@@ -41,9 +41,11 @@ func (s *Server) humaHandleAgentList(ctx context.Context, input *AgentListInput)
 
 	var agents []agentResponse
 	for _, a := range cfg.Agents {
-		expanded := expandAgent(a, cityName, sessTmpl, sp)
+		var expanded []expandedAgent
 		if sessionSnapshot.readModel {
 			expanded = expandAgentFromSessionSnapshot(a, cityName, sessTmpl, sessionSnapshot)
+		} else {
+			expanded = expandAgent(a, cityName, sessTmpl, sp)
 		}
 		for _, ea := range expanded {
 			if input.Rig != "" && ea.rig != input.Rig {

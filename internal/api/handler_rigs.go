@@ -42,9 +42,11 @@ func (s *Server) buildRigResponse(cfg *config.City, rig config.Rig, sp runtime.P
 		if workdirutil.ConfiguredRigName(cityPath, a, cfg.Rigs) != rig.Name {
 			continue
 		}
-		expanded := expandAgent(a, cityName, tmpl, sp)
+		var expanded []expandedAgent
 		if snapshot.readModel {
 			expanded = expandAgentFromSessionSnapshot(a, cityName, tmpl, snapshot)
+		} else {
+			expanded = expandAgent(a, cityName, tmpl, sp)
 		}
 		for _, ea := range expanded {
 			agentCount++
@@ -93,9 +95,11 @@ func (s *Server) rigSuspended(cfg *config.City, rig config.Rig, sp runtime.Provi
 		if workdirutil.ConfiguredRigName(cityPath, a, cfg.Rigs) != rig.Name {
 			continue
 		}
-		expanded := expandAgent(a, cityName, tmpl, sp)
+		var expanded []expandedAgent
 		if snapshot.readModel {
 			expanded = expandAgentFromSessionSnapshot(a, cityName, tmpl, snapshot)
+		} else {
+			expanded = expandAgent(a, cityName, tmpl, sp)
 		}
 		for _, ea := range expanded {
 			agentCount++

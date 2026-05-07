@@ -91,6 +91,55 @@ func TestAgentListDoesNotBlockOnColdCachedActiveBeadReadModel(t *testing.T) {
 	}
 }
 
+type panicListRunningProvider struct {
+	*runtime.Fake
+}
+
+func (p *panicListRunningProvider) ListRunning(prefix string) ([]string, error) {
+	panic("ListRunning should not be called when the session read model is available")
+}
+
+type overrideSessionProviderState struct {
+	*fakeState
+	provider runtime.Provider
+}
+
+func (s *overrideSessionProviderState) SessionProvider() runtime.Provider {
+	return s.provider
+}
+
+func TestOverviewReadModelDoesNotDiscoverUnlimitedPoolsLive(t *testing.T) {
+	state := newFakeState(t)
+	state.cfg.Agents = []config.Agent{
+		{
+			Name:              "web-worker",
+			Dir:               "myrig",
+			Provider:          "test-agent",
+			MaxActiveSessions: intPtr(-1),
+		},
+	}
+	state.cityBeadStore = &coldCachedListStoreForStatusTest{MemStore: beads.NewMemStore()}
+
+	wrappedState := &overrideSessionProviderState{
+		fakeState: state,
+		provider:  &panicListRunningProvider{Fake: state.sp},
+	}
+	srv := New(wrappedState)
+	h := newTestCityHandlerWith(t, wrappedState, srv)
+
+	for _, path := range []string{"/agents", "/rigs"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest("GET", cityURL(state, path), nil)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("GET %s status = %d, want %d; body=%s", path, rec.Code, http.StatusOK, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestAgentListPoolExpansion(t *testing.T) {
 	state := newFakeState(t)
 	state.cfg.Agents = []config.Agent{
