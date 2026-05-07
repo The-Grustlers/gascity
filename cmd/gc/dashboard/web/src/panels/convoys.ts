@@ -40,7 +40,7 @@ export async function renderConvoys(): Promise<void> {
   for (const convoy of listR.data.items) {
     rows.push(await buildConvoyRow(city, convoy.id ?? ""));
   }
-  const filtered = rows.filter((row): row is ConvoyRow => row !== null);
+  const filtered = rows.filter((row): row is ConvoyRow => row !== null).sort(compareConvoyRows);
   byId("convoy-count")!.textContent = String(filtered.length);
 
   clear(container);
@@ -163,6 +163,27 @@ function convoyState(row: ConvoyRow): string {
   if (row.inProgress > 0) return "active";
   if (row.ready > 0) return "waiting";
   return row.status ?? "open";
+}
+
+function compareConvoyRows(a: ConvoyRow, b: ConvoyRow): number {
+  const stateDelta = convoyStateRank(a) - convoyStateRank(b);
+  if (stateDelta !== 0) return stateDelta;
+  return a.id.localeCompare(b.id);
+}
+
+function convoyStateRank(row: ConvoyRow): number {
+  switch (convoyState(row)) {
+    case "active":
+      return 0;
+    case "waiting":
+      return 1;
+    case "open":
+      return 2;
+    case "done":
+      return 4;
+    default:
+      return 3;
+  }
 }
 
 function convoyLabel(row: ConvoyRow): string {

@@ -19,12 +19,11 @@ export async function renderStatus(): Promise<void> {
     await renderSupervisorStatus(banner);
     return;
   }
-  renderCityScopeBannerIdle();
 
   const [statusR, sessionsR, beadsR, convoysR] = await Promise.all([
     api.GET("/v0/city/{cityName}/status", { params: { path: { cityName: city } } }),
     api.GET("/v0/city/{cityName}/sessions", {
-      params: { path: { cityName: city }, query: { state: "active", peek: true } },
+      params: { path: { cityName: city }, query: { peek: true } },
     }),
     api.GET("/v0/city/{cityName}/beads", {
       params: { path: { cityName: city }, query: { status: "open", limit: 500 } },
@@ -171,18 +170,6 @@ function renderCityScopeBanner(city: string, sessions: SessionSummary[]): void {
     scopeStat("Activity", overseer.last_active ? formatTimestamp(overseer.last_active) : "Unknown", active ? "active" : "idle"),
     scopeStat("State", overseer.running ? "Running" : "Stopped"),
   );
-}
-
-function renderCityScopeBannerIdle(): void {
-  const banner = byId("scope-banner");
-  const badge = byId("scope-badge");
-  const status = byId("scope-status");
-  if (!banner || !badge || !status) return;
-  banner.classList.remove("attached");
-  banner.classList.add("detached");
-  badge.className = "badge badge-muted";
-  badge.textContent = "Idle";
-  clear(status);
 }
 
 function renderCityScopeBannerFleet(): void {
