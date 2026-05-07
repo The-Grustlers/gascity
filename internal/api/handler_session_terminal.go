@@ -41,6 +41,39 @@ type terminalWebSocketWriter struct {
 var sessionTerminalUpgrader = websocket.Upgrader{
 	ReadBufferSize:  8192,
 	WriteBufferSize: 8192,
+	CheckOrigin:     checkSessionTerminalOrigin,
+}
+
+func checkSessionTerminalOrigin(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	originHost := strings.TrimSpace(parsed.Host)
+	if originHost == "" {
+		return false
+	}
+	if equalHost(originHost, r.Host) {
+		return true
+	}
+	for _, forwardedHost := range r.Header.Values("X-Forwarded-Host") {
+		for _, host := range strings.Split(forwardedHost, ",") {
+			if equalHost(originHost, strings.TrimSpace(host)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func equalHost(a, b string) bool {
+	a = strings.TrimSpace(strings.ToLower(a))
+	b = strings.TrimSpace(strings.ToLower(b))
+	return a != "" && b != "" && a == b
 }
 
 func parseCitySessionTerminalPath(path string) (string, string, bool) {

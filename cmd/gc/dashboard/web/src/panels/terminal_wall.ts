@@ -16,6 +16,7 @@ type TerminalPane = {
   sessionID: string;
   socket: WebSocket;
   status: HTMLElement;
+  terminalError: boolean;
   term: Terminal;
 };
 
@@ -168,6 +169,7 @@ function createPane(city: string, session: SessionRecord): TerminalPane {
     sessionID: session.id,
     socket,
     status,
+    terminalError: false,
     term,
   };
   pane.inputDisposable = term.onData((data) => {
@@ -183,9 +185,11 @@ function createPane(city: string, session: SessionRecord): TerminalPane {
   });
   socket.addEventListener("close", () => {
     if (!panes.has(pane.sessionID)) return;
+    if (pane.terminalError) return;
     setPaneStatus(pane, "Closed", "badge-muted");
   });
   socket.addEventListener("error", (event) => {
+    pane.terminalError = true;
     setPaneStatus(pane, "Error", "badge-red");
     reportUIError("Terminal websocket error", event);
   });
@@ -252,6 +256,7 @@ function handleTerminalControl(pane: TerminalPane, frame: TerminalControlFrame):
     return;
   }
   if (frame.type === "error") {
+    pane.terminalError = true;
     setPaneStatus(pane, "Error", "badge-red");
     const detail = typeof frame.data === "string" ? frame.data : "terminal error";
     pane.term.writeln(`\x1b[31m${detail}\x1b[0m`);
