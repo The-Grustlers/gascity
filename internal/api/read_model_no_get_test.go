@@ -10,6 +10,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/runtime"
+	"github.com/gastownhall/gascity/internal/session"
 )
 
 type getCountingStore struct {
@@ -65,7 +66,20 @@ func TestSessionListDoesNotProbePendingInteractions(t *testing.T) {
 
 func TestRigListUsesProviderStateWithoutSessionStoreGet(t *testing.T) {
 	state := newFakeState(t)
-	counting := &getCountingStore{Store: beads.NewMemStore()}
+	store := beads.NewMemStore()
+	if _, err := store.Create(beads.Bead{
+		Type:   session.BeadType,
+		Status: "open",
+		Labels: []string{session.LabelSession},
+		Metadata: map[string]string{
+			"state":        string(session.StateActive),
+			"template":     "myrig/worker",
+			"session_name": "myrig--worker",
+		},
+	}); err != nil {
+		t.Fatalf("create session bead: %v", err)
+	}
+	counting := &getCountingStore{Store: store}
 	state.cityBeadStore = counting
 	if err := state.sp.Start(context.Background(), "myrig--worker", runtime.Config{}); err != nil {
 		t.Fatalf("start provider session: %v", err)

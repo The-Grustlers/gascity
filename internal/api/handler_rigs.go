@@ -9,6 +9,7 @@ import (
 	"github.com/gastownhall/gascity/internal/config"
 	gitpkg "github.com/gastownhall/gascity/internal/git"
 	"github.com/gastownhall/gascity/internal/runtime"
+	"github.com/gastownhall/gascity/internal/session"
 	workdirutil "github.com/gastownhall/gascity/internal/workdir"
 )
 
@@ -32,7 +33,7 @@ type gitStatus struct {
 }
 
 // buildRigResponse creates a rigResponse with agent counts and last activity.
-func (s *Server) buildRigResponse(cfg *config.City, rig config.Rig, sp runtime.Provider, cityName, cityPath string) rigResponse {
+func (s *Server) buildRigResponse(cfg *config.City, rig config.Rig, sp runtime.Provider, cityName, cityPath string, snapshot statusSessionSnapshot) rigResponse {
 	tmpl := cfg.Workspace.SessionTemplate
 	var agentCount, runningCount int
 	var maxActivity time.Time
@@ -42,15 +43,25 @@ func (s *Server) buildRigResponse(cfg *config.City, rig config.Rig, sp runtime.P
 			continue
 		}
 		expanded := expandAgent(a, cityName, tmpl, sp)
+		if snapshot.readModel {
+			expanded = expandAgentFromSessionSnapshot(a, cityName, tmpl, snapshot)
+		}
 		for _, ea := range expanded {
 			agentCount++
 			sessionName := agent.SessionNameFor(cityName, ea.qualifiedName, tmpl)
-			obs := observeProviderSession(sp, sessionName, nil)
-			if obs.Running {
-				runningCount++
-			}
-			if obs.LastActivity != nil && obs.LastActivity.After(maxActivity) {
-				maxActivity = *obs.LastActivity
+			if snapshot.readModel {
+				info, ok := snapshot.bySessionName[sessionName]
+				if ok && statusSessionRuntimeActive(info.state) {
+					runningCount++
+				}
+			} else {
+				obs := observeProviderSession(sp, sessionName, nil)
+				if obs.Running {
+					runningCount++
+				}
+				if obs.LastActivity != nil && obs.LastActivity.After(maxActivity) {
+					maxActivity = *obs.LastActivity
+				}
 			}
 		}
 	}
@@ -58,7 +69,7 @@ func (s *Server) buildRigResponse(cfg *config.City, rig config.Rig, sp runtime.P
 	resp := rigResponse{
 		Name:         rig.Name,
 		Path:         rig.Path,
-		Suspended:    s.rigSuspended(cfg, rig, sp, cityName, cityPath),
+		Suspended:    s.rigSuspended(cfg, rig, sp, cityName, cityPath, snapshot),
 		Prefix:       rig.Prefix,
 		AgentCount:   agentCount,
 		RunningCount: runningCount,
@@ -72,7 +83,7 @@ func (s *Server) buildRigResponse(cfg *config.City, rig config.Rig, sp runtime.P
 // rigSuspended computes effective suspended state for a rig by merging config
 // and runtime session metadata. A rig is suspended if the config says so, or
 // if all its agents are runtime-suspended via session metadata.
-func (s *Server) rigSuspended(cfg *config.City, rig config.Rig, sp runtime.Provider, cityName, cityPath string) bool {
+func (s *Server) rigSuspended(cfg *config.City, rig config.Rig, sp runtime.Provider, cityName, cityPath string, snapshot statusSessionSnapshot) bool {
 	if rig.Suspended {
 		return true
 	}
@@ -83,9 +94,19 @@ func (s *Server) rigSuspended(cfg *config.City, rig config.Rig, sp runtime.Provi
 			continue
 		}
 		expanded := expandAgent(a, cityName, tmpl, sp)
+		if snapshot.readModel {
+			expanded = expandAgentFromSessionSnapshot(a, cityName, tmpl, snapshot)
+		}
 		for _, ea := range expanded {
 			agentCount++
 			sessionName := agent.SessionNameFor(cityName, ea.qualifiedName, tmpl)
+			if snapshot.readModel {
+				info, ok := snapshot.bySessionName[sessionName]
+				if ok && info.state == session.StateSuspended {
+					suspendedCount++
+				}
+				continue
+			}
 			obs := observeProviderSession(sp, sessionName, nil)
 			if obs.Suspended {
 				suspendedCount++

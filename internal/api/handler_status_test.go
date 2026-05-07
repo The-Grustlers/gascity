@@ -190,8 +190,8 @@ func TestHandleStatusUsesCachedSessionStateForSuspendedAgents(t *testing.T) {
 	if resp.Agents.Running != 0 {
 		t.Fatalf("Agents.Running = %d, want 0 for suspended session", resp.Agents.Running)
 	}
-	if resp.Running != 1 {
-		t.Fatalf("Running = %d, want raw liveness count 1", resp.Running)
+	if resp.Running != 0 {
+		t.Fatalf("Running = %d, want read-model liveness count 0 for suspended session", resp.Running)
 	}
 }
 
@@ -334,6 +334,18 @@ func TestHandleStatusBoundedPoolUsesCachedSessionState(t *testing.T) {
 	}
 	if err := state.sp.Start(context.Background(), "myrig--worker-1", runtime.Config{}); err != nil {
 		t.Fatalf("Start: %v", err)
+	}
+	if _, err := store.Create(beads.Bead{
+		Type:   session.BeadType,
+		Status: "open",
+		Labels: []string{session.LabelSession},
+		Metadata: map[string]string{
+			"state":        string(session.StateActive),
+			"template":     "myrig/worker",
+			"session_name": "myrig--worker-1",
+		},
+	}); err != nil {
+		t.Fatalf("Create active pool session bead: %v", err)
 	}
 	h := newTestCityHandler(t, state)
 

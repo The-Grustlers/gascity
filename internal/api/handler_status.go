@@ -69,7 +69,10 @@ func (s *Server) buildStatusBody() StatusBody {
 			if rigName != "" {
 				rigAgentCounts[rigName]++
 			}
-			running := statusProviderRunning(sp, slot.sessionName)
+			running := slot.running
+			if !sessionSnapshot.readModel {
+				running = statusProviderRunning(sp, slot.sessionName)
+			}
 			if running {
 				rawRunning++
 			}
@@ -178,17 +181,23 @@ func listStatusWorkBeadsForReadModel(store beads.Store) ([]beads.Bead, error) {
 type statusSessionSnapshot struct {
 	bySessionName map[string]statusSessionInfo
 	byTemplate    map[string][]statusSessionInfo
+	readModel     bool
 }
 
 type statusSessionInfo struct {
+	id          string
 	sessionName string
 	template    string
 	state       session.State
 }
 
 type statusAgentSlot struct {
-	sessionName string
-	suspended   bool
+	qualifiedName string
+	sessionName   string
+	sessionID     string
+	running       bool
+	suspended     bool
+	hasSession    bool
 }
 
 func (s *Server) statusSessionSnapshot() statusSessionSnapshot {
@@ -202,12 +211,15 @@ func (s *Server) statusSessionSnapshot() statusSessionSnapshot {
 	}
 
 	rows, cacheAware := listCachedSessionBeadsForReadModel(store)
-	if !cacheAware {
+	if cacheAware {
+		snapshot.readModel = true
+	} else {
 		var err error
 		rows, err = listSessionBeadsForReadModel(store)
 		if err != nil {
 			return snapshot
 		}
+		snapshot.readModel = true
 	}
 
 	seenSessionName := make(map[string]bool, len(rows))
@@ -216,6 +228,7 @@ func (s *Server) statusSessionSnapshot() statusSessionSnapshot {
 			continue
 		}
 		info := statusSessionInfo{
+			id:          strings.TrimSpace(b.ID),
 			sessionName: strings.TrimSpace(b.Metadata["session_name"]),
 			template:    strings.TrimSpace(b.Metadata["template"]),
 			state:       statusSessionState(b),
@@ -257,20 +270,33 @@ func statusAgentSlots(a config.Agent, cityName, sessTmpl string, snapshot status
 		sessions := snapshot.byTemplate[a.QualifiedName()]
 		slots := make([]statusAgentSlot, 0, len(sessions))
 		for _, info := range sessions {
+			qualifiedName := qualifiedNameFromSessionName(cityName, sessTmpl, info.sessionName)
+			if qualifiedName == "" {
+				qualifiedName = a.QualifiedName()
+			}
 			slots = append(slots, statusAgentSlot{
-				sessionName: info.sessionName,
-				suspended:   info.state == session.StateSuspended,
+				qualifiedName: qualifiedName,
+				sessionName:   info.sessionName,
+				sessionID:     info.id,
+				running:       statusSessionRuntimeActive(info.state),
+				suspended:     info.state == session.StateSuspended,
+				hasSession:    true,
 			})
 		}
 		return slots
 	}
 
 	if !isMultiSession {
+		qualifiedName := a.QualifiedName()
 		sessionName := agentSessionName(cityName, a.QualifiedName(), sessTmpl)
 		info, ok := snapshot.bySessionName[sessionName]
 		return []statusAgentSlot{{
-			sessionName: sessionName,
-			suspended:   ok && info.state == session.StateSuspended,
+			qualifiedName: qualifiedName,
+			sessionName:   sessionName,
+			sessionID:     info.id,
+			running:       ok && statusSessionRuntimeActive(info.state),
+			suspended:     ok && info.state == session.StateSuspended,
+			hasSession:    ok,
 		}}
 	}
 
@@ -281,14 +307,28 @@ func statusAgentSlots(a config.Agent, cityName, sessTmpl string, snapshot status
 	slots := make([]statusAgentSlot, 0, poolMax)
 	for i := 1; i <= poolMax; i++ {
 		memberName := poolInstanceNameForAPI(a.Name, i, a)
-		sessionName := agentSessionName(cityName, a.QualifiedInstanceName(memberName), sessTmpl)
+		qualifiedName := a.QualifiedInstanceName(memberName)
+		sessionName := agentSessionName(cityName, qualifiedName, sessTmpl)
 		info, ok := snapshot.bySessionName[sessionName]
 		slots = append(slots, statusAgentSlot{
-			sessionName: sessionName,
-			suspended:   ok && info.state == session.StateSuspended,
+			qualifiedName: qualifiedName,
+			sessionName:   sessionName,
+			sessionID:     info.id,
+			running:       ok && statusSessionRuntimeActive(info.state),
+			suspended:     ok && info.state == session.StateSuspended,
+			hasSession:    ok,
 		})
 	}
 	return slots
+}
+
+func statusSessionRuntimeActive(state session.State) bool {
+	switch state {
+	case session.StateActive, session.StateAwake, session.StateCreating, session.StateDraining:
+		return true
+	default:
+		return false
+	}
 }
 
 func statusProviderRunning(sp interface{ IsRunning(string) bool }, sessionName string) bool {

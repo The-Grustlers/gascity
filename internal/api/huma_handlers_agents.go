@@ -8,6 +8,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/sse"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/session"
 )
 
 // humaHandleAgentList is the Huma-typed handler for GET /v0/agents.
@@ -21,6 +22,7 @@ func (s *Server) humaHandleAgentList(ctx context.Context, input *AgentListInput)
 	sp := s.state.SessionProvider()
 	cityName := s.state.CityName()
 	sessTmpl := cfg.Workspace.SessionTemplate
+	sessionSnapshot := s.statusSessionSnapshot()
 	wantPeek := input.Peek
 
 	index := s.latestIndex()
@@ -40,6 +42,9 @@ func (s *Server) humaHandleAgentList(ctx context.Context, input *AgentListInput)
 	var agents []agentResponse
 	for _, a := range cfg.Agents {
 		expanded := expandAgent(a, cityName, sessTmpl, sp)
+		if sessionSnapshot.readModel {
+			expanded = expandAgentFromSessionSnapshot(a, cityName, sessTmpl, sessionSnapshot)
+		}
 		for _, ea := range expanded {
 			if input.Rig != "" && ea.rig != input.Rig {
 				continue
@@ -49,7 +54,13 @@ func (s *Server) humaHandleAgentList(ctx context.Context, input *AgentListInput)
 			}
 
 			sessionName := agentSessionName(cityName, ea.qualifiedName, sessTmpl)
-			running := sp.IsRunning(sessionName)
+			info, hasSession := sessionSnapshot.bySessionName[sessionName]
+			running := false
+			if sessionSnapshot.readModel {
+				running = hasSession && statusSessionRuntimeActive(info.state)
+			} else {
+				running = statusProviderRunning(sp, sessionName)
+			}
 
 			if input.Running == "true" && !running {
 				continue
@@ -59,8 +70,12 @@ func (s *Server) humaHandleAgentList(ctx context.Context, input *AgentListInput)
 			}
 
 			suspended := ea.suspended
-			if v, err := sp.GetMeta(sessionName, "suspended"); err == nil && v == "true" {
-				suspended = true
+			if sessionSnapshot.readModel {
+				suspended = suspended || (hasSession && info.state == session.StateSuspended)
+			} else {
+				if v, err := sp.GetMeta(sessionName, "suspended"); err == nil && v == "true" {
+					suspended = true
+				}
 			}
 
 			provider, displayName := resolveProviderInfo(ea.provider, cfg)
@@ -94,15 +109,19 @@ func (s *Server) humaHandleAgentList(ctx context.Context, input *AgentListInput)
 			sessionID := ""
 			if running {
 				si := &sessionInfo{Name: sessionName}
-				if t, err := sp.GetLastActivity(sessionName); err == nil && !t.IsZero() {
-					si.LastActivity = &t
-					lastActivity = &t
+				if sessionSnapshot.readModel {
+					sessionID = info.id
+				} else {
+					if t, err := sp.GetLastActivity(sessionName); err == nil && !t.IsZero() {
+						si.LastActivity = &t
+						lastActivity = &t
+					}
+					si.Attached = sp.IsAttached(sessionName)
+					if id, err := sp.GetMeta(sessionName, "GC_SESSION_ID"); err == nil {
+						sessionID = strings.TrimSpace(id)
+					}
 				}
-				si.Attached = sp.IsAttached(sessionName)
 				resp.Session = si
-				if id, err := sp.GetMeta(sessionName, "GC_SESSION_ID"); err == nil {
-					sessionID = strings.TrimSpace(id)
-				}
 			}
 
 			resp.ActiveBead = s.findActiveBeadForAssignees(ea.rig, sessionID, sessionName, ea.qualifiedName)

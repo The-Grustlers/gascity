@@ -145,6 +145,75 @@ func discoverUnlimitedPool(a config.Agent, poolName, cityName, sessTmpl string, 
 	return result
 }
 
+func expandAgentFromSessionSnapshot(a config.Agent, cityName, sessTmpl string, snapshot statusSessionSnapshot) []expandedAgent {
+	maxSess := a.EffectiveMaxActiveSessions()
+	isMultiSession := maxSess == nil || *maxSess != 1
+
+	if !isMultiSession {
+		return []expandedAgent{{
+			qualifiedName: a.QualifiedName(),
+			rig:           a.Dir,
+			suspended:     a.Suspended,
+			provider:      a.Provider,
+			description:   a.Description,
+		}}
+	}
+
+	poolName := a.QualifiedName()
+	isUnlimited := maxSess == nil || *maxSess < 0
+	if isUnlimited {
+		sessions := snapshot.byTemplate[poolName]
+		result := make([]expandedAgent, 0, len(sessions))
+		for _, info := range sessions {
+			qn := qualifiedNameFromSessionName(cityName, sessTmpl, info.sessionName)
+			if qn == "" {
+				continue
+			}
+			result = append(result, expandedAgent{
+				qualifiedName: qn,
+				rig:           a.Dir,
+				pool:          poolName,
+				suspended:     a.Suspended,
+				provider:      a.Provider,
+				description:   a.Description,
+			})
+		}
+		return result
+	}
+
+	poolMax := 1
+	if maxSess != nil && *maxSess > 1 {
+		poolMax = *maxSess
+	}
+
+	result := make([]expandedAgent, 0, poolMax)
+	for i := 1; i <= poolMax; i++ {
+		memberName := poolInstanceNameForAPI(a.Name, i, a)
+		result = append(result, expandedAgent{
+			qualifiedName: a.QualifiedInstanceName(memberName),
+			rig:           a.Dir,
+			pool:          poolName,
+			suspended:     a.Suspended,
+			provider:      a.Provider,
+			description:   a.Description,
+		})
+	}
+	return result
+}
+
+func qualifiedNameFromSessionName(cityName, sessTmpl, sessionName string) string {
+	sessionName = strings.TrimSpace(sessionName)
+	if sessionName == "" {
+		return ""
+	}
+	templatePrefix := agent.SessionNameFor(cityName, "", sessTmpl)
+	qnSanitized := sessionName
+	if templatePrefix != "" && strings.HasPrefix(qnSanitized, templatePrefix) {
+		qnSanitized = qnSanitized[len(templatePrefix):]
+	}
+	return agent.UnsanitizeQualifiedNameFromSession(qnSanitized)
+}
+
 // agentSessionName converts a qualified agent name to a tmux session name
 // using the canonical naming contract from agent.SessionNameFor.
 func agentSessionName(cityName, qualifiedName, sessionTemplate string) string {
