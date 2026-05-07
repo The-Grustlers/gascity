@@ -23,6 +23,7 @@ var (
 	_ runtime.InteractionProvider           = (*Provider)(nil)
 	_ runtime.InterruptBoundaryWaitProvider = (*Provider)(nil)
 	_ runtime.InterruptedTurnResetProvider  = (*Provider)(nil)
+	_ runtime.TerminalAttachSpecProvider    = (*Provider)(nil)
 )
 
 // New creates a hybrid provider. isRemote returns true for sessions
@@ -76,6 +77,26 @@ func (p *Provider) IsAttached(name string) bool {
 // Attach delegates to the routed backend.
 func (p *Provider) Attach(name string) error {
 	return p.route(name).Attach(name)
+}
+
+// TerminalAttachCommand delegates to the routed backend when it supports
+// browser terminal attachment.
+func (p *Provider) TerminalAttachCommand(name string) (runtime.TerminalCommandSpec, error) {
+	provider, ok := p.route(name).(runtime.TerminalAttachSpecProvider)
+	if !ok {
+		return runtime.TerminalCommandSpec{}, runtime.ErrInteractionUnsupported
+	}
+	return provider.TerminalAttachCommand(name)
+}
+
+// TerminalResizeCommand delegates to the routed backend when it supports
+// browser terminal resizing.
+func (p *Provider) TerminalResizeCommand(name string, cols, rows int) (runtime.TerminalCommandSpec, error) {
+	provider, ok := p.route(name).(runtime.TerminalAttachSpecProvider)
+	if !ok {
+		return runtime.TerminalCommandSpec{}, runtime.ErrInteractionUnsupported
+	}
+	return provider.TerminalResizeCommand(name, cols, rows)
 }
 
 // ProcessAlive delegates to the routed backend.

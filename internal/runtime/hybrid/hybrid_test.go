@@ -120,6 +120,52 @@ func TestAttach_RoutesCorrectly(t *testing.T) {
 	}
 }
 
+type terminalProvider struct {
+	*runtime.Fake
+	label string
+}
+
+func (p *terminalProvider) TerminalAttachCommand(name string) (runtime.TerminalCommandSpec, error) {
+	return runtime.TerminalCommandSpec{Path: p.label + "-attach", Args: []string{name}}, nil
+}
+
+func (p *terminalProvider) TerminalResizeCommand(name string, cols, rows int) (runtime.TerminalCommandSpec, error) {
+	return runtime.TerminalCommandSpec{Path: p.label + "-resize", Args: []string{name, fmt.Sprint(cols), fmt.Sprint(rows)}}, nil
+}
+
+func TestTerminalAttachCommand_RoutesCorrectly(t *testing.T) {
+	local := &terminalProvider{Fake: runtime.NewFake(), label: "local"}
+	remote := &terminalProvider{Fake: runtime.NewFake(), label: "remote"}
+	h := New(local, remote, isRemote)
+
+	localSpec, err := h.TerminalAttachCommand("refinery")
+	if err != nil {
+		t.Fatalf("local TerminalAttachCommand: %v", err)
+	}
+	if localSpec.Path != "local-attach" {
+		t.Fatalf("local Path = %q, want local-attach", localSpec.Path)
+	}
+
+	remoteSpec, err := h.TerminalAttachCommand("polecat-1")
+	if err != nil {
+		t.Fatalf("remote TerminalAttachCommand: %v", err)
+	}
+	if remoteSpec.Path != "remote-attach" {
+		t.Fatalf("remote Path = %q, want remote-attach", remoteSpec.Path)
+	}
+}
+
+func TestTerminalAttachCommand_UnsupportedWhenBackendLacksCapability(t *testing.T) {
+	local := runtime.NewFake()
+	remote := &terminalProvider{Fake: runtime.NewFake(), label: "remote"}
+	h := New(local, remote, isRemote)
+
+	_, err := h.TerminalAttachCommand("refinery")
+	if !errors.Is(err, runtime.ErrInteractionUnsupported) {
+		t.Fatalf("TerminalAttachCommand error = %v, want ErrInteractionUnsupported", err)
+	}
+}
+
 func TestStop_RoutesCorrectly(t *testing.T) {
 	local, remote := runtime.NewFake(), runtime.NewFake()
 	h := New(local, remote, isRemote)

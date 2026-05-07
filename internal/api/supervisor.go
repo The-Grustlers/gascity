@@ -239,13 +239,34 @@ func (sm *SupervisorMux) Shutdown(ctx context.Context) error {
 
 // ServeHTTP delegates every request to humaMux. Every typed
 // operation — supervisor-scope and city-scoped — is registered on the
-// supervisor's single Huma API. The only non-Huma registration is
-// serveCitySvcProxy at "/v0/city/{cityName}/svc/" for the
-// workspace-service pass-through; Go 1.22+ mux specificity routes
-// /v0/city/{cityName}/<typed-op> requests to the matching Huma
-// operation rather than the prefix handler.
+// supervisor's single Huma API. Raw routes that do not fit Huma's HTTP
+// contract shape (websocket terminal attach and /svc/* pass-through) are
+// dispatched explicitly here or registered on humaMux.
 func (sm *SupervisorMux) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if cityName, sessionID, ok := parseCitySessionTerminalPath(r.URL.Path); ok {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "terminal attach requires GET")
+			return
+		}
+		sm.serveCitySessionTerminal(w, r, cityName, sessionID)
+		return
+	}
 	sm.humaMux.ServeHTTP(w, r)
+}
+
+// serveCitySessionTerminal resolves a city and dispatches the websocket
+// terminal attach route to that city's handler host.
+func (sm *SupervisorMux) serveCitySessionTerminal(w http.ResponseWriter, r *http.Request, cityName, sessionID string) {
+	state := sm.resolver.CityState(cityName)
+	if state == nil {
+		sm.cacheMu.Lock()
+		delete(sm.cache, cityName)
+		sm.cacheMu.Unlock()
+		problemCityNotFound.writeTo(w)
+		return
+	}
+	sm.getCityServer(cityName, state).handleSessionTerminal(w, r, sessionID)
 }
 
 // serveCityRequest resolves a city's State and dispatches to a per-city Server.

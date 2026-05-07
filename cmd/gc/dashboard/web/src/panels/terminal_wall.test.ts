@@ -1,9 +1,69 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "../api";
-import { connectAgentOutput } from "../sse";
 import { syncCityScopeFromLocation } from "../state";
 import { installTerminalWallInteractions, syncTerminalWallControl } from "./terminal_wall";
+
+type MockTerminalInstance = {
+  cols: number;
+  emitData(data: string): void;
+  rows: number;
+};
+
+type MockMessageEvent = {
+  data: unknown;
+};
+
+const mockState = vi.hoisted(() => ({
+  sockets: [] as MockWebSocket[],
+  terminals: [] as MockTerminalInstance[],
+}));
+
+class MockWebSocket {
+  static CONNECTING = 0;
+  static OPEN = 1;
+  static CLOSED = 3;
+
+  binaryType = "";
+  readyState = MockWebSocket.CONNECTING;
+  sent: string[] = [];
+
+  private listeners = new Map<string, Array<(event: Event | MockMessageEvent) => void>>();
+
+  constructor(readonly url: string) {
+    mockState.sockets.push(this);
+  }
+
+  addEventListener(type: string, listener: (event: Event | MockMessageEvent) => void): void {
+    const listeners = this.listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  close(): void {
+    this.readyState = MockWebSocket.CLOSED;
+    this.emit("close", new Event("close"));
+  }
+
+  emitMessage(data: unknown): void {
+    this.emit("message", { data });
+  }
+
+  open(): void {
+    this.readyState = MockWebSocket.OPEN;
+    this.emit("open", new Event("open"));
+  }
+
+  send(data: string): void {
+    this.sent.push(data);
+  }
+
+  private emit(type: string, event: Event | MockMessageEvent): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener(event);
+    }
+  }
+}
 
 vi.mock("@xterm/addon-fit", () => ({
   FitAddon: class {
@@ -13,11 +73,27 @@ vi.mock("@xterm/addon-fit", () => ({
 
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
+    cols = 80;
+    rows = 24;
+    private dataListener: ((data: string) => void) | null = null;
     private mount: HTMLElement | null = null;
+
+    constructor() {
+      mockState.terminals.push(this);
+    }
 
     dispose = vi.fn();
 
     loadAddon = vi.fn();
+
+    onData(listener: (data: string) => void): { dispose(): void } {
+      this.dataListener = listener;
+      return { dispose: vi.fn() };
+    }
+
+    emitData(data: string): void {
+      this.dataListener?.(data);
+    }
 
     open(mount: HTMLElement): void {
       this.mount = mount;
@@ -26,16 +102,16 @@ vi.mock("@xterm/xterm", () => ({
       mount.append(node);
     }
 
+    write(text: string): void {
+      const node = document.createElement("span");
+      node.textContent = text;
+      this.mount?.append(node);
+    }
+
     writeln(text: string): void {
-      const line = document.createElement("div");
-      line.textContent = text;
-      this.mount?.append(line);
+      this.write(`${text}\n`);
     }
   },
-}));
-
-vi.mock("../sse", () => ({
-  connectAgentOutput: vi.fn(() => ({ close: vi.fn() })),
 }));
 
 describe("terminal wall", () => {
@@ -51,7 +127,17 @@ describe("terminal wall", () => {
       </div>
     `;
     window.history.pushState({}, "", "/dashboard?city=mc-city");
+    Object.defineProperty(window, "WebSocket", {
+      configurable: true,
+      value: MockWebSocket,
+    });
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: MockWebSocket,
+    });
     syncCityScopeFromLocation();
+    mockState.sockets.length = 0;
+    mockState.terminals.length = 0;
   });
 
   afterEach(() => {
@@ -60,7 +146,7 @@ describe("terminal wall", () => {
     syncCityScopeFromLocation();
   });
 
-  it("opens xterm panes for running sessions and streams raw frames", async () => {
+  it("opens xterm panes for running sessions and connects websocket terminals", async () => {
     vi.spyOn(api, "GET").mockImplementation(async (path: string) => {
       if (path === "/v0/city/{cityName}/sessions") {
         return {
@@ -103,27 +189,22 @@ describe("terminal wall", () => {
       expect(document.getElementById("terminal-wall-panel")?.style.display).toBe("block");
       expect(document.getElementById("terminal-wall-count")?.textContent).toBe("1");
       expect(document.getElementById("terminal-wall-grid")?.textContent).toContain("Director");
+      expect(mockState.sockets).toHaveLength(1);
     });
 
-    expect(connectAgentOutput).toHaveBeenCalledWith(
-      "mc-city",
-      "s-director",
-      expect.any(Function),
-      { format: "raw" },
-    );
+    const socket = mockState.sockets[0];
+    expect(socket.url).toBe("ws://localhost:3000/v0/city/mc-city/session/s-director/terminal");
+    socket.open();
+    expect(JSON.parse(socket.sent[0] ?? "{}")).toEqual({ type: "resize", cols: 80, rows: 24 });
 
-    const onEvent = vi.mocked(connectAgentOutput).mock.calls[0]?.[2];
-    onEvent?.({
-      data: {
-        messages: [{
-          message: { content: "hello from raw stream", role: "assistant" },
-          type: "assistant",
-        }],
-      },
-      type: "message",
+    mockState.terminals[0]?.emitData("hello\n");
+    expect(socket.sent.map((frame) => JSON.parse(frame) as unknown)).toContainEqual({
+      type: "input",
+      data: "hello\n",
     });
 
-    expect(document.getElementById("terminal-wall-grid")?.textContent).toContain("hello from raw stream");
+    socket.emitMessage(new TextEncoder().encode("hello from terminal").buffer);
+    expect(document.getElementById("terminal-wall-grid")?.textContent).toContain("hello from terminal");
   });
 });
 
