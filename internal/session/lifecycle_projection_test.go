@@ -159,6 +159,29 @@ func TestProjectLifecycleDesiredStateAndBlockers(t *testing.T) {
 	}
 }
 
+func TestProjectLifecycleCreatingStalenessUsesPendingCreateStartedAt(t *testing.T) {
+	now := time.Date(2026, 5, 3, 9, 0, 0, 0, time.UTC)
+	view := ProjectLifecycle(LifecycleInput{
+		Status: "open",
+		Metadata: map[string]string{
+			"state":                     string(StateCreating),
+			"session_name":              "s-worker",
+			"pending_create_started_at": now.Add(-30 * time.Second).UTC().Format(time.RFC3339),
+		},
+		Runtime:            RuntimeFacts{Observed: true, Alive: false},
+		CreatedAt:          now.Add(-2 * time.Minute),
+		StaleCreatingAfter: time.Minute,
+		Now:                now,
+	})
+
+	if view.RuntimeProjection != RuntimeProjectionFreshCreating {
+		t.Fatalf("RuntimeProjection = %q, want %q", view.RuntimeProjection, RuntimeProjectionFreshCreating)
+	}
+	if view.ReconciledState != StateCreating {
+		t.Fatalf("ReconciledState = %q, want %q", view.ReconciledState, StateCreating)
+	}
+}
+
 func TestProjectLifecycleNamedIdentityProjection(t *testing.T) {
 	now := time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC)
 
@@ -397,7 +420,33 @@ func TestProjectLifecycleRuntimeLivenessProjection(t *testing.T) {
 			wantReset:           true,
 		},
 		{
-			name: "pending create claim keeps stale creating state in creating",
+			// Regression for #1460: a pending_create_claim left behind by a
+			// crashed creator must not protect a stale-creating bead forever.
+			// Once the lease window (StaleCreatingAfter) elapses with no live
+			// runtime, the bead heals to asleep and the claim no longer wins.
+			name: "stale creating heals to asleep even with pending_create_claim",
+			input: LifecycleInput{
+				Status: "open",
+				Metadata: map[string]string{
+					"state":                "creating",
+					"session_name":         "s-worker",
+					"session_key":          "old-provider-conversation",
+					"pending_create_claim": "true",
+				},
+				Runtime:            RuntimeFacts{Observed: true, Alive: false},
+				CreatedAt:          now.Add(-2 * time.Minute),
+				StaleCreatingAfter: time.Minute,
+				Now:                now,
+			},
+			wantRuntime:         RuntimeProjectionStaleCreating,
+			wantReconciledState: StateAsleep,
+			wantReset:           true,
+		},
+		{
+			// Counterpart: while the lease is still fresh, pending_create_claim
+			// continues to short-circuit so an in-flight create attempt is not
+			// raced.
+			name: "fresh creating with pending_create_claim stays in creating",
 			input: LifecycleInput{
 				Status: "open",
 				Metadata: map[string]string{
@@ -406,9 +455,24 @@ func TestProjectLifecycleRuntimeLivenessProjection(t *testing.T) {
 					"pending_create_claim": "true",
 				},
 				Runtime:            RuntimeFacts{Observed: true, Alive: false},
-				CreatedAt:          now.Add(-2 * time.Minute),
+				CreatedAt:          now.Add(-30 * time.Second),
 				StaleCreatingAfter: time.Minute,
 				Now:                now,
+			},
+			wantRuntime:         RuntimeProjectionStartRequested,
+			wantReconciledState: StateCreating,
+		},
+		{
+			name: "non-creating pending_create_claim remains start requested",
+			input: LifecycleInput{
+				Status: "open",
+				Metadata: map[string]string{
+					"state":                "active",
+					"session_name":         "s-worker",
+					"pending_create_claim": "true",
+				},
+				Runtime: RuntimeFacts{Observed: true, Alive: false},
+				Now:     now,
 			},
 			wantRuntime:         RuntimeProjectionStartRequested,
 			wantReconciledState: StateCreating,

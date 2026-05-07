@@ -28,7 +28,10 @@ import (
 )
 
 type wakeEvaluation struct {
-	Reasons          []WakeReason
+	Reasons []WakeReason
+	// Reason mirrors AwakeDecision.Reason on the ComputeAwakeSet bridge path.
+	// It is only actionable when Reasons contains the matching effective wake.
+	Reason           string
 	Policy           resolvedSessionSleepPolicy
 	ConfigSuppressed bool
 }
@@ -173,6 +176,12 @@ func sessionStartRequested(session beads.Bead, clk clock.Clock) bool {
 	return !staleCreatingState(session, clk)
 }
 
+// staleCreatingStateTimeout bounds how long a state=creating bead may sit
+// before generic creating metadata and corrupt start leases roll back. It is
+// measured from the pending-create transition (see staleCreatingState below),
+// not from the bead row's CreatedAt, so configured named-session reopens get a
+// fresh window each time the bead is reopened. Pending creates that never
+// reached preWakeCommit use pendingCreateNeverStartedTimeout instead.
 const staleCreatingStateTimeout = time.Minute
 
 func sessionMetadataState(session beads.Bead) string {
@@ -599,11 +608,12 @@ func recordRateLimitQuarantine(session *beads.Bead, store beads.Store, clk clock
 	}
 	qUntil := clk.Now().Add(defaultRateLimitQuarantineDuration).UTC().Format(time.RFC3339)
 	batch := map[string]string{
-		"state":                string(sessionpkg.StateAsleep),
-		"quarantined_until":    qUntil,
-		"sleep_reason":         "rate_limit",
-		"last_woke_at":         "",
-		"pending_create_claim": "",
+		"state":                     string(sessionpkg.StateAsleep),
+		"quarantined_until":         qUntil,
+		"sleep_reason":              "rate_limit",
+		"last_woke_at":              "",
+		"pending_create_claim":      "",
+		"pending_create_started_at": "",
 	}
 	if err := store.SetMetadataBatch(session.ID, batch); err != nil {
 		fmt.Fprintf(os.Stderr, "recordRateLimitQuarantine: SetMetadataBatch %s: %v\n", session.ID, err) //nolint:errcheck
@@ -938,14 +948,61 @@ func emptyNil(batch map[string]string) map[string]string {
 	return batch
 }
 
+// staleCreatingState returns true when a state=creating bead has been
+// stuck in that state longer than staleCreatingStateTimeout.
+//
+// "How long" is measured from the most recent transition into the
+// creating/pending-create state, NOT from the bead's original
+// CreatedAt. Configured-named-session beads (e.g. beads/planner) get
+// REOPENED on demand — the same bead row toggles closed→open with
+// state→creating — so its CreatedAt is from when the bead row was
+// first created (potentially hours/days/months ago) and is irrelevant
+// to whether the current spawn attempt is stuck.
+//
+// Order of preference:
+//  1. metadata["pending_create_started_at"] — set by createPoolSessionBead
+//     and reopenClosedConfiguredNamedSessionBead at the moment the bead
+//     enters state=creating with pending_create_claim=true.
+//  2. session.CreatedAt — fallback for fresh pool beads minted before
+//     this metadata key was introduced, and for any caller that creates
+//     a bead in state=creating without going through the helpers above.
 func staleCreatingState(session beads.Bead, clk clock.Clock) bool {
 	if clk == nil {
 		return false
 	}
+	if strings.TrimSpace(session.Metadata["state"]) != string(sessionpkg.StateCreating) {
+		return false
+	}
+	return pendingCreateAttemptStale(session, clk)
+}
+
+// pendingCreateAttemptStale reports whether the current pending-create attempt
+// has aged past staleCreatingStateTimeout, regardless of the bead's current
+// projected state. This lets the reconciler keep never-started pending-create
+// leases alive after healState has already rewritten state=creating to asleep.
+func pendingCreateAttemptStale(session beads.Bead, clk clock.Clock) bool {
+	if clk == nil {
+		return false
+	}
+	now := clk.Now()
+	if started, ok := parseRFC3339Metadata(session.Metadata["pending_create_started_at"]); ok {
+		return !now.Before(started.Add(staleCreatingStateTimeout))
+	}
 	if session.CreatedAt.IsZero() {
 		return true
 	}
-	return !clk.Now().Before(session.CreatedAt.Add(staleCreatingStateTimeout))
+	return !now.Before(session.CreatedAt.Add(staleCreatingStateTimeout))
+}
+
+// pendingCreateStartedAtNow returns the timestamp string to write into
+// metadata["pending_create_started_at"] when a bead transitions into
+// state=creating with pending_create_claim=true. Must match the format
+// staleCreatingState parses (RFC3339).
+func pendingCreateStartedAtNow(now time.Time) string {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	return now.UTC().Format(time.RFC3339)
 }
 
 // topoOrder returns session beads in dependency order (dependencies first).
