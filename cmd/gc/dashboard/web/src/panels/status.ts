@@ -3,12 +3,16 @@ import { byId, clear, el } from "../util/dom";
 import { ACTIVE_WINDOW_MS, beadPriority, formatTimestamp } from "../util/legacy";
 
 interface SessionSummary {
+  alias?: string;
   attached: boolean;
   last_active?: string;
   pool?: string;
+  reason?: string;
   rig?: string;
   running: boolean;
+  state?: string;
   template: string;
+  title?: string;
 }
 
 export async function renderStatus(): Promise<void> {
@@ -50,7 +54,7 @@ export async function renderStatus(): Promise<void> {
   }).length;
   const staleAssigned = beads.filter((bead) => bead.assignee && bead.status !== "closed").length;
   const highPriorityIssues = beads.filter((bead) => beadPriority(bead.priority) <= 2).length;
-  const deadSessions = sessions.filter((session) => !session.running).length;
+  const deadSessions = sessions.filter((session) => isDeadSession(session)).length;
 
   const stats = el("div", { class: "summary-stats" }, [
     statChip(statusR.data.agents.running, "Agents"),
@@ -141,7 +145,7 @@ function renderCityScopeBanner(city: string, sessions: SessionSummary[]): void {
   const status = byId("scope-status");
   if (!banner || !badge || !status) return;
 
-  const overseer = sessions.find((session) => !session.rig && !session.pool);
+  const overseer = sessions.filter((session) => !session.rig && !session.pool).sort(compareScopeSessions)[0];
   if (!overseer) {
     banner.classList.remove("attached");
     banner.classList.add("detached");
@@ -158,7 +162,7 @@ function renderCityScopeBanner(city: string, sessions: SessionSummary[]): void {
   banner.classList.remove("attached", "detached");
   banner.classList.add(overseer.attached ? "attached" : "detached");
   badge.className = `badge ${overseer.attached ? "badge-green" : "badge-muted"}`;
-  badge.textContent = overseer.attached ? "Attached" : "Detached";
+  badge.textContent = overseer.attached ? "Attached" : titleCase(overseer.state || "Detached");
   clear(status);
 
   const active = overseer.last_active
@@ -166,10 +170,46 @@ function renderCityScopeBanner(city: string, sessions: SessionSummary[]): void {
     : false;
   status.append(
     scopeStat("Scope", city),
-    scopeStat("Session", overseer.template),
-    scopeStat("Activity", overseer.last_active ? formatTimestamp(overseer.last_active) : "Unknown", active ? "active" : "idle"),
-    scopeStat("State", overseer.running ? "Running" : "Stopped"),
+    scopeStat("Session", overseer.alias || overseer.title || overseer.template),
+    scopeStat("Activity", formatSessionActivity(overseer), active ? "active" : "idle"),
+    scopeStat("State", formatSessionState(overseer)),
   );
+}
+
+function compareScopeSessions(a: SessionSummary, b: SessionSummary): number {
+  return scopeSessionRank(a) - scopeSessionRank(b) || (a.template || "").localeCompare(b.template || "");
+}
+
+function scopeSessionRank(session: SessionSummary): number {
+  if (session.attached) return 0;
+  if (session.running) return 1;
+  if (isDeadSession(session)) return 4;
+  if ((session.reason ?? "").toLowerCase() === "city-stop") return 3;
+  return 2;
+}
+
+function isDeadSession(session: SessionSummary): boolean {
+  const state = (session.state ?? "").toLowerCase();
+  if (state === "asleep" || state === "stopped") return false;
+  return !session.running && (state === "dead" || state === "failed" || state === "error" || state === "crashed");
+}
+
+function formatSessionActivity(session: SessionSummary): string {
+  if (session.last_active) return formatTimestamp(session.last_active);
+  if ((session.state ?? "").toLowerCase() === "asleep") return "Idle";
+  return "No recent activity";
+}
+
+function formatSessionState(session: SessionSummary): string {
+  return titleCase(session.state || (session.running ? "running" : "stopped"));
+}
+
+function titleCase(value: string): string {
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
 }
 
 function renderCityScopeBannerFleet(): void {

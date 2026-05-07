@@ -68,15 +68,16 @@ export async function renderCrew(): Promise<void> {
   const crew = sessions;
   crew.forEach((session, index) => {
     const state = classifyCrewState(session, pending[index] ?? false);
+    const activity = sessionActivity(session);
     const beadText = session.active_bead ? truncate(beadTitles.get(session.active_bead) ?? session.active_bead, 24) : "—";
     const row = el("tr", {}, [
       el("td", {}, [session.template]),
       el("td", {}, [session.rig ?? "city"]),
       el("td", {}, [el("span", { class: `badge ${statusBadgeClass(state)}` }, [state])]),
       el("td", {}, [beadText]),
-      el("td", { class: calculateActivity(session.last_active).colorClass ? `activity-${calculateActivity(session.last_active).colorClass}` : "" }, [
+      el("td", { class: activity.colorClass ? `activity-${activity.colorClass}` : "" }, [
         el("span", { class: "activity-dot" }),
-        ` ${calculateActivity(session.last_active).display}`,
+        ` ${activity.display}`,
       ]),
       el("td", {}, [
         el("span", { class: `badge ${session.attached ? "badge-green" : "badge-muted"}` }, [
@@ -136,6 +137,12 @@ function classifyCrewState(session: SessionRecord, hasPending: boolean): string 
   if (session.active_bead) return "spinning";
   if (!session.running) return session.state || "stopped";
   return "idle";
+}
+
+function sessionActivity(session: SessionRecord): ReturnType<typeof calculateActivity> {
+  if (session.last_active) return calculateActivity(session.last_active);
+  if ((session.state ?? "").toLowerCase() === "asleep") return { display: "idle", colorClass: "unknown" };
+  return calculateActivity(session.last_active);
 }
 
 function attachButton(session: SessionRecord): HTMLElement {

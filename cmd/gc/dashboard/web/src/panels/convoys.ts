@@ -74,7 +74,7 @@ export async function renderConvoys(): Promise<void> {
       el("td", { class: "convoy-work-cell" }, [
         el("div", { class: "convoy-work-breakdown" }, [
           row.ready > 0 ? el("span", { class: "work-chip work-ready" }, [`${row.ready} ready`]) : null,
-          row.inProgress > 0 ? el("span", { class: "work-chip work-inprogress" }, [`${row.inProgress} active`]) : null,
+          row.inProgress > 0 ? el("span", { class: "work-chip work-inprogress" }, [`${row.inProgress} assigned`]) : null,
           row.closed === row.total && row.total > 0 ? el("span", { class: "work-chip work-done" }, ["all done"]) : null,
         ]),
       ]),
@@ -160,7 +160,7 @@ async function buildConvoyRow(city: string, convoyID: string): Promise<ConvoyRow
 
 function convoyState(row: ConvoyRow): string {
   if (row.total > 0 && row.closed === row.total) return "done";
-  if (row.inProgress > 0) return "active";
+  if (row.inProgress > 0) return "assigned";
   if (row.ready > 0) return "waiting";
   return row.status ?? "open";
 }
@@ -173,7 +173,7 @@ function compareConvoyRows(a: ConvoyRow, b: ConvoyRow): number {
 
 function convoyStateRank(row: ConvoyRow): number {
   switch (convoyState(row)) {
-    case "active":
+    case "assigned":
       return 0;
     case "waiting":
       return 1;
@@ -190,8 +190,8 @@ function convoyLabel(row: ConvoyRow): string {
   switch (convoyState(row)) {
     case "done":
       return "✓ Done";
-    case "active":
-      return "Active";
+    case "assigned":
+      return "Assigned";
     case "waiting":
       return "Waiting";
     default:

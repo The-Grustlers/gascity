@@ -155,6 +155,7 @@ export function statusBadgeClass(status: string | undefined | null): string {
     case "working":
       return "badge-green";
     case "in_progress":
+    case "assigned":
     case "pending":
     case "stale":
     case "warning":
