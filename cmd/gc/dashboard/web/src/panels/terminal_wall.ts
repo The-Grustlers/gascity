@@ -76,7 +76,7 @@ export async function renderTerminalWall(): Promise<void> {
   count.textContent = String(running.length);
   status.textContent = running.length === 0
     ? "No running sessions to attach."
-    : `Attached to ${running.length} terminal session(s).`;
+    : `Showing ${running.length} active terminal pane(s).`;
 
   const nextIDs = new Set(running.map((session) => session.id));
   closeMissingPanes(nextIDs);

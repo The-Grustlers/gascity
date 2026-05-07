@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { CityEventRecord } from "../api";
-import { isNoisyBeadActivity, renderActivity, seedActivity, type ActivityEntry } from "./activity";
+import {
+  isInternalAlertActivity,
+  isNoisyBeadActivity,
+  renderActivity,
+  seedActivity,
+  type ActivityEntry,
+} from "./activity";
 
 describe("activity feed ordering", () => {
   beforeEach(() => {
@@ -75,6 +81,49 @@ describe("activity feed ordering", () => {
       actor: "director",
       payload: { bead: { issue_type: "task", labels: ["customer-visible"] } },
     }))).toBe(false);
+    expect(isInternalAlertActivity(eventRecord({
+      actor: "cache-reconcile",
+      payload: { bead: { issue_type: "session", labels: ["gc:session"] } },
+      type: "bead.closed",
+    }))).toBe(true);
+  });
+
+  it("keeps internal entries available behind the internal toggle", async () => {
+    const visibleEntry: ActivityEntry = {
+      category: "work",
+      id: "mc-city:20",
+      rig: "city",
+      scope: "mc-city",
+      seq: 20,
+      ts: "2026-04-03T10:00:00Z",
+      type: "bead.updated",
+    };
+    const internalEntry: ActivityEntry = {
+      alert: true,
+      category: "work",
+      id: "mc-city:21",
+      internal: true,
+      rig: "city",
+      scope: "mc-city",
+      seq: 21,
+      ts: "2026-04-03T10:01:00Z",
+      type: "bead.closed",
+    };
+
+    await seedActivity([visibleEntry, internalEntry]);
+    renderActivity();
+
+    expect(document.querySelectorAll(".tl-entry")).toHaveLength(1);
+    expect(document.getElementById("activity-count")?.textContent).toBe("1");
+    expect(document.querySelector(".tl-internal-count")?.textContent).toBe("1");
+    expect(document.querySelector(".tl-internal-alert")?.textContent).toBe("1 alert");
+
+    document.querySelector<HTMLInputElement>("#tl-internal-toggle")?.click();
+
+    expect(document.querySelectorAll(".tl-entry")).toHaveLength(2);
+    expect(document.querySelectorAll(".activity-internal")).toHaveLength(1);
+    expect(document.querySelectorAll(".activity-alert")).toHaveLength(1);
+    expect(document.getElementById("activity-count")?.textContent).toBe("2");
   });
 });
 

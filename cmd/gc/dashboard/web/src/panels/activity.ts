@@ -19,8 +19,10 @@ import { relativeTime } from "../util/time";
 
 export interface ActivityEntry {
   actor?: string;
+  alert?: boolean;
   category: string;
   id: string;
+  internal?: boolean;
   message?: string;
   rig: string;
   scope: string;
@@ -40,6 +42,7 @@ let handle: SSEHandle | null = null;
 let categoryFilter = "all";
 let rigFilter = "all";
 let agentFilter = "all";
+let showInternalActivity = false;
 let streamAfterSeq = "";
 let renderTimer: number | null = null;
 
@@ -118,12 +121,13 @@ export function renderActivity(): void {
   clear(feed);
 
   const filtered = entries.filter((entry) => {
+    if (!showInternalActivity && entry.internal) return false;
     if (categoryFilter !== "all" && entry.category !== categoryFilter) return false;
     if (rigFilter !== "all" && entry.rig !== rigFilter) return false;
     if (agentFilter !== "all" && entry.actor !== agentFilter) return false;
     return true;
   });
-  byId("activity-count")!.textContent = String(entries.length);
+  byId("activity-count")!.textContent = String(filtered.length);
 
   if (filtered.length === 0) {
     feed.append(el("div", { class: "empty-state" }, [el("p", {}, ["No recent activity"])]));
@@ -133,8 +137,9 @@ export function renderActivity(): void {
   const timeline = el("div", { class: "tl-timeline", id: "activity-timeline" });
   filtered.forEach((entry) => {
     timeline.append(el("div", {
-      class: `tl-entry ${activityTypeClass(entry.category)}`,
+      class: `tl-entry ${activityTypeClass(entry.category)}${entry.internal ? " activity-internal" : ""}${entry.alert ? " activity-alert" : ""}`,
       "data-category": entry.category,
+      "data-internal": entry.internal ? "true" : "false",
       "data-rig": entry.rig,
       "data-agent": entry.actor ?? "",
       "data-type": entry.type,
@@ -152,6 +157,7 @@ export function renderActivity(): void {
         el("div", { class: "tl-meta" }, [
           entry.actor ? el("span", { class: "tl-badge tl-badge-agent" }, [formatAgentAddress(entry.actor)]) : null,
           entry.rig ? el("span", { class: "tl-badge tl-badge-rig" }, [entry.rig]) : null,
+          entry.internal ? el("span", { class: `tl-badge ${entry.alert ? "tl-badge-alert" : "tl-badge-internal"}` }, ["internal"]) : null,
           el("span", { class: "tl-badge tl-badge-type" }, [entry.type]),
         ]),
       ]),
@@ -193,6 +199,8 @@ function renderFilters(): void {
   if (!container) return;
   clear(container);
   if (entries.length === 0) return;
+  const hiddenInternalCount = entries.filter((entry) => entry.internal).length;
+  const alertCount = entries.filter((entry) => entry.alert).length;
   const rigs = [...new Set(entries.map((entry) => entry.rig).filter(Boolean))].sort();
   const agents = [...new Set(entries.map((entry) => entry.actor).filter(Boolean))].sort() as string[];
 
@@ -212,6 +220,21 @@ function renderFilters(): void {
     renderActivity();
   });
 
+  const internalControl = hiddenInternalCount > 0 ? el("label", { class: "tl-internal-control" }, [
+    el("input", {
+      checked: showInternalActivity,
+      id: "tl-internal-toggle",
+      type: "checkbox",
+    }),
+    el("span", {}, ["Internal"]),
+    el("span", { class: "tl-internal-count" }, [String(hiddenInternalCount)]),
+    alertCount > 0 ? el("span", { class: "tl-internal-alert" }, [`${alertCount} alert`]) : null,
+  ]) : null;
+  internalControl?.querySelector<HTMLInputElement>("#tl-internal-toggle")?.addEventListener("change", (event) => {
+    showInternalActivity = (event.currentTarget as HTMLInputElement).checked;
+    renderActivity();
+  });
+
   container.append(el("div", { class: "tl-filters" }, [
     el("div", { class: "tl-filter-group" }, [
       el("label", {}, ["Category:"]),
@@ -223,6 +246,7 @@ function renderFilters(): void {
     ]),
     el("div", { class: "tl-filter-group" }, [el("label", {}, ["Rig:"]), rigSelect]),
     el("div", { class: "tl-filter-group" }, [el("label", {}, ["Agent:"]), agentSelect]),
+    internalControl,
   ]));
 }
 
@@ -251,13 +275,15 @@ function toEntryFromRecord(record: CityEventRecord | SupervisorEventRecord): Act
 
 function toActivityEntry(record: DashboardEventRecord, eventID?: string): ActivityEntry | null {
   if (!record.type) return null;
-  if (isNoisyBeadActivity(record)) return null;
+  const internal = isNoisyBeadActivity(record);
   const scope = recordCity(record) ?? cityScope();
   const seq = typeof record.seq === "number" ? record.seq : 0;
   return {
+    alert: isInternalAlertActivity(record),
     id: stableEventID(record, eventID),
     type: record.type,
     category: eventCategory(record.type),
+    internal,
     actor: record.actor || undefined,
     subject: record.subject || undefined,
     message: record.message || undefined,
@@ -277,6 +303,13 @@ export function isNoisyBeadActivity(record: DashboardEventRecord): boolean {
   const issueType = payloadString(payload, "issue_type") || payloadString(payload, "type");
   if (issueType === "session" || issueType === "message") return true;
   return payloadStringArray(payload, "labels").includes("gc:session");
+}
+
+export function isInternalAlertActivity(record: DashboardEventRecord): boolean {
+  if (record.type !== "bead.closed" || record.actor !== "cache-reconcile") return false;
+  const payload = beadPayload(eventPayload(record));
+  const issueType = payloadString(payload, "issue_type") || payloadString(payload, "type");
+  return issueType === "session" || payloadStringArray(payload, "labels").includes("gc:session");
 }
 
 function isOrderTrackingBeadEvent(record: DashboardEventRecord): boolean {
