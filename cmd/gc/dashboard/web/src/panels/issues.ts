@@ -27,7 +27,7 @@ export async function renderIssues(): Promise<void> {
     api.GET("/v0/city/{cityName}/beads", {
       params: { path: { cityName: city }, query: { status: "in_progress", limit: 500 } },
     }),
-    getOptions(true),
+    getOptions(),
   ]);
   if ((openR.error && progressR.error) || (!openR.data?.items && !progressR.data?.items)) {
     clear(issuesList);

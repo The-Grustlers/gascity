@@ -36,9 +36,10 @@ export async function renderConvoys(): Promise<void> {
     return;
   }
 
-  const rows = await Promise.all(
-    listR.data.items.map(async (convoy) => buildConvoyRow(city, convoy.id ?? "")),
-  );
+  const rows: Array<ConvoyRow | null> = [];
+  for (const convoy of listR.data.items) {
+    rows.push(await buildConvoyRow(city, convoy.id ?? ""));
+  }
   const filtered = rows.filter((row): row is ConvoyRow => row !== null);
   byId("convoy-count")!.textContent = String(filtered.length);
 

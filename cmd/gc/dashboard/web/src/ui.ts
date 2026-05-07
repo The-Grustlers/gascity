@@ -2,6 +2,8 @@ import { byId } from "./util/dom";
 import { logError } from "./logger";
 
 let pauseCount = 0;
+const recentErrorToasts = new Map<string, number>();
+const ERROR_TOAST_DEDUPE_MS = 10_000;
 
 // popPauseListener is wired by main.ts so the dashboard can run a
 // catch-up refresh when the last pause (modal/expanded panel) closes.
@@ -76,6 +78,11 @@ export function showToast(type: "success" | "error" | "info", title: string, mes
 export function reportUIError(title: string, error: unknown, fallbackMessage = "Unexpected dashboard error"): void {
   const message = error instanceof Error ? error.message : fallbackMessage;
   logError("ui", title, { error, fallbackMessage, message });
+  const key = `${title}:${message}`;
+  const now = Date.now();
+  const lastShown = recentErrorToasts.get(key) ?? 0;
+  if (now - lastShown < ERROR_TOAST_DEDUPE_MS) return;
+  recentErrorToasts.set(key, now);
   showToast("error", title, message);
 }
 

@@ -37,6 +37,9 @@ const CITY_SCOPED_PANEL_IDS = [
   "agent-log-drawer",
 ];
 
+let refreshInFlight: Promise<void> | null = null;
+let refreshQueued = false;
+
 async function refreshAll(): Promise<void> {
   if (refreshPaused()) return;
   await refreshVisibleResources();
@@ -206,6 +209,21 @@ function syncCityScopedPanels(hasCity: boolean): void {
 }
 
 async function refreshVisibleResources(force = false): Promise<void> {
+  if (refreshInFlight) {
+    if (force) invalidateAll();
+    refreshQueued = true;
+    return refreshInFlight;
+  }
+  refreshInFlight = runRefreshVisibleResources(force).finally(() => {
+    refreshInFlight = null;
+    if (!refreshQueued) return;
+    refreshQueued = false;
+    void refreshVisibleResources().catch((error) => reportUIError("Refresh failed", error));
+  });
+  return refreshInFlight;
+}
+
+async function runRefreshVisibleResources(force = false): Promise<void> {
   syncCityScopeFromLocation();
   syncCityScopedControls();
 
@@ -219,7 +237,7 @@ async function refreshVisibleResources(force = false): Promise<void> {
     await renderCityTabs().catch((error) => reportUIError("City tabs failed", error));
   }
 
-  const tasks: Array<Promise<void>> = [];
+  const tasks: Array<() => Promise<void>> = [];
   const status = currentCityStatus();
   const hasRunningCity = status.kind === "running";
 
@@ -237,10 +255,13 @@ async function refreshVisibleResources(force = false): Promise<void> {
     queueRefresh(tasks, dirty, "admin", () => renderAdminPanels());
   }
 
-  const results = await Promise.allSettled(tasks);
-  const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
-  if (failure) {
-    reportUIError("Panel refresh failed", failure.reason);
+  for (const task of tasks) {
+    try {
+      await task();
+    } catch (error) {
+      reportUIError("Panel refresh failed", error);
+      break;
+    }
   }
 
   if (dirty.has("supervisor") || dirty.has("cities")) {
@@ -249,11 +270,11 @@ async function refreshVisibleResources(force = false): Promise<void> {
 }
 
 function queueRefresh(
-  tasks: Array<Promise<void>>,
+  tasks: Array<() => Promise<void>>,
   dirty: Set<DashboardResource>,
   resource: DashboardResource,
   run: () => Promise<void>,
 ): void {
   if (!dirty.has(resource)) return;
-  tasks.push(run());
+  tasks.push(run);
 }
