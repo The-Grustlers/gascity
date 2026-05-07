@@ -712,21 +712,34 @@
             50% { transform: scale(1.05); }
         }
 
-        .attach-btn {
+        .crew-actions {
+            align-items: center;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            min-width: 148px;
+        }
+
+        .attach-btn,
+        .agent-log-link {
             background: var(--bg-tertiary);
             border: 1px solid var(--border);
             border-radius: 4px;
             color: var(--cyan);
             cursor: pointer;
             font-size: 0.75rem;
+            line-height: 1.2;
             padding: 4px 8px;
+            text-decoration: none;
             transition: all 0.15s ease;
         }
 
-        .attach-btn:hover {
+        .attach-btn:hover,
+        .agent-log-link:hover {
             background: var(--cyan);
             border-color: var(--cyan);
             color: var(--bg-primary);
+            text-decoration: none;
         }
 
         /* Toast notifications */
@@ -2617,7 +2630,8 @@
                 font-size: 0.85rem;
             }
 
-            .attach-btn {
+            .attach-btn,
+            .agent-log-link {
                 padding: 8px 12px;
                 font-size: 0.8rem;
             }
@@ -3933,15 +3947,6 @@
         }
 
         /* Agent log drawer */
-        .agent-log-link {
-            color: var(--cyan);
-            text-decoration: none;
-            cursor: pointer;
-        }
-        .agent-log-link:hover {
-            text-decoration: underline;
-        }
-
         .log-drawer-body {
             max-height: 500px;
             overflow-y: auto;

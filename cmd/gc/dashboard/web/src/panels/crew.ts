@@ -83,12 +83,10 @@ export async function renderCrew(): Promise<void> {
           session.attached ? "Attached" : "Detached",
         ]),
       ]),
-      el("td", {}, [
+      el("td", { class: "crew-actions" }, [
         attachButton(session),
-        " ",
         messageButton(session),
-        " ",
-        logButton(session.id, session.template),
+        transcriptButton(session.id, session.template, "Transcript"),
       ]),
     ]);
     crewBody.append(row);
@@ -141,12 +139,17 @@ function classifyCrewState(session: SessionRecord, hasPending: boolean): string 
 }
 
 function attachButton(session: SessionRecord): HTMLElement {
-  const btn = el("button", { class: "attach-btn", type: "button" }, ["Attach"]);
+  const btn = el("button", {
+    "aria-label": `Copy attach command for ${session.template}`,
+    class: "attach-btn copy-attach-btn",
+    title: "Copies a terminal command. Paste it into SSH/WezTerm to attach.",
+    type: "button",
+  }, ["Copy attach"]);
   btn.addEventListener("click", async () => {
     const command = `gc session attach ${session.id}`;
     try {
       await navigator.clipboard.writeText(command);
-      showToast("success", "Attach command copied", command);
+      showToast("success", "Attach command copied", `Paste in a terminal: ${command}`);
     } catch {
       showToast("error", "Copy failed", command);
     }
@@ -155,7 +158,7 @@ function attachButton(session: SessionRecord): HTMLElement {
 }
 
 function messageButton(session: SessionRecord): HTMLElement {
-  const btn = el("button", { class: "attach-btn", type: "button" }, ["Message"]);
+  const btn = el("button", { class: "attach-btn message-session-btn", type: "button" }, ["Message"]);
   btn.addEventListener("click", async () => {
     const city = cityScope();
     if (!city) {
@@ -182,8 +185,14 @@ function messageButton(session: SessionRecord): HTMLElement {
   return btn;
 }
 
-function logButton(sessionID: string, label: string): HTMLElement {
-  const btn = el("button", { class: "agent-log-link", type: "button", "data-session-id": sessionID }, [label]);
+function transcriptButton(sessionID: string, label: string, buttonText = label): HTMLElement {
+  const btn = el("button", {
+    "aria-label": `Open transcript for ${label}`,
+    class: "agent-log-link",
+    title: `Open ${label} transcript`,
+    type: "button",
+    "data-session-id": sessionID,
+  }, [buttonText]);
   btn.addEventListener("click", () => {
     void openLogDrawer(sessionID, label);
   });
@@ -209,7 +218,7 @@ function renderRiggedAgents(sessions: SessionRecord[], beadTitles: Map<string, s
     const activity = calculateActivity(session.last_active);
     const workStatus = !session.active_bead ? "Idle" : activity.colorClass === "red" ? "Stuck" : activity.colorClass === "yellow" ? "Stale" : "Working";
     tbody.append(el("tr", { class: `rigged-${workStatus.toLowerCase()}` }, [
-      el("td", {}, [logButton(session.id, session.template)]),
+      el("td", {}, [transcriptButton(session.id, session.template)]),
       el("td", {}, [el("span", { class: "badge badge-muted" }, [session.pool ?? "pool"])]),
       el("td", {}, [session.rig ?? "city"]),
       el("td", { class: "rigged-issue" }, [
