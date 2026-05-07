@@ -259,6 +259,7 @@ func (s *Server) findActiveBeadForAssigneesWithFreshness(rig string, live bool, 
 						}
 						continue
 					}
+					continue
 				}
 			}
 			matches, err := stores[rn].List(query)

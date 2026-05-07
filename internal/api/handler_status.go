@@ -170,6 +170,7 @@ func listStatusWorkBeadsForReadModel(store beads.Store) ([]beads.Bead, error) {
 		if rows, cacheOK := cached.CachedList(query); cacheOK {
 			return rows, nil
 		}
+		return nil, nil
 	}
 	return store.List(query)
 }
@@ -200,9 +201,13 @@ func (s *Server) statusSessionSnapshot() statusSessionSnapshot {
 		return snapshot
 	}
 
-	rows, err := listSessionBeadsForReadModel(store)
-	if err != nil {
-		return snapshot
+	rows, cacheAware := listCachedSessionBeadsForReadModel(store)
+	if !cacheAware {
+		var err error
+		rows, err = listSessionBeadsForReadModel(store)
+		if err != nil {
+			return snapshot
+		}
 	}
 
 	seenSessionName := make(map[string]bool, len(rows))

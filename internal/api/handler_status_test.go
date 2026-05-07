@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,6 +12,20 @@ import (
 	"github.com/gastownhall/gascity/internal/runtime"
 	"github.com/gastownhall/gascity/internal/session"
 )
+
+type coldCachedListStoreForStatusTest struct {
+	*beads.MemStore
+	listCalls int
+}
+
+func (s *coldCachedListStoreForStatusTest) List(beads.ListQuery) ([]beads.Bead, error) {
+	s.listCalls++
+	return nil, errors.New("backing List should not be used while read cache is cold")
+}
+
+func (s *coldCachedListStoreForStatusTest) CachedList(beads.ListQuery) ([]beads.Bead, bool) {
+	return nil, false
+}
 
 func TestHandleStatus(t *testing.T) {
 	state := newFakeState(t)
@@ -377,6 +392,25 @@ func TestHandleStatusUsesCachedWorkReadModel(t *testing.T) {
 	}
 	if resp.Work.Ready != 1 {
 		t.Fatalf("Work.Ready = %d, want 1", resp.Work.Ready)
+	}
+}
+
+func TestHandleStatusDoesNotBlockOnColdCachedReadModel(t *testing.T) {
+	state := newFakeState(t)
+	store := &coldCachedListStoreForStatusTest{MemStore: beads.NewMemStore()}
+	state.cityBeadStore = store
+	state.stores["myrig"] = store
+	h := newTestCityHandler(t, state)
+
+	req := httptest.NewRequest("GET", cityURL(state, "/status"), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if store.listCalls != 0 {
+		t.Fatalf("/status called backing List %d time(s), want cold-cache soft failure", store.listCalls)
 	}
 }
 

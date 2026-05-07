@@ -71,6 +71,26 @@ func TestAgentList(t *testing.T) {
 	}
 }
 
+func TestAgentListDoesNotBlockOnColdCachedActiveBeadReadModel(t *testing.T) {
+	state := newFakeState(t)
+	store := &coldCachedListStoreForStatusTest{MemStore: beads.NewMemStore()}
+	state.stores["myrig"] = store
+	state.sp.Start(context.Background(), "myrig--worker", runtime.Config{}) //nolint:errcheck
+	srv := New(state)
+	h := newTestCityHandlerWith(t, state, srv)
+
+	req := httptest.NewRequest("GET", cityURL(state, "/agents"), nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if store.listCalls != 0 {
+		t.Fatalf("/agents called backing List %d time(s), want cold-cache soft failure", store.listCalls)
+	}
+}
+
 func TestAgentListPoolExpansion(t *testing.T) {
 	state := newFakeState(t)
 	state.cfg.Agents = []config.Agent{

@@ -21,3 +21,17 @@ func listSessionBeadsForReadModel(store beads.Store) ([]beads.Bead, error) {
 	}
 	return store.List(query)
 }
+
+func listCachedSessionBeadsForReadModel(store beads.Store) ([]beads.Bead, bool) {
+	query := beads.ListQuery{
+		Label: session.LabelSession,
+		Sort:  beads.SortCreatedDesc,
+	}
+	if cached, ok := store.(cachedListStore); ok {
+		if rows, cacheOK := cached.CachedList(query); cacheOK {
+			return rows, true
+		}
+		return nil, true
+	}
+	return nil, false
+}
