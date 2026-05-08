@@ -1242,7 +1242,10 @@ func runController(
 	}()
 
 	convergenceReqCh := make(chan convergenceRequest, 16)
-	reloadReqCh := make(chan reloadRequest)
+	// Buffer size 1: allows a reload request to be queued immediately while
+	// runTick is executing in the same goroutine, preventing spurious "controller
+	// is busy" rejections during long k8s session start waves (~60s per tick).
+	reloadReqCh := make(chan reloadRequest, 1)
 	pokeCh := make(chan struct{}, 1)
 	controlDispatcherCh := make(chan struct{}, 1)
 	configDirty := &atomic.Bool{}

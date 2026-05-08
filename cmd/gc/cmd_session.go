@@ -731,7 +731,7 @@ func cmdSessionList(stateFilter, templateFilter string, jsonOutput bool, stdout,
 	w := tabwriter.NewWriter(stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tTEMPLATE\tSTATE\tREASON\tTARGET\tTITLE\tAGE\tLAST ACTIVE") //nolint:errcheck // best-effort stdout
 	for _, s := range sessions {
-		state := string(s.State)
+		state := sessionListStateLabel(s, beadIndex)
 		if s.State == "" {
 			state = "closed"
 		}
@@ -851,6 +851,31 @@ func buildAttachmentCache(sessions []session.Info, observe ...func(session.Info)
 		cache[s.SessionName] = attached
 	}
 	return cache
+}
+
+// sessionListStateLabel returns a human-readable STATE column value.
+// Maps internal lifecycle states to operator-facing labels that distinguish
+// warm (running but idle), idle (dormant), starting (being created), and
+// executing (actively processing) states.
+func sessionListStateLabel(s session.Info, beadIndex map[string]beads.Bead) string {
+	switch s.State {
+	case session.StateCreating:
+		return "starting"
+	case session.StateAsleep:
+		return "idle"
+	case session.StateActive:
+		b, ok := beadIndex[s.ID]
+		if ok && strings.TrimSpace(b.Metadata["pending_create_claim"]) == "true" {
+			// Active bead that still holds the pending-create claim is mid-start.
+			return "starting"
+		}
+		if s.Attached {
+			return "executing"
+		}
+		return "warm"
+	default:
+		return string(s.State)
+	}
 }
 
 // sessionReason computes the REASON column for a session in gc session list.

@@ -255,16 +255,22 @@ func pendingCreateLeaseExpiredForRollback(session beads.Bead, clk clock.Clock, s
 	if strings.TrimSpace(session.Metadata["pending_create_claim"]) != "true" {
 		return false
 	}
-	if strings.TrimSpace(session.Metadata["state"]) != "creating" {
+	// Accept both "creating" and "asleep": healState transitions
+	// state=creating → state=asleep after staleCreatingStateTimeout, so
+	// blocking rollback on state=="creating" alone permanently blocks it for
+	// any healed bead. Other states (e.g. stopped, draining) are unusual
+	// for a pending-create and should follow their own reconciliation paths.
+	state := strings.TrimSpace(session.Metadata["state"])
+	if state != string(sessionpkg.StateCreating) && state != string(sessionpkg.StateAsleep) {
 		return false
 	}
 	if pendingCreateStartInFlight(session, clk, startupTimeout) {
 		return false
 	}
 	if strings.TrimSpace(session.Metadata["last_woke_at"]) == "" {
-		return pendingCreateNeverStartedExpired(session, clk)
+		return pendingCreateNeverStartedLeaseExpired(session, clk)
 	}
-	return staleCreatingState(session, clk)
+	return pendingCreateAttemptStale(session, clk)
 }
 
 // reconcileSessionBeads performs bead-driven reconciliation using wake/sleep
