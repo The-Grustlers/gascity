@@ -1944,6 +1944,37 @@ name = "reviewer"
 	}
 }
 
+func TestExpandPacks_IgnoresEmptyConventionAgentDirs(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "packs/gr7n-project/pack.toml", `
+[pack]
+name = "gr7n-project"
+schema = 1
+`)
+	writeFile(t, dir, "packs/gr7n-project/agents/reviewer/prompt.template.md", "review the work")
+	if err := os.MkdirAll(filepath.Join(dir, "packs/gr7n-project/agents/project-reviewer"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &City{
+		Rigs: []Rig{{
+			Name:     "rabble",
+			Path:     "/tmp/rabble",
+			Includes: []string{"packs/gr7n-project"},
+		}},
+	}
+
+	if err := ExpandPacks(cfg, fsys.OSFS{}, dir, nil); err != nil {
+		t.Fatalf("ExpandPacks: %v", err)
+	}
+	if len(cfg.Agents) != 1 {
+		t.Fatalf("got %d agents, want only reviewer: %+v", len(cfg.Agents), cfg.Agents)
+	}
+	if got := cfg.Agents[0]; got.Name != "reviewer" || got.Dir != "rabble" {
+		t.Fatalf("agent = %q/%q, want rabble/reviewer", got.Dir, got.Name)
+	}
+}
+
 func TestExpandPacks_SamePackDifferentRigsNoCollision(t *testing.T) {
 	// Same pack applied to two different rigs should not collide
 	// (different dir scope).

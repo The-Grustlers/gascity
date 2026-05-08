@@ -16,7 +16,9 @@ var agentPromptConventionFilenames = []string{
 }
 
 // DiscoverPackAgents scans a pack's agents/ tree and returns
-// convention-discovered agents. Each immediate subdirectory is an agent.
+// convention-discovered agents. Each immediate subdirectory with an agent
+// definition is an agent. Empty directories, scratch notes, and stale folders
+// are ignored so deleted convention agents do not linger in live configs.
 // agent.toml provides optional per-agent config, prompt.template.md is
 // canonical, prompt.md.tmpl remains temporarily supported, and prompt.md is
 // the plain-markdown fallback.
@@ -41,6 +43,10 @@ func DiscoverPackAgents(fs fsys.FS, packDir, _ string, skipNames map[string]bool
 		}
 
 		agentDir := filepath.Join(agentsDir, agentName)
+		if !agentConventionHasDefinition(fs, agentDir) {
+			continue
+		}
+
 		agent := Agent{Name: agentName}
 
 		agentTomlPath := filepath.Join(agentDir, "agent.toml")
@@ -58,6 +64,29 @@ func DiscoverPackAgents(fs fsys.FS, packDir, _ string, skipNames map[string]bool
 	}
 
 	return discovered, nil
+}
+
+func agentConventionHasDefinition(fs fsys.FS, agentDir string) bool {
+	if _, err := fs.Stat(filepath.Join(agentDir, "agent.toml")); err == nil {
+		return true
+	}
+	for _, promptName := range agentPromptConventionFilenames {
+		if _, err := fs.Stat(filepath.Join(agentDir, promptName)); err == nil {
+			return true
+		}
+	}
+
+	for _, dirName := range []string{"overlay", "skills", "mcp"} {
+		info, err := fs.Stat(filepath.Join(agentDir, dirName))
+		if err == nil && info.IsDir() {
+			return true
+		}
+	}
+
+	if _, err := fs.Stat(filepath.Join(agentDir, "namepool.txt")); err == nil {
+		return true
+	}
+	return false
 }
 
 // DiscoverPackAttachmentRoots reports the shared attachment catalog roots
