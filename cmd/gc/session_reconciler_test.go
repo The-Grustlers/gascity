@@ -4075,6 +4075,112 @@ func TestPendingCreateLeaseExpiredForRollbackFallsBackToStaleWindowForInvalidLas
 	}
 }
 
+// TestPendingCreateLeaseExpiredForRollback_HealedAsleepState verifies that
+// pendingCreateLeaseExpiredForRollback returns the correct result when
+// healState has already transitioned state=creating → state=asleep. Prior to
+// the fix, the state=="creating" guard in the function would return false for
+// any healed bead, permanently blocking rollback.
+func TestPendingCreateLeaseExpiredForRollback_HealedAsleepState(t *testing.T) {
+	clk := &clock.Fake{Time: time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)}
+	startupTimeout := time.Minute
+
+	tests := []struct {
+		name      string
+		state     string
+		createdAt time.Time
+		startedAt string
+		lastWoke  string
+		want      bool
+	}{
+		{
+			name:      "state=asleep after heal, never started, lease expired",
+			state:     "asleep",
+			createdAt: clk.Now().Add(-(pendingCreateNeverStartedTimeout + time.Second)),
+			want:      true,
+		},
+		{
+			// pending_create_started_at is always set in production.
+			// A fresh started_at (< 1 min) means the bead just entered
+			// state=creating and healState hasn't fired yet.
+			name:  "state=asleep after heal, started_at still fresh (not yet stale)",
+			state: "asleep",
+			startedAt: pendingCreateStartedAtNow(
+				clk.Now().Add(-(staleCreatingStateTimeout - time.Second))),
+			want: false,
+		},
+		{
+			// last_woke_at is empty (no start attempt); uses the 10-min
+			// never-started floor regardless of pending_create_started_at age.
+			// This preserves sessions legitimately queued in a busy pool.
+			name:  "state=asleep after heal, started_at stale but no wake attempt yet",
+			state: "asleep",
+			startedAt: pendingCreateStartedAtNow(
+				clk.Now().Add(-(staleCreatingStateTimeout + time.Second))),
+			want: false, // 10-min never-started floor not yet expired
+		},
+		{
+			// started_at stale AND never-started timeout elapsed → roll back.
+			name:  "state=asleep after heal, never-started timeout elapsed",
+			state: "asleep",
+			startedAt: pendingCreateStartedAtNow(
+				clk.Now().Add(-(pendingCreateNeverStartedTimeout + time.Second))),
+			want: true,
+		},
+		{
+			// last_woke_at must be past the in-flight window
+			// (startupTimeout + staleKeyDetectDelay + 5s = 67s) for
+			// pendingCreateStartInFlight to return false.
+			name:  "state=asleep after heal, last_woke_at set and started_at stale",
+			state: "asleep",
+			startedAt: pendingCreateStartedAtNow(
+				clk.Now().Add(-(startupTimeout + staleKeyDetectDelay + 6*time.Second + time.Second))),
+			lastWoke: clk.Now().Add(-(startupTimeout + staleKeyDetectDelay + 6*time.Second)).UTC().Format(time.RFC3339),
+			want:     true, // last_woke_at path: attempt stale and past in-flight → roll back
+		},
+		{
+			// last_woke_at just issued: still within in-flight window → preserved.
+			name:     "state=asleep after heal, last_woke_at set but start still in-flight",
+			state:    "asleep",
+			lastWoke: clk.Now().Add(-(time.Second)).UTC().Format(time.RFC3339),
+			want:     false,
+		},
+		{
+			name:      "state=creating still works as before",
+			state:     "creating",
+			createdAt: clk.Now().Add(-(pendingCreateNeverStartedTimeout + time.Second)),
+			want:      true,
+		},
+		{
+			name:     "state=asleep with in-flight last_woke_at, start just issued",
+			state:    "asleep",
+			lastWoke: clk.Now().Add(-(time.Second)).UTC().Format(time.RFC3339),
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := map[string]string{
+				"pending_create_claim": "true",
+				"state":                tt.state,
+			}
+			if tt.startedAt != "" {
+				meta["pending_create_started_at"] = tt.startedAt
+			}
+			if tt.lastWoke != "" {
+				meta["last_woke_at"] = tt.lastWoke
+			}
+			bead := beads.Bead{
+				Metadata:  meta,
+				CreatedAt: tt.createdAt,
+			}
+			if got := pendingCreateLeaseExpiredForRollback(bead, clk, startupTimeout); got != tt.want {
+				t.Fatalf("pendingCreateLeaseExpiredForRollback() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestReconcileSessionBeads_RollsBackPendingCreateWhenConflictingRuntimeAlreadyRunning(t *testing.T) {
 	store := beads.NewMemStore()
 	sp := runtime.NewFake()
