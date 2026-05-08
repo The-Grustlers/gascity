@@ -1169,9 +1169,9 @@ schema = 1
 	}
 }
 
-func TestImport_AgentDiscoveryWithNoPromptOrToml(t *testing.T) {
-	// An agents/<name>/ directory with neither prompt.md nor agent.toml
-	// should still create an agent (minimal discovery).
+func TestImport_AgentDiscoveryIgnoresNonAgentDirectory(t *testing.T) {
+	// An agents/<name>/ directory with neither a prompt, agent.toml, nor a
+	// supported convention asset is scratch state, not an agent.
 	dir := t.TempDir()
 	packDir := filepath.Join(dir, "mypk")
 	agentDir := filepath.Join(packDir, "agents", "minimal")
@@ -1199,18 +1199,9 @@ includes = ["../mypk"]
 		t.Fatalf("LoadWithIncludes: %v", err)
 	}
 
-	explicit := explicitAgents(cfg.Agents)
-	found := false
-	for _, a := range explicit {
+	for _, a := range explicitAgents(cfg.Agents) {
 		if a.Name == "minimal" {
-			found = true
-			if a.PromptTemplate != "" {
-				t.Errorf("minimal agent should have no prompt template, got %q", a.PromptTemplate)
-			}
-			break
+			t.Fatalf("minimal should not be discovered from notes-only agents/ subdir: %+v", a)
 		}
-	}
-	if !found {
-		t.Error("minimal agent should still be discovered from empty agents/ subdir")
 	}
 }
