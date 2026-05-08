@@ -1259,15 +1259,16 @@ func enqueueQueuedNudgeWithStore(cityPath string, store beads.Store, item queued
 		return nil
 	})
 	if err != nil && created && store != nil && beadID != "" {
-		// Stamp metadata.close_reason before Close so BdStore.Close (per
-		// #1644) can forward it as `bd close --reason` and satisfy the
-		// validator under validation.on-close=error. Both writes are
-		// best-effort: failures here would only swap one symptom (leaked
-		// open bead) for another (leaked open bead with mismatched
-		// metadata) and the original enqueue error is the one the caller
-		// actually needs to see.
-		_ = store.SetMetadata(beadID, "close_reason", nudgeEnqueueRollbackCloseReason)
-		_ = store.Close(beadID)
+		// Stamp metadata.close_reason before Close so BdStore.Close can forward
+		// it as `bd close --reason` and satisfy validation.on-close=error.
+		// Preserve the original enqueue error, but return rollback failures too
+		// so leaked open nudge beads are diagnosable.
+		if setErr := store.SetMetadata(beadID, "close_reason", nudgeEnqueueRollbackCloseReason); setErr != nil {
+			err = errors.Join(err, fmt.Errorf("stamping rollback nudge bead %q close reason: %w", beadID, setErr))
+		}
+		if closeErr := store.Close(beadID); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("closing rollback nudge bead %q: %w", beadID, closeErr))
+		}
 	}
 	return err
 }

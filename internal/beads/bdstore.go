@@ -870,10 +870,15 @@ func (s *BdStore) CloseAll(ids []string, metadata map[string]string) (int, error
 	return len(ids), nil
 }
 
-// Close sets a bead's status to closed via bd close.
+// Close sets a bead's status to closed via bd close. If the bead already has
+// metadata.close_reason, the trimmed value is forwarded as bd close --reason.
 // Idempotent: closing an already-closed bead returns nil.
 func (s *BdStore) Close(id string) error {
-	return s.close(id, "")
+	reason := ""
+	if b, err := s.Get(id); err == nil {
+		reason = strings.TrimSpace(b.Metadata["close_reason"])
+	}
+	return s.close(id, reason)
 }
 
 func bdCloseArgs(reason string, ids ...string) []string {

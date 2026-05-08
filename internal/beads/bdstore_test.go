@@ -330,6 +330,35 @@ func TestBdStoreClose(t *testing.T) {
 	}
 }
 
+func TestBdStoreCloseForwardsStampedCloseReason(t *testing.T) {
+	const reason = "nudge failed: queue terminalization rejected delivery"
+	var closeArgs []string
+	runner := func(_, name string, args ...string) ([]byte, error) {
+		if name != "bd" {
+			return nil, fmt.Errorf("unexpected command name: %s", name)
+		}
+		switch strings.Join(args, " ") {
+		case "show --json bd-abc-123":
+			return []byte(`[{"id":"bd-abc-123","title":"test","status":"open","issue_type":"task","created_at":"2025-01-15T10:30:00Z","metadata":{"close_reason":"` + reason + `"}}]`), nil
+		case "close --force --json --reason " + reason + " bd-abc-123":
+			closeArgs = append([]string(nil), args...)
+			return []byte(`[{"id":"bd-abc-123","title":"test","status":"closed","issue_type":"task","created_at":"2025-01-15T10:30:00Z"}]`), nil
+		default:
+			return nil, fmt.Errorf("unexpected command: bd %s", strings.Join(args, " "))
+		}
+	}
+
+	s := beads.NewBdStore("/city", runner)
+	if err := s.Close("bd-abc-123"); err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"close", "--force", "--json", "--reason", reason, "bd-abc-123"}
+	if got := fmt.Sprint(closeArgs); got != fmt.Sprint(want) {
+		t.Fatalf("close args = %v, want %v", closeArgs, want)
+	}
+}
+
 func TestBdStoreReopenUsesReopenCommand(t *testing.T) {
 	runner := fakeRunner(map[string]struct {
 		out []byte

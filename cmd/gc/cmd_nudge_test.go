@@ -71,6 +71,15 @@ func (s *unrelatedNotFoundNudgeBeadStore) SetMetadataBatch(id string, kvs map[st
 	return s.MemStore.SetMetadataBatch(id, kvs)
 }
 
+type rollbackCloseFailStore struct {
+	*beads.MemStore
+	closeErr error
+}
+
+func (s *rollbackCloseFailStore) Close(string) error {
+	return s.closeErr
+}
+
 func TestMarkQueuedNudgeTerminalFallsBackWhenStoredBeadIDEmpty(t *testing.T) {
 	store := beads.NewMemStore()
 	item := queuedNudge{
@@ -2044,12 +2053,12 @@ func TestListQueuedNudges_CategorizesPendingAndDead(t *testing.T) {
 
 // TestMarkQueuedNudgeTerminalStampsCloseReason verifies that
 // markQueuedNudgeTerminal stamps a canonical close_reason on the nudge
-// bead's metadata before invoking store.Close. BdStore.Close (per #1644)
-// forwards metadata.close_reason as `bd close --reason ...`; without
-// this stamp, cities running with validation.on-close=error reject the
-// close, the withNudgeQueueState transaction rolls back, and the nudge
-// bounces between Pending and InFlight forever — generating a
-// bead.updated event per claim attempt for every wedged nudge.
+// bead's metadata before invoking store.Close. BdStore.Close forwards
+// metadata.close_reason as `bd close --reason ...`; without this stamp,
+// cities running with validation.on-close=error reject the close, the
+// withNudgeQueueState transaction rolls back, and the nudge bounces
+// between Pending and InFlight forever, generating a bead.updated event
+// per claim attempt for every wedged nudge.
 //
 // This test pins the contract that the close_reason metadata flows
 // through every state markQueuedNudgeTerminal handles. The
@@ -2142,8 +2151,8 @@ func TestNudgeCanonicalCloseReasonMeetsValidatorThreshold(t *testing.T) {
 	}
 	// Empty input also yields a >=20 char fallback (avoids accidental
 	// short close_reason if a caller passes "").
-	if got := nudgeCanonicalCloseReason(""); len(got) < 20 {
-		t.Errorf("empty-code fallback = %q (%d chars), want >=20", got, len(got))
+	if got := strings.TrimSpace(nudgeCanonicalCloseReason("")); len(got) < 20 {
+		t.Errorf("trimmed empty-code fallback = %q (%d chars), want >=20", got, len(got))
 	}
 	// Codes already >=20 characters pass through unchanged.
 	const long = "a-very-long-state-code-already-sufficient"
@@ -2155,10 +2164,10 @@ func TestNudgeCanonicalCloseReasonMeetsValidatorThreshold(t *testing.T) {
 // TestEnqueueQueuedNudgeWithStore_RollbackStampsCloseReason verifies that
 // enqueueQueuedNudgeWithStore's rollback path stamps a canonical
 // metadata.close_reason on the partially-created nudge bead before
-// invoking store.Close. Without the stamp, BdStore.Close (per #1644)
-// has no metadata.close_reason to forward, the validator (under
-// validation.on-close=error) rejects the close, and the rollback
-// silently leaks an OPEN nudge bead with metadata.state="queued".
+// invoking store.Close. Without the stamp, BdStore.Close has no
+// metadata.close_reason to forward, the validator (under
+// validation.on-close=error) rejects the close, and the rollback leaks
+// an OPEN nudge bead with metadata.state="queued".
 //
 // Triggers the rollback by writing corrupt JSON to the queue state
 // file before the call, which fails LoadState inside withNudgeQueueState
@@ -2204,5 +2213,37 @@ func TestEnqueueQueuedNudgeWithStore_RollbackStampsCloseReason(t *testing.T) {
 	// floor. If someone shortens it without thinking, this guard fires.
 	if got := nudgeEnqueueRollbackCloseReason; len(got) < 20 {
 		t.Errorf("nudgeEnqueueRollbackCloseReason = %q (%d chars), want >=20 to satisfy validation.on-close=error", got, len(got))
+	}
+}
+
+func TestEnqueueQueuedNudgeWithStore_RollbackReturnsCloseFailure(t *testing.T) {
+	dir := t.TempDir()
+
+	statePath := nudgequeue.StatePath(dir)
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	if err := os.WriteFile(statePath, []byte("{not-valid-json"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	closeErr := errors.New("rollback close failed")
+	store := &rollbackCloseFailStore{
+		MemStore: beads.NewMemStore(),
+		closeErr: closeErr,
+	}
+	item := newQueuedNudgeWithOptions("worker", "rollback close failure", "session", time.Now(), queuedNudgeOptions{
+		ID: "nudge-rollback-close-failure",
+	})
+
+	err := enqueueQueuedNudgeWithStore(dir, store, item)
+	if err == nil {
+		t.Fatal("enqueueQueuedNudgeWithStore: expected error from corrupt queue state and rollback close failure")
+	}
+	if !errors.Is(err, closeErr) {
+		t.Fatalf("error = %v, want joined rollback close failure", err)
+	}
+	if !strings.Contains(err.Error(), "rollback nudge bead") {
+		t.Fatalf("error = %q, want rollback context", err)
 	}
 }
