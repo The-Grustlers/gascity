@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2037,5 +2038,70 @@ func TestListQueuedNudges_CategorizesPendingAndDead(t *testing.T) {
 	}
 	if len(deadList) != 1 || deadList[0].ID != "n-stale" {
 		t.Fatalf("dead = %v, want [n-stale]", deadList)
+	}
+}
+
+// TestResolveNudgeTargetCLI_TimesOutOnSlowStore verifies that
+// resolveNudgeTargetCLI returns a concrete "timed out" error quickly when the
+// underlying resolver blocks (simulating a hung Dolt/bd subprocess) instead of
+// hanging for multiple 120s bd-subprocess timeouts (gc-6q7awk).
+func TestResolveNudgeTargetCLI_TimesOutOnSlowStore(t *testing.T) {
+	const testTimeout = 20 * time.Millisecond
+
+	orig := nudgeTargetResolverFn
+	origTimeout := nudgeTargetResolveTimeout
+	t.Cleanup(func() {
+		nudgeTargetResolverFn = orig
+		nudgeTargetResolveTimeout = origTimeout
+	})
+
+	nudgeTargetResolveTimeout = testTimeout
+	nudgeTargetResolverFn = func(_ string, _ ...io.Writer) (nudgeTarget, error) {
+		time.Sleep(5 * time.Second) // simulate hung bead-store lookup
+		return nudgeTarget{}, nil
+	}
+
+	start := time.Now()
+	_, err := resolveNudgeTargetCLI("director")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("resolveNudgeTargetCLI: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("resolveNudgeTargetCLI error = %q, want it to contain 'timed out'", err.Error())
+	}
+	// Should return well before the simulated 5s hang — allow 3× the timeout
+	// for scheduler jitter.
+	if elapsed > 3*testTimeout+100*time.Millisecond {
+		t.Fatalf("resolveNudgeTargetCLI took %v; should have returned within ~%v", elapsed, testTimeout)
+	}
+}
+
+// TestResolveNudgeTargetCLI_PassesThroughFastResult verifies that
+// resolveNudgeTargetCLI correctly forwards the result when resolution completes
+// before the deadline.
+func TestResolveNudgeTargetCLI_PassesThroughFastResult(t *testing.T) {
+	const testTimeout = 5 * time.Second
+
+	orig := nudgeTargetResolverFn
+	origTimeout := nudgeTargetResolveTimeout
+	t.Cleanup(func() {
+		nudgeTargetResolverFn = orig
+		nudgeTargetResolveTimeout = origTimeout
+	})
+
+	nudgeTargetResolveTimeout = testTimeout
+	wantTarget := nudgeTarget{identity: "director", sessionName: "gr7n-city.director"}
+	nudgeTargetResolverFn = func(_ string, _ ...io.Writer) (nudgeTarget, error) {
+		return wantTarget, nil
+	}
+
+	got, err := resolveNudgeTargetCLI("director")
+	if err != nil {
+		t.Fatalf("resolveNudgeTargetCLI: unexpected error: %v", err)
+	}
+	if got.identity != wantTarget.identity || got.sessionName != wantTarget.sessionName {
+		t.Fatalf("resolveNudgeTargetCLI = %+v, want %+v", got, wantTarget)
 	}
 }
