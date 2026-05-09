@@ -37,7 +37,21 @@ const (
 	defaultNudgePollQuiescence      = 3 * time.Second
 	defaultNudgePollStartGrace      = 15 * time.Second
 	defaultNudgeWaitIdleTimeout     = 30 * time.Second
+
+	// defaultNudgeTargetResolveTimeout bounds the bead-store lookup in
+	// resolveNudgeTarget. Each bd subprocess has a 120s timeout; without an
+	// overall cap, LookupConfiguredNamedSession can make 4 sequential calls
+	// and hang for up to 480s when the Dolt server is slow or unavailable.
+	defaultNudgeTargetResolveTimeout = 15 * time.Second
 )
+
+// nudgeTargetResolveTimeout is the deadline applied by resolveNudgeTargetCLI.
+// Tests may shrink it to make timeout assertions fast.
+var nudgeTargetResolveTimeout = defaultNudgeTargetResolveTimeout
+
+// nudgeTargetResolverFn is the underlying resolution function called by
+// resolveNudgeTargetCLI. Tests may replace it to inject latency or errors.
+var nudgeTargetResolverFn = resolveNudgeTarget
 
 var errNudgeSessionFenceMismatch = errors.New("queued nudge session fence mismatch")
 
@@ -244,7 +258,7 @@ func cmdNudgeStatus(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	target, err := resolveNudgeTarget(targetID, stderr)
+	target, err := resolveNudgeTargetCLI(targetID, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc nudge status: %v\n", err) //nolint:errcheck
 		return 1
@@ -302,7 +316,7 @@ func cmdNudgeDrainWithFormat(args []string, inject bool, hookFormat string, stdo
 		return 1
 	}
 
-	target, err := resolveNudgeTarget(targetID, stderr)
+	target, err := resolveNudgeTargetCLI(targetID, stderr)
 	if err != nil {
 		if inject {
 			return 0
@@ -409,7 +423,7 @@ func cmdNudgePoll(args []string, sessionName string, interval, quiescence time.D
 		fmt.Fprintln(stderr, "gc nudge poll: session not specified (set $GC_ALIAS/$GC_SESSION_ID or pass an alias/id)") //nolint:errcheck
 		return 1
 	}
-	target, err := resolveNudgeTarget(targetID, stderr)
+	target, err := resolveNudgeTargetCLI(targetID, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "gc nudge poll: %v\n", err) //nolint:errcheck
 		return 1
@@ -602,6 +616,28 @@ func sendMailNotifyWithWorker(target nudgeTarget, store beads.Store, sp runtime.
 		maybeStartNudgePoller(target)
 	}
 	return nil
+}
+
+// resolveNudgeTargetCLI is the CLI entry point for resolving a nudge target.
+// It wraps nudgeTargetResolverFn with nudgeTargetResolveTimeout so that a slow
+// or unavailable bead store returns a concrete error quickly rather than
+// hanging for multiple 120s bd-subprocess timeouts.
+func resolveNudgeTargetCLI(identifier string, warningWriter ...io.Writer) (nudgeTarget, error) {
+	type result struct {
+		target nudgeTarget
+		err    error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		t, err := nudgeTargetResolverFn(identifier, warningWriter...)
+		ch <- result{t, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.target, r.err
+	case <-time.After(nudgeTargetResolveTimeout):
+		return nudgeTarget{}, fmt.Errorf("session identity lookup timed out after %s: bead store may be slow or unavailable", nudgeTargetResolveTimeout)
+	}
 }
 
 func resolveNudgeTarget(identifier string, warningWriter ...io.Writer) (nudgeTarget, error) {
