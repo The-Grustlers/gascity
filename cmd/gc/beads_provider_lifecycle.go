@@ -85,6 +85,8 @@ var resolveProviderLifecycleGCBinary = func() string {
 	return ""
 }
 
+var providerProbeTimeout = 10 * time.Second
+
 var (
 	initDirIfReadyEnsureBeadsProvider = ensureBeadsProvider
 	initDirIfReadyInitAndHookDir      = initAndHookDir
@@ -1426,11 +1428,12 @@ func normalizeScopeDoltConfig(dir string, state contract.ConfigState) error {
 // available (exit 2) or on any error. Unlike runProviderOp, exit 2 means
 // "not running" rather than "not needed."
 func runProviderProbe(script, cityPath, provider string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), providerProbeTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, script, "probe")
 	cmd.WaitDelay = 2 * time.Second
+	prepareProviderOpCommand(cmd)
 	if cityPath != "" {
 		cmd.Env = providerLifecycleProcessEnv(cityPath, provider)
 	}
@@ -1547,7 +1550,7 @@ func acquireProviderSemaphoreForOp(cityPath, op string) (func(), error) {
 // operation. The "start" and "recover" operations get a longer timeout
 // because dolt server startup can take 30+ seconds for large data dirs.
 // All other operations use 30s.
-func providerOpTimeout(op string) time.Duration {
+var providerOpTimeout = func(op string) time.Duration {
 	switch op {
 	case "start", "recover":
 		return 120 * time.Second
@@ -1578,6 +1581,7 @@ func runProviderOpWithEnv(script string, environ []string, args ...string) error
 
 	cmd := exec.CommandContext(ctx, script, args...)
 	cmd.WaitDelay = 2 * time.Second
+	prepareProviderOpCommand(cmd)
 	if len(environ) > 0 {
 		cmd.Env = environ
 	}
