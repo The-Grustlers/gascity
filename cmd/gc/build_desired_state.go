@@ -1087,16 +1087,9 @@ func listForControllerDemand(store beads.Store, query beads.ListQuery) ([]beads.
 }
 
 func readyForControllerDemand(store beads.Store) ([]beads.Bead, error) {
-	// Controller demand reads are intentionally cache-tolerant, not
-	// authoritative lifecycle gates; CachedReady falls back whenever the cache
-	// has dirty or unknown dependency coverage.
-	if cached, ok := store.(interface {
-		CachedReady() ([]beads.Bead, bool)
-	}); ok {
-		if ready, ok := cached.CachedReady(); ok {
-			return ready, nil
-		}
-	}
+	// Pool scale checks decide whether to create new sessions. Use a live
+	// Ready read so stale cached status/metadata cannot keep creating workers
+	// after the backing bead queue is no longer actionable.
 	return beads.ReadyLive(store)
 }
 
