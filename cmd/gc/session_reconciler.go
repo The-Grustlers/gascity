@@ -722,6 +722,9 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 							}
 						}
 						if stopped {
+							if !hasAssignedWork {
+								annotateEmptyWake(store, session, clk.Now().UTC(), stderr)
+							}
 							template := normalizedSessionTemplate(*session, cfg)
 							if template == "" {
 								template = session.Metadata["template"]
@@ -962,6 +965,8 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 						batch := sessionpkg.AcknowledgeDrainPatch(session.Metadata["wake_mode"] == "fresh")
 						if hasAssignedWork {
 							batch = sessionpkg.CompleteDrainPatch(clk.Now().UTC(), sleepReason, session.Metadata["wake_mode"] == "fresh")
+						} else {
+							annotateEmptyWakePatch(batch, session.Metadata, clk.Now().UTC())
 						}
 						_ = store.SetMetadataBatch(session.ID, batch)
 						if session.Metadata == nil {
@@ -1433,6 +1438,14 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 				session: target.session,
 				tp:      target.tp,
 				order:   len(startCandidates),
+				provenance: wakeProvenanceForStart(
+					*target.session,
+					target.tp,
+					decision.Reason,
+					poolDesired,
+					assignedWorkBeads,
+					cfg,
+				),
 			})
 		}
 

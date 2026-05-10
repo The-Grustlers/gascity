@@ -103,6 +103,51 @@ func TestPreWakeCommit(t *testing.T) {
 	}
 }
 
+func TestPreWakeCommitRecordsWakeProvenance(t *testing.T) {
+	now := time.Date(2026, 5, 10, 18, 30, 0, 0, time.UTC)
+	clk := &clock.Fake{Time: now}
+	store := beads.NewMemStore()
+
+	b, err := store.Create(beads.Bead{
+		Title: "test-session",
+		Metadata: map[string]string{
+			"session_name": "project-worker-gc-test",
+			"template":     "rabble/project-worker",
+			"generation":   "2",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err = preWakeCommitWithProvenance(&b, store, clk, wakeProvenance{
+		Reason:           "scaled:demand",
+		Source:           "scale_check",
+		Template:         "rabble/project-worker",
+		PoolDesiredCount: 1,
+	})
+	if err != nil {
+		t.Fatalf("preWakeCommitWithProvenance: %v", err)
+	}
+
+	got, err := store.Get(b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Metadata["last_wake_reason"] != "scaled:demand" {
+		t.Fatalf("last_wake_reason = %q, want scaled:demand", got.Metadata["last_wake_reason"])
+	}
+	if got.Metadata["last_wake_source"] != "scale_check" {
+		t.Fatalf("last_wake_source = %q, want scale_check", got.Metadata["last_wake_source"])
+	}
+	if got.Metadata["last_wake_template"] != "rabble/project-worker" {
+		t.Fatalf("last_wake_template = %q, want rabble/project-worker", got.Metadata["last_wake_template"])
+	}
+	if got.Metadata["last_wake_pool_desired_count"] != "1" {
+		t.Fatalf("last_wake_pool_desired_count = %q, want 1", got.Metadata["last_wake_pool_desired_count"])
+	}
+}
+
 func TestPreWakeCommitUsesSingleBatchMetadataWrite(t *testing.T) {
 	now := time.Date(2026, 3, 8, 12, 0, 0, 0, time.UTC)
 	clk := &clock.Fake{Time: now}

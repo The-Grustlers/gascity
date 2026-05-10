@@ -292,7 +292,11 @@ func TestReconcileSessionBeads_DrainAckKeepsBeadOpen(t *testing.T) {
 	session := env.createSessionBead("worker", "worker")
 	env.markSessionActive(&session)
 	env.setSessionMetadata(&session, map[string]string{
-		"pending_create_claim": "true",
+		"pending_create_claim":         "true",
+		"last_wake_reason":             "scaled:demand",
+		"last_wake_source":             "scale_check",
+		"last_wake_template":           "worker",
+		"last_wake_pool_desired_count": "1",
 	})
 	if err := env.sp.SetMeta("worker", "GC_SESSION_ID", session.ID); err != nil {
 		t.Fatalf("SetMeta(GC_SESSION_ID): %v", err)
@@ -346,6 +350,18 @@ func TestReconcileSessionBeads_DrainAckKeepsBeadOpen(t *testing.T) {
 	}
 	if got.Metadata["pending_create_claim"] != "" {
 		t.Fatalf("pending_create_claim = %q, want cleared after drain-ack", got.Metadata["pending_create_claim"])
+	}
+	if got.Metadata["last_empty_wake_reason"] != "scaled:demand" {
+		t.Fatalf("last_empty_wake_reason = %q, want scaled:demand", got.Metadata["last_empty_wake_reason"])
+	}
+	if got.Metadata["last_empty_wake_source"] != "scale_check" {
+		t.Fatalf("last_empty_wake_source = %q, want scale_check", got.Metadata["last_empty_wake_source"])
+	}
+	if got.Metadata["last_empty_wake_template"] != "worker" {
+		t.Fatalf("last_empty_wake_template = %q, want worker", got.Metadata["last_empty_wake_template"])
+	}
+	if got.Metadata["last_empty_wake_pool_desired_count"] != "1" {
+		t.Fatalf("last_empty_wake_pool_desired_count = %q, want 1", got.Metadata["last_empty_wake_pool_desired_count"])
 	}
 }
 
