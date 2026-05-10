@@ -136,9 +136,10 @@ var stopPerTargetTimeoutDefault = 30 * time.Second
 var interruptPerTargetTimeoutMargin = 2 * time.Second
 
 type startCandidate struct {
-	session *beads.Bead
-	tp      TemplateParams
-	order   int
+	session    *beads.Bead
+	tp         TemplateParams
+	order      int
+	provenance wakeProvenance
 }
 
 func (c startCandidate) name() string {
@@ -643,7 +644,7 @@ func prepareStartCandidateForCity(
 	stderr io.Writer,
 ) (*preparedStart, error) {
 	session := candidate.session
-	if _, _, err := preWakeCommit(session, store, clk); err != nil {
+	if _, _, err := preWakeCommitWithProvenance(session, store, clk, candidate.provenance); err != nil {
 		return nil, err
 	}
 	candidate = refreshConfiguredNamedStartCandidate(candidate, cityPath, cityName, cfg, sp, store, clk, stderr)

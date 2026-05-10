@@ -33,6 +33,15 @@ func preWakeCommit(
 	store beads.Store,
 	clk clock.Clock,
 ) (newGen int, token string, err error) {
+	return preWakeCommitWithProvenance(session, store, clk, wakeProvenance{})
+}
+
+func preWakeCommitWithProvenance(
+	session *beads.Bead,
+	store beads.Store,
+	clk clock.Clock,
+	provenance wakeProvenance,
+) (newGen int, token string, err error) {
 	name := session.Metadata["session_name"]
 	if !sessions.IsSessionNameSyntaxValid(name) {
 		return 0, "", fmt.Errorf("invalid session_name %q", name)
@@ -65,6 +74,7 @@ func preWakeCommit(
 		SleepReason:       sleepReason,
 		FreshWake:         freshWake,
 	})
+	applyWakeProvenancePatch(batch, provenance)
 	if writeErr := store.SetMetadataBatch(session.ID, batch); writeErr != nil {
 		return 0, "", fmt.Errorf("pre-wake metadata commit: %w", writeErr)
 	}
