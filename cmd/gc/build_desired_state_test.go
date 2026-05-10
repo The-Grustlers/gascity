@@ -351,8 +351,8 @@ func TestCollectAssignedWorkBeads_ExcludesBlockedOpenAssignedHandoff(t *testing.
 	}
 }
 
-func TestDefaultScaleCheckCountsUsesCachedReadyReadModel(t *testing.T) {
-	backing := &readyFailStore{Store: beads.NewMemStore()}
+func TestDefaultScaleCheckCountsUsesLiveReadyReadModel(t *testing.T) {
+	backing := &readyQueryRecordingStore{MemStore: beads.NewMemStore()}
 	if _, err := backing.Create(beads.Bead{
 		Title:  "queued routed work",
 		Type:   "task",
@@ -379,8 +379,8 @@ func TestDefaultScaleCheckCountsUsesCachedReadyReadModel(t *testing.T) {
 	if got := counts["gascity/workflows.codex-min"]; got != 1 {
 		t.Fatalf("defaultScaleCheckCounts = %d, want 1", got)
 	}
-	if backing.readyCalls != 0 {
-		t.Fatalf("backing Ready calls = %d, want cached demand read", backing.readyCalls)
+	if len(backing.readyQueries) != 1 {
+		t.Fatalf("backing Ready calls = %d, want one live demand read", len(backing.readyQueries))
 	}
 }
 
@@ -417,8 +417,8 @@ func TestDefaultScaleCheckCountsIgnoresOpenMoleculeContainers(t *testing.T) {
 	}
 }
 
-func TestDefaultScaleCheckCountsHonorsCachedWriteThroughDependencies(t *testing.T) {
-	backing := &readyFailStore{Store: beads.NewMemStore()}
+func TestDefaultScaleCheckCountsHonorsLiveDependencies(t *testing.T) {
+	backing := &readyQueryRecordingStore{MemStore: beads.NewMemStore()}
 	blocker, err := backing.Create(beads.Bead{
 		Title:  "blocked earlier step",
 		Type:   "task",
@@ -457,8 +457,8 @@ func TestDefaultScaleCheckCountsHonorsCachedWriteThroughDependencies(t *testing.
 	if got := counts["gascity/workflows.codex-max"]; got != 0 {
 		t.Fatalf("defaultScaleCheckCounts = %d, want blocked future work excluded", got)
 	}
-	if backing.readyCalls != 0 {
-		t.Fatalf("backing Ready calls = %d, want cached demand read", backing.readyCalls)
+	if len(backing.readyQueries) != 1 {
+		t.Fatalf("backing Ready calls = %d, want one live demand read", len(backing.readyQueries))
 	}
 }
 

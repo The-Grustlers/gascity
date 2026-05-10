@@ -967,6 +967,48 @@ func TestBuildPodEnvRemapsVars(t *testing.T) {
 	}
 }
 
+func TestBuildPodEnvStripsHostShellVars(t *testing.T) {
+	cfgEnv := map[string]string{
+		"GC_AGENT":          "web-worker",
+		"GC_CITY":           "/host/city",
+		"HOME":              "/home/bryce",
+		"USER":              "bryce",
+		"LOGNAME":           "bryce",
+		"PATH":              "/home/bryce/.local/bin:/usr/bin",
+		"TERM":              "xterm-256color",
+		"XDG_CONFIG_HOME":   "/home/bryce/.config",
+		"XDG_STATE_HOME":    "/home/bryce/.local/state",
+		"CLAUDE_CONFIG_DIR": "/home/bryce/.claude",
+		"CUSTOM_VAR":        "preserved",
+	}
+
+	env := mustBuildPodEnv(t, cfgEnv, "/workspace", podManagedDoltHost, podManagedDoltPort)
+	envMap := map[string]string{}
+	for _, e := range env {
+		envMap[e.Name] = e.Value
+	}
+
+	for _, key := range []string{
+		"HOME",
+		"USER",
+		"LOGNAME",
+		"PATH",
+		"TERM",
+		"XDG_CONFIG_HOME",
+		"XDG_STATE_HOME",
+	} {
+		if _, ok := envMap[key]; ok {
+			t.Fatalf("%s leaked into pod env", key)
+		}
+	}
+	if envMap["CLAUDE_CONFIG_DIR"] != "/home/gcagent/.claude" {
+		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want /home/gcagent/.claude", envMap["CLAUDE_CONFIG_DIR"])
+	}
+	if envMap["CUSTOM_VAR"] != "preserved" {
+		t.Fatalf("CUSTOM_VAR = %q, want preserved", envMap["CUSTOM_VAR"])
+	}
+}
+
 func TestBuildPodEnvReprojectsExternalRuntimeRoots(t *testing.T) {
 	cfgEnv := map[string]string{
 		"GC_CITY":                             "/host/city",

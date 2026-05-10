@@ -397,6 +397,24 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir, managedServiceHost, manag
 		"GC_DOLT_PORT":           true,
 		"BEADS_DOLT_SERVER_HOST": true,
 		"BEADS_DOLT_SERVER_PORT": true,
+		// Host shell vars must not override the image-level pod defaults.
+		// For example, HOME=/home/bryce makes the gcagent container try to
+		// write Claude config under a host user path it cannot create.
+		"HOME":              true,
+		"USER":              true,
+		"LOGNAME":           true,
+		"PWD":               true,
+		"OLDPWD":            true,
+		"SHLVL":             true,
+		"MAIL":              true,
+		"PATH":              true,
+		"TERM":              true,
+		"XDG_CONFIG_HOME":   true,
+		"XDG_DATA_HOME":     true,
+		"XDG_CACHE_HOME":    true,
+		"XDG_STATE_HOME":    true,
+		"XDG_RUNTIME_DIR":   true,
+		"CLAUDE_CONFIG_DIR": true,
 	}
 
 	ctrlCity := controllerCityPath(cfgEnv)
