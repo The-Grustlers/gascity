@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,5 +106,91 @@ func TestDoBeadsHealth_BdSkip(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Beads provider: healthy") {
 		t.Errorf("GC_DOLT=skip should pass: %s", stdout.String())
+	}
+}
+
+func TestDoBeadsHealth_RejectsInheritedRigLocalDoltDatabase(t *testing.T) {
+	cityDir := t.TempDir()
+	rigDir := filepath.Join(t.TempDir(), "rabble")
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigDir, ".beads", "dolt", "rb", ".dolt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(fmt.Sprintf(`[workspace]
+name = "test-city"
+
+[[rigs]]
+name = "rabble"
+path = %q
+prefix = "rb"
+`, rigDir)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigDir, ".beads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rigDir, ".beads", "config.yaml"), []byte("issue_prefix: rb\ngc.endpoint_origin: inherited_city\ngc.endpoint_status: verified\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rigDir, ".beads", "metadata.json"), []byte("{\"backend\":\"dolt\",\"dolt_database\":\"rb\"}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldCityFlag := cityFlag
+	cityFlag = cityDir
+	t.Cleanup(func() { cityFlag = oldCityFlag })
+	t.Setenv("GC_BEADS", "file")
+
+	var stdout, stderr bytes.Buffer
+	code := doBeadsHealth(false, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("exit code = %d, want 1; stdout = %s; stderr = %s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "split-brain guard") || !strings.Contains(stderr.String(), "rig-local Dolt database") {
+		t.Fatalf("stderr should mention split-brain local database, got: %s", stderr.String())
+	}
+}
+
+func TestDoBeadsHealth_AllowsInheritedRigRootDoltMetadataOnly(t *testing.T) {
+	cityDir := t.TempDir()
+	rigDir := filepath.Join(t.TempDir(), "rabble")
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigDir, ".beads", "dolt", ".dolt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(fmt.Sprintf(`[workspace]
+name = "test-city"
+
+[[rigs]]
+name = "rabble"
+path = %q
+prefix = "rb"
+`, rigDir)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigDir, ".beads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rigDir, ".beads", "config.yaml"), []byte("issue_prefix: rb\ngc.endpoint_origin: inherited_city\ngc.endpoint_status: verified\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(rigDir, ".beads", "metadata.json"), []byte("{\"backend\":\"dolt\",\"dolt_database\":\"rb\"}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldCityFlag := cityFlag
+	cityFlag = cityDir
+	t.Cleanup(func() { cityFlag = oldCityFlag })
+	t.Setenv("GC_BEADS", "file")
+
+	var stdout, stderr bytes.Buffer
+	code := doBeadsHealth(false, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit code = %d, want 0; stderr = %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Beads provider: healthy") {
+		t.Fatalf("should show healthy message: %s", stdout.String())
 	}
 }

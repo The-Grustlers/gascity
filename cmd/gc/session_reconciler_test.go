@@ -3985,6 +3985,43 @@ func TestReconcileSessionBeads_PreservesPendingCreateWhenLeaseRecentNoRuntime(t 
 	}
 }
 
+func TestReconcileSessionBeads_ClearsCompletedAsleepPendingCreateWithoutWake(t *testing.T) {
+	env := newReconcilerTestEnv()
+	env.cfg = &config.City{Agents: []config.Agent{{Name: "worker"}}}
+	env.desiredState["worker"] = TemplateParams{
+		Command:      "test-cmd",
+		SessionName:  "worker",
+		TemplateName: "worker",
+	}
+	session := env.createSessionBead("worker", "worker")
+	env.setSessionMetadata(&session, map[string]string{
+		"state":                     "asleep",
+		"pending_create_claim":      "true",
+		"pending_create_started_at": env.clk.Now().Add(-time.Minute).UTC().Format(time.RFC3339),
+		"last_woke_at":              env.clk.Now().Add(-10 * time.Second).UTC().Format(time.RFC3339),
+	})
+
+	if woken := env.reconcile([]beads.Bead{session}); woken != 0 {
+		t.Fatalf("woken = %d, want 0 for completed pending-create cleanup", woken)
+	}
+	if env.sp.IsRunning("worker") {
+		t.Fatal("worker runtime was started from a completed pending-create claim")
+	}
+	got, err := env.store.Get(session.ID)
+	if err != nil {
+		t.Fatalf("Get(session): %v", err)
+	}
+	if got.Metadata["pending_create_claim"] != "" {
+		t.Fatalf("pending_create_claim = %q, want cleared", got.Metadata["pending_create_claim"])
+	}
+	if got.Metadata["pending_create_started_at"] != "" {
+		t.Fatalf("pending_create_started_at = %q, want cleared", got.Metadata["pending_create_started_at"])
+	}
+	if got.Metadata["last_woke_at"] != "" {
+		t.Fatalf("last_woke_at = %q, want cleared", got.Metadata["last_woke_at"])
+	}
+}
+
 func TestPendingCreateNeverStartedExpiredEdges(t *testing.T) {
 	clk := &clock.Fake{Time: time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)}
 	base := beads.Bead{

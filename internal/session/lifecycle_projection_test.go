@@ -159,6 +159,34 @@ func TestProjectLifecycleDesiredStateAndBlockers(t *testing.T) {
 	}
 }
 
+func TestProjectLifecycleCompletedPendingCreateDoesNotWake(t *testing.T) {
+	now := time.Date(2026, 4, 15, 12, 0, 0, 0, time.UTC)
+	view := ProjectLifecycle(LifecycleInput{
+		Status: "open",
+		Metadata: map[string]string{
+			"state":                "asleep",
+			"session_name":         "s-worker",
+			"pending_create_claim": "true",
+			"last_woke_at":         now.Add(-15 * time.Second).UTC().Format(time.RFC3339),
+		},
+		Runtime: RuntimeFacts{Observed: true, Alive: false},
+		Now:     now,
+	})
+
+	if view.HasWakeCause(WakeCausePendingCreate) {
+		t.Fatalf("WakeCausePendingCreate = true for completed asleep attempt; causes=%v", view.WakeCauses)
+	}
+	if view.DesiredState != DesiredStateUndesired {
+		t.Fatalf("DesiredState = %q, want %q", view.DesiredState, DesiredStateUndesired)
+	}
+	if view.RuntimeProjection != RuntimeProjectionMissing {
+		t.Fatalf("RuntimeProjection = %q, want %q", view.RuntimeProjection, RuntimeProjectionMissing)
+	}
+	if view.ReconciledState != StateAsleep {
+		t.Fatalf("ReconciledState = %q, want %q", view.ReconciledState, StateAsleep)
+	}
+}
+
 func TestProjectLifecycleCreatingStalenessUsesPendingCreateStartedAt(t *testing.T) {
 	now := time.Date(2026, 5, 3, 9, 0, 0, 0, time.UTC)
 	view := ProjectLifecycle(LifecycleInput{

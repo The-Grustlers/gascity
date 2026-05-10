@@ -71,6 +71,10 @@ func doBeadsHealth(quiet bool, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "gc beads health: %v\n", err) //nolint:errcheck // best-effort stderr
 		return 1
 	}
+	if err := validateNoInheritedRigSplitBrain(cityPath); err != nil {
+		fmt.Fprintf(stderr, "gc beads health: %v\n", err) //nolint:errcheck // best-effort stderr
+		return 1
+	}
 	if !quiet {
 		fmt.Fprintln(stdout, "Beads provider: healthy") //nolint:errcheck // best-effort stdout
 	}

@@ -143,6 +143,9 @@ func pendingCreateSessionStillLeased(session beads.Bead, cfg *config.City, clk c
 		startupTimeout = cfg.Session.StartupTimeoutDuration()
 	}
 	if strings.TrimSpace(session.Metadata["pending_create_claim"]) == "true" {
+		if !sessionpkg.PendingCreateClaimWakeEligible(session.Metadata) {
+			return false
+		}
 		if !pendingCreateLeaseActive(session, clk, startupTimeout) {
 			return false
 		}
@@ -596,6 +599,18 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 
 		name := strings.TrimSpace(session.Metadata["session_name"])
 		tp, desired := desiredState[name]
+		if cleared, err := clearCompletedPendingCreateClaim(session, store); err != nil {
+			fmt.Fprintf(stderr, "session reconciler: clearing completed pending create %s: %v\n", name, err) //nolint:errcheck
+			continue
+		} else if cleared && trace != nil {
+			template := normalizedSessionTemplate(*session, cfg)
+			if template == "" {
+				template = session.Metadata["template"]
+			}
+			trace.recordDecision("reconciler.session.pending_create", template, name, "pending_create_completed", "cleared", traceRecordPayload{
+				"state": session.Metadata["state"],
+			}, nil, "")
+		}
 
 		// Orphan/suspended: bead exists but not in desired state.
 		// Handle BEFORE heal/stability to avoid false crash detection —
