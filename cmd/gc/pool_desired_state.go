@@ -6,6 +6,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	sessionpkg "github.com/gastownhall/gascity/internal/session"
 )
 
 // SessionRequest represents a single session the reconciler should start.
@@ -251,7 +252,7 @@ func poolInFlightNewRequests(cfg *config.City, sessionBeads []beads.Bead, resume
 
 func poolSessionConsumesNewDemand(session beads.Bead) bool {
 	if strings.TrimSpace(session.Metadata["pending_create_claim"]) == boolMetadata(true) {
-		return true
+		return sessionpkg.PendingCreateClaimWakeEligible(session.Metadata)
 	}
 	// This pure desired-state pass has no reconciler clock. Creating sessions
 	// still represent already-spent new demand; lifecycle code owns stale

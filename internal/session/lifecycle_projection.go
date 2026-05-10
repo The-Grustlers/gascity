@@ -559,7 +559,7 @@ func projectWakeCauses(input LifecycleInput, meta map[string]string) []WakeCause
 	for _, cause := range input.WakeCauses {
 		causes = appendUniqueWakeCause(causes, cause)
 	}
-	if strings.TrimSpace(meta["pending_create_claim"]) == "true" {
+	if PendingCreateClaimWakeEligible(meta) {
 		causes = appendUniqueWakeCause(causes, WakeCausePendingCreate)
 	}
 	if strings.TrimSpace(meta["pin_awake"]) == "true" {
@@ -572,6 +572,30 @@ func projectWakeCauses(input LifecycleInput, meta map[string]string) []WakeCause
 		causes = appendUniqueWakeCause(causes, WakeCausePending)
 	}
 	return causes
+}
+
+// PendingCreateClaimWakeEligible reports whether a persisted create claim still
+// represents an initial start attempt that should wake or reserve capacity.
+func PendingCreateClaimWakeEligible(meta map[string]string) bool {
+	if strings.TrimSpace(meta["pending_create_claim"]) != "true" {
+		return false
+	}
+	return !PendingCreateClaimCompletedAttempt(meta)
+}
+
+// PendingCreateClaimCompletedAttempt detects a stale shape where a session was
+// already woken at least once and then recorded as stopped/asleep. That claim
+// must not continue acting like an in-flight create, or the controller can
+// restart an idle pool slot forever.
+func PendingCreateClaimCompletedAttempt(meta map[string]string) bool {
+	if strings.TrimSpace(meta["pending_create_claim"]) != "true" {
+		return false
+	}
+	state := BaseState(strings.TrimSpace(meta["state"]))
+	if state != BaseStateAsleep && state != BaseStateDrained {
+		return false
+	}
+	return strings.TrimSpace(meta["last_woke_at"]) != ""
 }
 
 func projectDesiredState(input LifecycleInput, terminal bool, blockers []LifecycleBlocker, wakeCauses []WakeCause) DesiredState {

@@ -834,6 +834,23 @@ func TestComputePoolDesiredStates_InFlightNewSessionsOnlySubtractCoveredDemand(t
 	}
 }
 
+func TestComputePoolDesiredStates_CompletedPendingCreateDoesNotConsumeScaleDemand(t *testing.T) {
+	cfg := &config.City{
+		Agents: []config.Agent{poolAgent("claude", "", intPtr(10), 0)},
+	}
+	session := poolSessionBeadWithState("sess-asleep", "asleep", boolMetadata(true))
+	session.Metadata["last_woke_at"] = time.Date(2026, 5, 10, 21, 37, 42, 0, time.UTC).Format(time.RFC3339)
+
+	result := ComputePoolDesiredStates(cfg, nil, []beads.Bead{session}, map[string]int{"claude": 1})
+
+	if len(result) != 1 || len(result[0].Requests) != 1 {
+		t.Fatalf("result = %#v, want one anonymous request for live demand", result)
+	}
+	if got := result[0].Requests[0].SessionBeadID; got != "" {
+		t.Fatalf("SessionBeadID = %q, want empty anonymous request; completed pending create must not be reused", got)
+	}
+}
+
 func TestComputePoolDesiredStates_InFlightResumeBeadsDoNotConsumeNewDemand(t *testing.T) {
 	cfg := &config.City{
 		Agents: []config.Agent{poolAgent("claude", "", intPtr(10), 0)},

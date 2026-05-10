@@ -380,6 +380,97 @@ read_existing_dolt_database() {
     grep -o '"dolt_database"[[:space:]]*:[[:space:]]*"[^"]*"' "$meta_file" 2>/dev/null |         sed 's/.*"dolt_database"[[:space:]]*:[[:space:]]*"//;s/"//' || true
 }
 
+read_yaml_scalar() {
+    local file="$1" key="$2"
+    [ -f "$file" ] || return 0
+    sed -n 's/^[[:space:]]*'"$key"'[[:space:]]*:[[:space:]]*"\{0,1\}\([^"#]*\)"\{0,1\}[[:space:]]*$/\1/p' "$file" | head -1 | sed 's/[[:space:]]*$//'
+}
+
+list_site_rigs() {
+    local site_file="$GC_CITY_PATH/.gc/site.toml"
+    [ -f "$site_file" ] || return 0
+    awk '
+        /^\[\[rig\]\]/ {
+            if (name != "" && path != "") print name "\t" path
+            name = ""
+            path = ""
+            next
+        }
+        /^[[:space:]]*name[[:space:]]*=/ {
+            value = $0
+            sub(/^[^=]*=[[:space:]]*"/, "", value)
+            sub(/".*$/, "", value)
+            name = value
+            next
+        }
+        /^[[:space:]]*path[[:space:]]*=/ {
+            value = $0
+            sub(/^[^=]*=[[:space:]]*"/, "", value)
+            sub(/".*$/, "", value)
+            path = value
+            next
+        }
+        END {
+            if (name != "" && path != "") print name "\t" path
+        }
+    ' "$site_file"
+}
+
+assert_no_inherited_rig_split_brain() {
+    local rig_name rig_path config_file origin metadata_file dolt_database port_file port db_dir child_db_dir pid proc_args cwd
+
+    list_site_rigs | while IFS="$(printf '\t')" read -r rig_name rig_path; do
+        [ -n "$rig_name" ] || continue
+        [ -n "$rig_path" ] || continue
+
+        config_file="$rig_path/.beads/config.yaml"
+        origin=$(read_yaml_scalar "$config_file" "gc.endpoint_origin")
+        [ "$origin" = "inherited_city" ] || continue
+
+        metadata_file="$rig_path/.beads/metadata.json"
+        dolt_database=$(read_existing_dolt_database "$metadata_file")
+        if [ -z "$dolt_database" ]; then
+            dolt_database=$(read_yaml_scalar "$config_file" "issue_prefix")
+        fi
+
+        port_file="$rig_path/.beads/dolt-server.port"
+        if [ -f "$port_file" ]; then
+            port=$(sed -n '1p' "$port_file" | tr -d '[:space:]')
+            if [ -n "$port" ] && [ "$port" != "$DOLT_PORT" ]; then
+                die "split-brain risk: inherited rig '$rig_name' points at Dolt port $port, but city canonical port is $DOLT_PORT ($port_file)"
+            fi
+        fi
+
+        if [ -n "$dolt_database" ]; then
+            db_dir="$rig_path/.beads/dolt/$dolt_database"
+            if [ -d "$db_dir/.dolt" ]; then
+                die "split-brain risk: inherited rig '$rig_name' has a local Dolt database at $db_dir; quarantine it before using city-managed beads"
+            fi
+        fi
+
+        for child_db_dir in "$rig_path"/.beads/dolt/*/.dolt; do
+            [ -d "$child_db_dir" ] || continue
+            child_db_dir=${child_db_dir%/.dolt}
+            die "split-brain risk: inherited rig '$rig_name' has local Dolt database '$child_db_dir'; inherited rigs must not keep per-rig Dolt DBs"
+        done
+
+        for pid in $(ps ax -o pid= -o args= 2>/dev/null | awk '/dolt sql-server/ && !/awk/ {print $1}'); do
+            proc_args=$(ps -p "$pid" -o args= 2>/dev/null || true)
+            case "$proc_args" in
+                *"$rig_path/.beads/dolt"*|*"$rig_path/.beads/dolt-server"*|*"$rig_path/.beads/"*"dolt-config.yaml"*)
+                    die "split-brain risk: inherited rig '$rig_name' has local Dolt sql-server PID $pid ($proc_args)"
+                    ;;
+            esac
+            if [ -d "/proc/$pid" ]; then
+                cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null || true)
+                if [ -n "$cwd" ] && same_dir_path "$cwd" "$rig_path/.beads/dolt"; then
+                    die "split-brain risk: inherited rig '$rig_name' has local Dolt sql-server PID $pid with cwd $cwd"
+                fi
+            fi
+        done
+    done
+}
+
 metadata_has_project_id() {
     local meta_file="$1"
     [ -f "$meta_file" ] || return 1
@@ -1720,6 +1811,7 @@ op_start() {
     gc_helper_bin=$(resolve_gc_helper_bin)
 
     ensure_dolt_identity
+    assert_no_inherited_rig_split_brain
 
     # Check for required tools before attempting anything.
     if ! command -v flock >/dev/null 2>&1; then
@@ -2249,6 +2341,8 @@ op_store_bridge() {
 }
 op_health() {
     local conn_count="" read_only_status
+
+    assert_no_inherited_rig_split_brain
 
     # TCP check.
     if ! tcp_check; then
