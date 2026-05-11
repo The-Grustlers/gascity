@@ -501,7 +501,7 @@
             "type": "string"
           },
           "type": "array",
-          "description": "InjectFragments overrides the agent's inject_fragments list."
+          "description": "InjectFragments overrides the agent's inject_fragments list. Leave this\nfield unset to keep inherited fragments; JSON callers may send null for\nthe same no-op. Set an empty list to clear fragments; set a populated\nlist to replace fragments."
         },
         "append_fragments": {
           "items": {
@@ -758,7 +758,7 @@
             "type": "string"
           },
           "type": "array",
-          "description": "InjectFragments overrides the agent's inject_fragments list."
+          "description": "InjectFragments overrides the agent's inject_fragments list. Leave this\nfield unset to keep inherited fragments; JSON callers may send null for\nthe same no-op. Set an empty list to clear fragments; set a populated\nlist to replace fragments."
         },
         "append_fragments": {
           "items": {
