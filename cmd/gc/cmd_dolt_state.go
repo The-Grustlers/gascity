@@ -431,6 +431,23 @@ func newDoltStateCmd(stdout, stderr io.Writer) *cobra.Command {
 	_ = startManaged.MarkFlagRequired("port")
 	cmd.AddCommand(startManaged)
 
+	publishManaged := &cobra.Command{
+		Use:    "publish-managed",
+		Short:  "Publish provider-managed Dolt runtime state",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if err := publishManagedDoltRuntimeStateIfOwned(cityPath); err != nil {
+				fmt.Fprintf(stderr, "gc dolt-state publish-managed: %v\n", err) //nolint:errcheck
+				return errExit
+			}
+			return nil
+		},
+	}
+	publishManaged.Flags().StringVar(&cityPath, "city", "", "city root")
+	_ = publishManaged.MarkFlagRequired("city")
+	cmd.AddCommand(publishManaged)
+
 	recoverManaged := &cobra.Command{
 		Use:    "recover-managed",
 		Short:  "Recover or reuse the managed Dolt process for a city",

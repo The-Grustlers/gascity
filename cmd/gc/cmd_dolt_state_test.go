@@ -105,6 +105,48 @@ func TestDoltStateRuntimeLayoutCmdUsesCanonicalPaths(t *testing.T) {
 	}
 }
 
+func TestDoltStatePublishManagedCmdWritesCanonicalState(t *testing.T) {
+	cityPath := t.TempDir()
+	layout, err := resolveManagedDoltRuntimeLayout(cityPath)
+	if err != nil {
+		t.Fatalf("resolveManagedDoltRuntimeLayout: %v", err)
+	}
+	if err := os.MkdirAll(layout.DataDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(data dir): %v", err)
+	}
+
+	port := reserveRandomTCPPort(t)
+	listener := startTCPListenerProcessInDir(t, port, layout.DataDir)
+	defer func() {
+		_ = listener.Process.Kill()
+		_ = listener.Wait()
+	}()
+
+	if err := writeDoltRuntimeStateFile(layout.StateFile, doltRuntimeState{
+		Running:   true,
+		PID:       listener.Process.Pid,
+		Port:      port,
+		DataDir:   layout.DataDir,
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}); err != nil {
+		t.Fatalf("write provider state: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{"dolt-state", "publish-managed", "--city", cityPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() = %d, stderr = %s", code, stderr.String())
+	}
+
+	published, err := readDoltRuntimeStateFile(managedDoltStatePath(cityPath))
+	if err != nil {
+		t.Fatalf("read published state: %v", err)
+	}
+	if published.PID != listener.Process.Pid || published.Port != port || !published.Running {
+		t.Fatalf("published state = %+v, want pid=%d port=%d running=true", published, listener.Process.Pid, port)
+	}
+}
+
 func TestResolveManagedDoltRuntimeLayoutCanonicalizesSymlinkedCityPath(t *testing.T) {
 	aliasCity, realCity := symlinkedCityPaths(t)
 	wantCityPath := normalizePathForCompare(realCity)
