@@ -254,10 +254,17 @@ func poolSessionConsumesNewDemand(session beads.Bead) bool {
 	if strings.TrimSpace(session.Metadata["pending_create_claim"]) == boolMetadata(true) {
 		return sessionpkg.PendingCreateClaimWakeEligible(session.Metadata)
 	}
-	// This pure desired-state pass has no reconciler clock. Creating sessions
-	// still represent already-spent new demand; lifecycle code owns stale
-	// creating recovery with its clock-aware predicate.
-	return strings.TrimSpace(session.Metadata["state"]) == "creating"
+	// This pure desired-state pass has no reconciler clock. Sessions that are
+	// already being created, active, or awake still represent already-spent new
+	// demand until they claim work or drain. Otherwise a slow startup/claim turn
+	// can make the next reconcile create another pool member for the same ready
+	// bead.
+	switch strings.TrimSpace(session.Metadata["state"]) {
+	case "creating", "active", "awake":
+		return true
+	default:
+		return false
+	}
 }
 
 // applyNestedCaps enforces workspace, rig, and agent max_active_sessions caps.
