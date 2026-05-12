@@ -620,6 +620,81 @@ func TestWorktreeSetupSyncSkipsMissingOrigin(t *testing.T) {
 	}
 }
 
+func TestWorktreeSetupCleanRestoresManagedBranch(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	city := filepath.Join(tmp, "city")
+	script := filepath.Join(exampleDir(), "packs", "gastown", "assets", "scripts", "worktree-setup.sh")
+
+	runCmd(t, tmp, "git", "init", repo)
+	runCmd(t, repo, "git", "config", "user.email", "test@example.com")
+	runCmd(t, repo, "git", "config", "user.name", "Gastown Test")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatalf("writing repo README: %v", err)
+	}
+	runCmd(t, repo, "git", "add", ".")
+	runCmd(t, repo, "git", "commit", "-m", "init")
+
+	worktree := filepath.Join(city, ".gc", "worktrees", filepath.Base(repo), "reviewer-1")
+	runCmd(t, tmp, "sh", script, repo, worktree, "reviewer-1", "--clean")
+	branch := currentBranch(t, worktree)
+
+	runCmd(t, tmp, "git", "-C", worktree, "checkout", "--detach", "HEAD")
+	if err := os.WriteFile(filepath.Join(worktree, "scratch.txt"), []byte("scratch\n"), 0o644); err != nil {
+		t.Fatalf("writing scratch file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, "README.md"), []byte("dirty\n"), 0o644); err != nil {
+		t.Fatalf("dirtying README: %v", err)
+	}
+	if status := runCmd(t, tmp, "git", "-C", worktree, "status", "--porcelain"); status == "" {
+		t.Fatal("expected dirty worktree before clean rerun")
+	}
+
+	runCmd(t, tmp, "sh", script, repo, worktree, "reviewer-1", "--clean")
+
+	if got := runCmd(t, tmp, "git", "-C", worktree, "status", "--porcelain"); got != "" {
+		t.Fatalf("expected clean worktree after --clean rerun, got:\n%s", got)
+	}
+	if got := currentBranch(t, worktree); got != branch {
+		t.Fatalf("branch after clean = %q, want managed branch %q", got, branch)
+	}
+	if _, err := os.Stat(filepath.Join(worktree, "scratch.txt")); !os.IsNotExist(err) {
+		t.Fatalf("scratch file still exists after clean, err=%v", err)
+	}
+}
+
+func TestWorktreeSetupReplacesCleanWrongOriginWorktree(t *testing.T) {
+	tmp := t.TempDir()
+	repo := filepath.Join(tmp, "repo")
+	other := filepath.Join(tmp, "other")
+	city := filepath.Join(tmp, "city")
+	script := filepath.Join(exampleDir(), "packs", "gastown", "assets", "scripts", "worktree-setup.sh")
+
+	for _, root := range []string{repo, other} {
+		runCmd(t, tmp, "git", "init", root)
+		runCmd(t, root, "git", "config", "user.email", "test@example.com")
+		runCmd(t, root, "git", "config", "user.name", "Gastown Test")
+		runCmd(t, root, "git", "remote", "add", "origin", "https://example.com/"+filepath.Base(root)+".git")
+		if err := os.WriteFile(filepath.Join(root, "README.md"), []byte(filepath.Base(root)+"\n"), 0o644); err != nil {
+			t.Fatalf("writing repo README: %v", err)
+		}
+		runCmd(t, root, "git", "add", ".")
+		runCmd(t, root, "git", "commit", "-m", "init")
+	}
+
+	worktree := filepath.Join(city, ".gc", "worktrees", filepath.Base(repo), "reviewer-1")
+	runCmd(t, tmp, "git", "-C", other, "worktree", "add", worktree, "-b", "wrong-origin")
+	if got := runCmd(t, tmp, "git", "-C", worktree, "remote", "get-url", "origin"); !strings.Contains(got, "other.git") {
+		t.Fatalf("setup did not create wrong-origin worktree, origin=%q", got)
+	}
+
+	runCmd(t, tmp, "sh", script, repo, worktree, "reviewer-1", "--clean")
+
+	if got := runCmd(t, tmp, "git", "-C", worktree, "remote", "get-url", "origin"); !strings.Contains(got, "repo.git") {
+		t.Fatalf("origin after setup = %q, want repo.git", got)
+	}
+}
+
 func TestPromptGuidanceUsesConfiguredRigRootsAndNamespacedWorktrees(t *testing.T) {
 	dir := exampleDir()
 

@@ -1,7 +1,7 @@
 #!/bin/sh
 # worktree-setup.sh — idempotent git worktree creation for Gas City agents.
 #
-# Usage: worktree-setup.sh <rig-root> <target-dir> <agent-name> [--sync]
+# Usage: worktree-setup.sh <rig-root> <target-dir> <agent-name> [--sync] [--clean]
 #
 # Ensures the target directory is a git worktree of the rig repo. For
 # backward compatibility, the older <repo-dir> <agent-name> <city-root>
@@ -13,9 +13,27 @@
 
 set -eu
 
-RIG_ROOT="${1:?usage: worktree-setup.sh <rig-root> <target-dir> <agent-name> [--sync]}"
+RIG_ROOT="${1:?usage: worktree-setup.sh <rig-root> <target-dir> <agent-name> [--sync] [--clean]}"
 ARG2="${2:?missing target-dir}"
 ARG3="${3:?missing agent-name}"
+shift 3
+
+SYNC=0
+CLEAN=0
+for ARG in "$@"; do
+    case "$ARG" in
+        --sync)
+            SYNC=1
+            ;;
+        --clean)
+            CLEAN=1
+            ;;
+        *)
+            echo "worktree-setup: unknown option: $ARG" >&2
+            exit 2
+            ;;
+    esac
+done
 
 is_path_like() {
     # Legacy mode passes the city path as arg 3. Agent names are validated
@@ -31,15 +49,13 @@ if is_path_like "$ARG3"; then
     CITY="$ARG3"
     RIG=$(basename "$RIG_ROOT")
     WT="$CITY/.gc/worktrees/$RIG/$AGENT"
-    SYNC="${4:-}"
 else
     WT="$ARG2"
     AGENT="$ARG3"
-    SYNC="${4:-}"
 fi
 
 sync_worktree() {
-    [ "$SYNC" = "--sync" ] || return 0
+    [ "$SYNC" = 1 ] || return 0
     if ! git -C "$WT" remote get-url origin >/dev/null 2>&1; then
         return 0
     fi
@@ -55,9 +71,42 @@ branch_name() {
     printf 'gc-%s-%s' "$AGENT" "$HASH"
 }
 
+clean_worktree() {
+    [ "$CLEAN" = 1 ] || return 0
+    [ -d "$WT/.git" ] || [ -f "$WT/.git" ] || return 0
+
+    if [ -n "$(git -C "$WT" status --porcelain 2>/dev/null || true)" ]; then
+        echo "worktree-setup: cleaning dirty managed worktree at $WT" >&2
+        git -C "$WT" reset --hard HEAD >/dev/null
+        git -C "$WT" clean -fd >/dev/null
+    fi
+
+    BRANCH=$(branch_name)
+    if git -C "$RIG_ROOT" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+        if ! git -C "$WT" checkout -q "$BRANCH" >/dev/null 2>&1; then
+            echo "worktree-setup: failed to restore managed branch $BRANCH at $WT" >&2
+            exit 1
+        fi
+    fi
+}
+
+if [ -d "$WT/.git" ] || [ -f "$WT/.git" ]; then
+    RIG_ORIGIN=$(git -C "$RIG_ROOT" remote get-url origin 2>/dev/null || true)
+    WT_ORIGIN=$(git -C "$WT" remote get-url origin 2>/dev/null || true)
+    if [ -n "$RIG_ORIGIN" ] && [ "$WT_ORIGIN" != "$RIG_ORIGIN" ]; then
+        if [ -n "$(git -C "$WT" status --porcelain 2>/dev/null || true)" ]; then
+            echo "worktree-setup: refusing to replace dirty non-rig worktree at $WT (origin $WT_ORIGIN, expected $RIG_ORIGIN)" >&2
+            exit 1
+        fi
+        git -C "$WT" worktree remove "$WT" --force >/dev/null 2>&1 || rm -rf "$WT"
+    fi
+fi
+
 # Idempotent: skip if worktree already exists.
 if [ -d "$WT/.git" ] || [ -f "$WT/.git" ]; then
+    clean_worktree
     sync_worktree
+    clean_worktree
     exit 0
 fi
 
@@ -179,5 +228,6 @@ append_exclude "state.json"
 
 # Optional sync.
 sync_worktree
+clean_worktree
 
 exit 0
