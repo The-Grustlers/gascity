@@ -791,10 +791,7 @@ func (m *memoryOrderDispatcher) rigSuspendedByName(rigName string) bool {
 // after a city restart because the first auto-fire's wisp root permanently
 // tripped this check.
 func (m *memoryOrderDispatcher) hasOpenWorkStrict(store beads.Store, scopedName string) (bool, error) {
-	results, err := store.List(beads.ListQuery{
-		Label: "order-run:" + scopedName,
-		Sort:  beads.SortCreatedDesc,
-	})
+	results, err := activeBeadsWithLabel(store, "order-run:"+scopedName)
 	if err != nil {
 		return false, fmt.Errorf("listing order work beads: %w", err)
 	}
@@ -827,12 +824,34 @@ func (m *memoryOrderDispatcher) hasOpenWorkInStoresStrict(stores []beads.Store, 
 	return false, nil
 }
 
+func activeBeadsWithLabel(store beads.Store, label string) ([]beads.Bead, error) {
+	items, err := store.List(beads.ListQuery{
+		AllowScan: true,
+		Sort:      beads.SortCreatedDesc,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var filtered []beads.Bead
+	for _, b := range items {
+		if b.Status == "closed" {
+			continue
+		}
+		for _, got := range b.Labels {
+			if got == label {
+				filtered = append(filtered, b)
+				break
+			}
+		}
+	}
+	return filtered, nil
+}
+
 // sweepOrphanedOrderTracking closes any open order-tracking beads left
 // behind by a previous controller instance. Returns the count of beads
 // closed. This is non-fatal: dispatch proceeds even if the sweep fails.
 func sweepOrphanedOrderTracking(store beads.Store) (int, error) {
-	// ListByLabel without IncludeClosed returns only open beads.
-	all, err := store.ListByLabel(labelOrderTracking, 0)
+	all, err := activeBeadsWithLabel(store, labelOrderTracking)
 	if err != nil {
 		return 0, fmt.Errorf("listing order-tracking beads: %w", err)
 	}
@@ -859,7 +878,7 @@ func sweepStaleOrderTracking(store beads.Store, now time.Time, staleAfter time.D
 	if staleAfter <= 0 {
 		return 0, fmt.Errorf("stale-after must be positive")
 	}
-	all, err := store.ListByLabel(labelOrderTracking, 0)
+	all, err := activeBeadsWithLabel(store, labelOrderTracking)
 	if err != nil {
 		return 0, fmt.Errorf("listing order-tracking beads: %w", err)
 	}
