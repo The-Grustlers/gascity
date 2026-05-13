@@ -589,6 +589,14 @@ docker-base: check-docker
 
 ## docker-agent: build base agent image (~5s on top of base). For prebaked images use: gc build-image
 docker-agent: check-docker
+	go build -o gc ./cmd/gc
+	cp "$$(command -v bd)" ./bd
+	if command -v br >/dev/null 2>&1; then \
+		cp "$$(command -v br)" ./br; \
+	else \
+		printf '%s\n' '#!/usr/bin/env bash' 'echo "br CLI is not installed in this image" >&2' 'exit 127' > ./br; \
+		chmod +x ./br; \
+	fi
 	docker build -f contrib/k8s/Dockerfile.agent -t gc-agent:latest .
 	@if kubectl config current-context 2>/dev/null | grep -q '^kind-'; then \
 		cluster=$$(kubectl config current-context | sed 's/^kind-//'); \
