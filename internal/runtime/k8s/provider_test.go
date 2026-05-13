@@ -774,6 +774,19 @@ func TestPodManifestCompatibility(t *testing.T) {
 		t.Errorf("workingDir = %q, want /workspace/demo-rig",
 			pod.Spec.Containers[0].WorkingDir)
 	}
+
+	args := strings.Join(pod.Spec.Containers[0].Args, "\n")
+	for _, want := range []string{
+		`mkdir -p "$HOME/.codex"`,
+		`[projects."/workspace"]`,
+		`trust_level = "trusted"`,
+		`hide_rate_limit_model_nudge = true`,
+		`[tui.model_availability_nux]`,
+	} {
+		if !strings.Contains(args, want) {
+			t.Errorf("pod args missing Codex bootstrap fragment %q in:\n%s", want, args)
+		}
+	}
 }
 
 func TestWorkspaceVolumeMountsAtRoot(t *testing.T) {

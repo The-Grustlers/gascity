@@ -219,6 +219,23 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 		)
 	}
 	credCopy := `mkdir -p $HOME/.claude && cp -rL /tmp/claude-secret/. $HOME/.claude/ 2>/dev/null; git config --global --add safe.directory '*' 2>/dev/null; `
+	codexConfig := `mkdir -p "$HOME/.codex" && cat > "$HOME/.codex/config.toml" <<'EOF'
+[projects."/workspace"]
+trust_level = "trusted"
+
+[projects."/"]
+trust_level = "trusted"
+
+[notice]
+hide_rate_limit_model_nudge = true
+
+[tui.model_availability_nux]
+"gpt-5.5" = 4
+EOF
+`
+	if linuxUsername != "" {
+		codexConfig += fmt.Sprintf(`chown -R "%s" "$HOME/.codex"; `, linuxUsername)
+	}
 	wsWait := ""
 	if !p.prebaked {
 		wsWait = `while [ ! -f /workspace/.gc-workspace-ready ]; do sleep 0.5; done; `
@@ -228,15 +245,15 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 	if linuxUsername != "" {
 		// Run tmux session as the dynamic user via su.
 		tmuxCmd = fmt.Sprintf(
-			"%s%s%s%sCMD=$(echo '%s' | base64 -d) && "+
+			"%s%s%s%s%sCMD=$(echo '%s' | base64 -d) && "+
 				`su - %s -c "cd %s && tmux new-session -d -s %s \"$CMD\" && sleep infinity"`,
-			userSetup, credCopy, wsWait, preStartCmds, cmdB64,
+			userSetup, credCopy, codexConfig, wsWait, preStartCmds, cmdB64,
 			linuxUsername, podWorkDir, tmuxSession,
 		)
 	} else {
 		tmuxCmd = fmt.Sprintf(
-			"%s%s%sCMD=$(echo '%s' | base64 -d) && tmux new-session -d -s %s \"$CMD\" && sleep infinity",
-			credCopy, wsWait, preStartCmds, cmdB64, tmuxSession,
+			"%s%s%s%sCMD=$(echo '%s' | base64 -d) && tmux new-session -d -s %s \"$CMD\" && sleep infinity",
+			credCopy, codexConfig, wsWait, preStartCmds, cmdB64, tmuxSession,
 		)
 	}
 
