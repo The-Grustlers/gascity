@@ -294,6 +294,13 @@ func cmdSling(args []string, isFormula, doNudge, force bool, title string, vars 
 		}
 	}
 	storeRef := workflowStoreRefForDir(storeDir, cityPath, cityName, cfg)
+	if !force {
+		if err := sling.CheckRouteStoreScope(a.QualifiedName(), storeRef, cityName, cfg); err != nil {
+			fmt.Fprintf(stderr, "gc sling: %v\n", err)                                                                                //nolint:errcheck // best-effort stderr
+			fmt.Fprintln(stderr, "  create or migrate the bead in the target rig store, or use --force only for deliberate recovery") //nolint:errcheck
+			return 1
+		}
+	}
 	storeEnv := slingStoreEnv(cfg, cityPath, storeDir)
 	if sourceBead.exists && looksLikeInlineText(cfg, beadOrFormula) {
 		fmt.Fprintf(stderr, "gc sling: found existing bead %q in %s; routing it instead of creating inline text\n", beadOrFormula, storeRef) //nolint:errcheck // best-effort stderr

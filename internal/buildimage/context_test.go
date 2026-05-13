@@ -73,8 +73,14 @@ name = "test-city"
 	writeFile(t, cityDir, ".gc/controller.sock", "sock")
 	writeFile(t, cityDir, ".gc/events.jsonl", "{}")
 	writeFile(t, cityDir, ".gc/agents/mayor.json", "{}")
+	writeFile(t, cityDir, ".beads/issues.jsonl", "{}")
+	writeFile(t, cityDir, ".runtime/state.json", "{}")
 	writeFile(t, cityDir, ".env", "SECRET=x")
 	writeFile(t, cityDir, "credentials.json", "{}")
+	writeFile(t, cityDir, ".git/HEAD", "ref: refs/heads/main\n")
+	writeFile(t, cityDir, "node_modules/pkg/index.js", "module")
+	writeFile(t, cityDir, "dist/app.js", "built")
+	writeFile(t, cityDir, "__pycache__/tool.pyc", "cache")
 
 	// Create files that should be included.
 	mkdirAll(t, cityDir, "formulas")
@@ -93,8 +99,14 @@ name = "test-city"
 	assertFileNotExists(t, outputDir, "workspace/.gc/controller.sock")
 	assertFileNotExists(t, outputDir, "workspace/.gc/events.jsonl")
 	assertFileNotExists(t, outputDir, "workspace/.gc/agents/mayor.json")
+	assertFileNotExists(t, outputDir, "workspace/.beads/issues.jsonl")
+	assertFileNotExists(t, outputDir, "workspace/.runtime/state.json")
 	assertFileNotExists(t, outputDir, "workspace/.env")
 	assertFileNotExists(t, outputDir, "workspace/credentials.json")
+	assertFileNotExists(t, outputDir, "workspace/.git/HEAD")
+	assertFileNotExists(t, outputDir, "workspace/node_modules/pkg/index.js")
+	assertFileNotExists(t, outputDir, "workspace/dist/app.js")
+	assertFileNotExists(t, outputDir, "workspace/__pycache__/tool.pyc")
 
 	// Verify included files ARE present.
 	assertFileExists(t, outputDir, "workspace/formulas/test.toml")
@@ -157,6 +169,30 @@ name = "test-city"
 	// Verify rig content was copied.
 	assertFileExists(t, outputDir, "workspace/my-rig/main.go")
 	assertFileExists(t, outputDir, "workspace/my-rig/README.md")
+}
+
+func TestAssembleContextWithWorkspacePaths(t *testing.T) {
+	cityDir := t.TempDir()
+	outputDir := t.TempDir()
+	platformDir := t.TempDir()
+
+	writeFile(t, cityDir, "city.toml", `[workspace]
+name = "test-city"
+`)
+	writeFile(t, platformDir, "package.json", `{"name":"gr7n-platform"}`)
+	writeFile(t, platformDir, "packages/node-access/src/cli.mjs", "#!/usr/bin/env node\n")
+
+	err := AssembleContext(Options{
+		CityPath:       cityDir,
+		OutputDir:      outputDir,
+		WorkspacePaths: map[string]string{"gr7n-platform": platformDir},
+	})
+	if err != nil {
+		t.Fatalf("AssembleContext: %v", err)
+	}
+
+	assertFileExists(t, outputDir, "workspace/gr7n-platform/package.json")
+	assertFileExists(t, outputDir, "workspace/gr7n-platform/packages/node-access/src/cli.mjs")
 }
 
 func TestAssembleContextPreservesCustomReferencedCityFiles(t *testing.T) {

@@ -32,6 +32,7 @@ name = "test-city"
 		"", // no tag needed for context-only
 		"gc-agent:latest",
 		nil,   // no rig paths
+		nil,   // no workspace paths
 		false, // no push
 		true,  // context-only
 		&stdout, &stderr,
@@ -75,6 +76,7 @@ func TestBuildImageRequiresTag(t *testing.T) {
 		"", // no tag
 		"gc-agent:latest",
 		nil,
+		nil,
 		false,
 		false, // not context-only, so tag is required
 		&stdout, &stderr,
@@ -94,6 +96,7 @@ func TestBuildImageInvalidRigPath(t *testing.T) {
 		"test:latest",
 		"gc-agent:latest",
 		[]string{"bad-format"}, // missing colon
+		nil,
 		false,
 		true,
 		&stdout, &stderr,
@@ -129,6 +132,7 @@ name = "test-city"
 		"",
 		"gc-agent:latest",
 		[]string{"my-rig:" + rigDir},
+		nil,
 		false,
 		true, // context-only
 		&stdout, &stderr,
@@ -148,6 +152,51 @@ name = "test-city"
 	// Verify rig content was included.
 	if _, err := os.Stat(filepath.Join(outputDir, "workspace", "my-rig", "main.go")); err != nil {
 		t.Errorf("missing workspace/my-rig/main.go: %v", err)
+	}
+
+	_ = os.RemoveAll(outputDir)
+}
+
+func TestBuildImageWithWorkspacePaths(t *testing.T) {
+	cityDir := t.TempDir()
+	platformDir := t.TempDir()
+
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(`[workspace]
+name = "test-city"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(platformDir, "package.json"), []byte(`{"name":"gr7n-platform"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := doBuildImage(
+		[]string{cityDir},
+		"",
+		"gc-agent:latest",
+		nil,
+		[]string{"gr7n-platform:" + platformDir},
+		false,
+		true,
+		&stdout, &stderr,
+	)
+	if code != 0 {
+		t.Fatalf("doBuildImage returned %d; stderr: %s", code, stderr.String())
+	}
+
+	line := strings.TrimSpace(stdout.String())
+	parts := strings.SplitN(line, ": ", 2)
+	if len(parts) != 2 {
+		t.Fatalf("unexpected stdout format: %q", line)
+	}
+	outputDir := parts[1]
+
+	if _, err := os.Stat(filepath.Join(outputDir, "workspace", "gr7n-platform", "package.json")); err != nil {
+		t.Errorf("missing workspace/gr7n-platform/package.json: %v", err)
 	}
 
 	_ = os.RemoveAll(outputDir)

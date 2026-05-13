@@ -23,6 +23,7 @@ var (
 
 func newDoctorCmd(stdout, stderr io.Writer) *cobra.Command {
 	var fix, verbose bool
+	var checks []string
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check workspace health",
@@ -34,10 +35,11 @@ bead stores, Dolt server health, event log integrity, and per-rig
 health. Use --fix to attempt automatic repairs.`,
 		Example: `  gc doctor
   gc doctor --fix
-  gc doctor --verbose`,
+  gc doctor --verbose
+  gc doctor --check route-store-scope --fix`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if doDoctor(fix, verbose, stdout, stderr) != 0 {
+			if doDoctor(fix, verbose, checks, stdout, stderr) != 0 {
 				return errExit
 			}
 			return nil
@@ -45,6 +47,7 @@ health. Use --fix to attempt automatic repairs.`,
 	}
 	cmd.Flags().BoolVar(&fix, "fix", false, "attempt to fix issues automatically")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "show extra diagnostic details")
+	cmd.Flags().StringArrayVar(&checks, "check", nil, "run only the named check; repeat for multiple checks")
 	return cmd
 }
 
@@ -117,7 +120,7 @@ func (c *doltTopologyCheck) CanFix() bool { return false }
 
 func (c *doltTopologyCheck) Fix(_ *doctor.CheckContext) error { return nil }
 
-func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
+func doDoctor(fix, verbose bool, checks []string, stdout, stderr io.Writer) int {
 	cityPath, err := resolveCity()
 	if err != nil {
 		fmt.Fprintf(stderr, "gc doctor: %v\n", err) //nolint:errcheck // best-effort stderr
@@ -200,6 +203,7 @@ func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
 		d.Register(doctor.NewBDSplitStoreCheck(cityPath))
 		d.Register(doctor.NewBeadsStoreCheck(cityPath, storeFactory))
 		d.Register(newV2RoutedToNamespaceCheck(cfg, cityPath, storeFactory))
+		d.Register(newRouteStoreScopeCheck(cfg, cityPath, storeFactory))
 		d.Register(&sessionModelDoctorCheck{cfg: cfg, cityPath: cityPath, newStore: storeFactory})
 	}
 	skipCityDoltCheck := os.Getenv("GC_DOLT") == "skip" || (!scopeUsesManagedBdStoreContract(cityPath, cityPath) && !workspaceNeedsCityDoltCheck(cityPath, cfg))
@@ -265,6 +269,9 @@ func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
 		}
 	}
 
+	checkFilter := parseDoctorCheckFilter(checks)
+	d.Filter(checkFilter)
+
 	report := d.Run(ctx, stdout, fix)
 	doctor.PrintSummary(stdout, report)
 
@@ -272,6 +279,22 @@ func doDoctor(fix, verbose bool, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+func parseDoctorCheckFilter(checks []string) map[string]bool {
+	if len(checks) == 0 {
+		return nil
+	}
+	result := make(map[string]bool)
+	for _, raw := range checks {
+		for _, part := range strings.Split(raw, ",") {
+			name := strings.TrimSpace(part)
+			if name != "" {
+				result[name] = true
+			}
+		}
+	}
+	return result
 }
 
 // collectPackDirs returns all unique pack directories from the city

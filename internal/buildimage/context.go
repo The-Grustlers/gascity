@@ -24,6 +24,9 @@ type Options struct {
 	Tag string
 	// RigPaths maps rig name → local repo path for baking rig content.
 	RigPaths map[string]string
+	// WorkspacePaths maps support workspace name → local repo path for baking
+	// non-rig shared tooling such as gr7n-platform into /workspace.
+	WorkspacePaths map[string]string
 }
 
 // Manifest records what was baked into the image for debugging.
@@ -36,6 +39,13 @@ type Manifest struct {
 
 // excludedPaths returns true for paths that should never be baked.
 func excludedPath(rel string) bool {
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	for _, part := range parts {
+		switch part {
+		case ".beads", ".dolt", ".git", ".gradle", ".godot", ".mypy_cache", ".nx", ".pnpm-store", ".pytest_cache", ".ruff_cache", ".runtime", ".turbo", ".venv", ".next", ".cache", "node_modules", "dist", "build", "coverage", "__pycache__", "target", "venv":
+			return true
+		}
+	}
 	if rel == citylayout.RuntimeRoot {
 		return false
 	}
@@ -89,6 +99,12 @@ func AssembleContext(opts Options) error {
 		rigDst := filepath.Join(wsDir, rigName)
 		if err := copyDirFiltered(rigPath, rigDst); err != nil {
 			return fmt.Errorf("copying rig %q: %w", rigName, err)
+		}
+	}
+	for workspaceName, workspacePath := range opts.WorkspacePaths {
+		workspaceDst := filepath.Join(wsDir, workspaceName)
+		if err := copyDirFiltered(workspacePath, workspaceDst); err != nil {
+			return fmt.Errorf("copying workspace %q: %w", workspaceName, err)
 		}
 	}
 

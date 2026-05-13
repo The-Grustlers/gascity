@@ -172,7 +172,7 @@ prefix = "fe"
 	})
 
 	var stdout, stderr bytes.Buffer
-	_ = doDoctor(false, false, &stdout, &stderr)
+	_ = doDoctor(false, false, nil, &stdout, &stderr)
 
 	if citySkip == nil || *citySkip {
 		t.Fatalf("city dolt check skip = %v, want false when a bd-backed rig inherits the city endpoint", citySkip)
@@ -235,7 +235,7 @@ dolt_port = "3308"
 	})
 
 	var stdout, stderr bytes.Buffer
-	_ = doDoctor(false, false, &stdout, &stderr)
+	_ = doDoctor(false, false, nil, &stdout, &stderr)
 
 	if !strings.Contains(stdout.String(), "canonical/compat Dolt drift") {
 		t.Fatalf("doctor output missing Dolt topology drift:\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
@@ -266,13 +266,40 @@ func TestDoDoctorReportsLegacyBDSplitStore(t *testing.T) {
 	t.Cleanup(func() { cityFlag = origCityFlag })
 
 	var stdout, stderr bytes.Buffer
-	_ = doDoctor(false, false, &stdout, &stderr)
+	_ = doDoctor(false, false, nil, &stdout, &stderr)
 	out := stdout.String() + stderr.String()
 	if !strings.Contains(out, "bd-split-store") {
 		t.Fatalf("doctor output missing bd-split-store check:\n%s", out)
 	}
 	if !strings.Contains(out, "legacy split store") {
 		t.Fatalf("doctor output missing split-store warning:\n%s", out)
+	}
+}
+
+func TestDoDoctorCheckFilterRunsOnlyNamedCheck(t *testing.T) {
+	cityDir := t.TempDir()
+	writeMinimalCityToml(t, cityDir)
+	t.Setenv("GC_CITY_PATH", cityDir)
+	t.Setenv("GC_BEADS", "file")
+
+	var stdout, stderr bytes.Buffer
+	_ = doDoctor(false, false, []string{"city-config"}, &stdout, &stderr)
+	out := stdout.String() + stderr.String()
+
+	if !strings.Contains(out, "city-config") {
+		t.Fatalf("doctor output missing requested check:\n%s", out)
+	}
+	if strings.Contains(out, "city-structure") {
+		t.Fatalf("doctor output included unrequested check:\n%s", out)
+	}
+}
+
+func TestParseDoctorCheckFilterSplitsCommas(t *testing.T) {
+	filter := parseDoctorCheckFilter([]string{"city-config, route-store-scope", "beads-store"})
+	for _, name := range []string{"city-config", "route-store-scope", "beads-store"} {
+		if !filter[name] {
+			t.Fatalf("filter[%q] = false, want true; filter=%#v", name, filter)
+		}
 	}
 }
 
