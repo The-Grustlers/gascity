@@ -120,6 +120,33 @@ func (c *doltTopologyCheck) CanFix() bool { return false }
 
 func (c *doltTopologyCheck) Fix(_ *doctor.CheckContext) error { return nil }
 
+type inheritedRigSplitBrainCheck struct {
+	cityPath string
+}
+
+func newInheritedRigSplitBrainCheck(cityPath string) *inheritedRigSplitBrainCheck {
+	return &inheritedRigSplitBrainCheck{cityPath: cityPath}
+}
+
+func (c *inheritedRigSplitBrainCheck) Name() string { return "inherited-rig-split-brain" }
+
+func (c *inheritedRigSplitBrainCheck) Run(_ *doctor.CheckContext) *doctor.CheckResult {
+	r := &doctor.CheckResult{Name: c.Name()}
+	if err := validateNoInheritedRigSplitBrain(c.cityPath); err != nil {
+		r.Status = doctor.StatusError
+		r.Message = err.Error()
+		r.FixHint = "stop stale rig-local Dolt servers or migrate/remove rig-local .beads/dolt databases so inherited rigs use the city Dolt store"
+		return r
+	}
+	r.Status = doctor.StatusOK
+	r.Message = "inherited rigs do not have local Dolt authority"
+	return r
+}
+
+func (c *inheritedRigSplitBrainCheck) CanFix() bool { return false }
+
+func (c *inheritedRigSplitBrainCheck) Fix(_ *doctor.CheckContext) error { return nil }
+
 func doDoctor(fix, verbose bool, checks []string, stdout, stderr io.Writer) int {
 	cityPath, err := resolveCity()
 	if err != nil {
@@ -145,6 +172,7 @@ func doDoctor(fix, verbose bool, checks []string, stdout, stderr io.Writer) int 
 		if workspaceUsesManagedBdStoreContract(cityPath, cfg.Rigs) {
 			d.Register(newDoltTopologyCheck(cityPath, cfg))
 		}
+		d.Register(newInheritedRigSplitBrainCheck(cityPath))
 		d.Register(doctor.NewConfigValidCheck(cfg))
 		d.Register(doctor.NewConfigRefsCheck(cfg, cityPath))
 		d.Register(doctor.NewBuiltinPackFamilyCheck(cfg, cityPath))
