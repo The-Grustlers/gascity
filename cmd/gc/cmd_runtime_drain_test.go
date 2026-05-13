@@ -964,6 +964,34 @@ func TestDrainAckNoArgsFallsBackToCityPathEnv(t *testing.T) {
 	}
 }
 
+func TestDrainAckEmptyArgFallsBackToSessionContext(t *testing.T) {
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd := newRuntimeDrainAckCmd(&stdout, &stderr)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	t.Setenv("GC_SESSION", "fake")
+	t.Setenv("GC_ALIAS", "")
+	t.Setenv("GC_SESSION_ID", "")
+	t.Setenv("GC_AGENT", "")
+	t.Setenv("GC_SESSION_NAME", "worker-runtime")
+	t.Setenv("GC_CITY", "")
+	t.Setenv("GC_CITY_PATH", cityDir)
+
+	cmd.SetArgs([]string{""})
+	err := cmd.Execute()
+	if err != nil {
+		t.Fatalf("drain-ack should treat an empty optional arg like no arg: %v; stderr=%q", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Drain acknowledged") {
+		t.Fatalf("stdout = %q, want drain acknowledgement", stdout.String())
+	}
+}
+
 // ---------------------------------------------------------------------------
 // resolveAgentIdentity / findAgentByQualified unit tests
 // ---------------------------------------------------------------------------
