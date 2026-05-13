@@ -985,6 +985,17 @@ func TestInstallOverlayManagedProviders(t *testing.T) {
 	if !strings.Contains(codexHooks, `gc handoff --auto --hook-format codex \"context cycle\"`) {
 		t.Error("codex PreCompact should use auto handoff with Codex hook output format")
 	}
+	// Copilot CLI documents preCompact (camelCase). The hook fires before
+	// context compaction starts so handoff can capture state; without it,
+	// long Copilot sessions silently lose context at compact boundaries.
+	// See gastownhall/gascity#672 gap 3.
+	copilotHooks := string(fs.Files["/work/.github/hooks/gascity.json"])
+	if !strings.Contains(copilotHooks, `"preCompact"`) {
+		t.Error("copilot hooks should include preCompact (closes #672 gap 3)")
+	}
+	if !strings.Contains(copilotHooks, `gc handoff --auto \"context cycle\"`) {
+		t.Error("copilot preCompact should use auto handoff")
+	}
 	for _, rel := range []string{
 		"/work/.codex/hooks.json",
 		"/work/.gemini/settings.json",
