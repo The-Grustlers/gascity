@@ -16,6 +16,7 @@ func newBuildImageCmd(stdout, stderr io.Writer) *cobra.Command {
 		tag         string
 		baseImage   string
 		rigPaths    []string
+		workspaces  []string
 		push        bool
 		contextOnly bool
 	)
@@ -38,14 +39,17 @@ volume mounts at runtime.`,
   # Build and tag image
   gc build-image ~/bright-lights --tag my-city:latest
 
-  # Build with rig content baked in
-  gc build-image ~/bright-lights --tag my-city:latest --rig-path demo:/path/to/demo
+	  # Build with rig content baked in
+	  gc build-image ~/bright-lights --tag my-city:latest --rig-path demo:/path/to/demo
 
-  # Build and push to registry
-  gc build-image ~/bright-lights --tag registry.io/my-city:latest --push`,
+	  # Build with shared support tooling baked in
+	  gc build-image ~/bright-lights --tag my-city:latest --workspace-path gr7n-platform:/path/to/gr7n-platform
+
+	  # Build and push to registry
+	  gc build-image ~/bright-lights --tag registry.io/my-city:latest --push`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
-			code := doBuildImage(args, tag, baseImage, rigPaths, push, contextOnly, stdout, stderr)
+			code := doBuildImage(args, tag, baseImage, rigPaths, workspaces, push, contextOnly, stdout, stderr)
 			if code != 0 {
 				return errExit
 			}
@@ -56,13 +60,14 @@ volume mounts at runtime.`,
 	cmd.Flags().StringVar(&tag, "tag", "", "image tag (required unless --context-only)")
 	cmd.Flags().StringVar(&baseImage, "base-image", "gc-agent:latest", "base Docker image")
 	cmd.Flags().StringSliceVar(&rigPaths, "rig-path", nil, "rig name:path pairs (repeatable)")
+	cmd.Flags().StringSliceVar(&workspaces, "workspace-path", nil, "support workspace name:path pairs to bake into /workspace (repeatable)")
 	cmd.Flags().BoolVar(&push, "push", false, "push image after building")
 	cmd.Flags().BoolVar(&contextOnly, "context-only", false, "write build context without running docker build")
 
 	return cmd
 }
 
-func doBuildImage(args []string, tag, baseImage string, rigPaths []string, push, contextOnly bool, stdout, stderr io.Writer) int {
+func doBuildImage(args []string, tag, baseImage string, rigPaths, workspacePaths []string, push, contextOnly bool, stdout, stderr io.Writer) int {
 	if !contextOnly && tag == "" {
 		fmt.Fprintln(stderr, "gc build-image: --tag is required (or use --context-only)") //nolint:errcheck // best-effort stderr
 		return 1
@@ -91,6 +96,15 @@ func doBuildImage(args []string, tag, baseImage string, rigPaths []string, push,
 		}
 		rigs[name] = path
 	}
+	workspaces := make(map[string]string)
+	for _, wp := range workspacePaths {
+		name, path, ok := strings.Cut(wp, ":")
+		if !ok || name == "" || path == "" {
+			fmt.Fprintf(stderr, "gc build-image: invalid --workspace-path %q (expected name:path)\n", wp) //nolint:errcheck // best-effort stderr
+			return 1
+		}
+		workspaces[name] = path
+	}
 
 	// Create temp output dir (or use a named one for context-only).
 	outputDir, err := os.MkdirTemp("", "gc-build-image-*")
@@ -104,11 +118,12 @@ func doBuildImage(args []string, tag, baseImage string, rigPaths []string, push,
 
 	// Assemble build context.
 	opts := buildimage.Options{
-		CityPath:  cityPath,
-		OutputDir: outputDir,
-		BaseImage: baseImage,
-		Tag:       tag,
-		RigPaths:  rigs,
+		CityPath:       cityPath,
+		OutputDir:      outputDir,
+		BaseImage:      baseImage,
+		Tag:            tag,
+		RigPaths:       rigs,
+		WorkspacePaths: workspaces,
 	}
 	if err := buildimage.AssembleContext(opts); err != nil {
 		fmt.Fprintf(stderr, "gc build-image: %v\n", err) //nolint:errcheck // best-effort stderr

@@ -27,6 +27,22 @@ func (d *Doctor) Register(c Check) {
 	d.checks = append(d.checks, c)
 }
 
+// Filter keeps only checks whose names are present in names. Unknown names are
+// ignored so callers can compose optional checks without making old binaries
+// fail hard on newer check filters.
+func (d *Doctor) Filter(names map[string]bool) {
+	if len(names) == 0 {
+		return
+	}
+	filtered := d.checks[:0]
+	for _, c := range d.checks {
+		if names[c.Name()] {
+			filtered = append(filtered, c)
+		}
+	}
+	d.checks = filtered
+}
+
 // Run executes all registered checks, streaming results to w as each
 // completes. When fix is true, fixable checks that fail are remediated
 // and re-run. Returns a summary report.
