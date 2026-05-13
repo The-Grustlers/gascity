@@ -46,6 +46,7 @@ func (c *CachingStore) ApplyEvent(eventType string, payload json.RawMessage) {
 	fieldConflictCached := cached && cacheEventConflictsCurrent(current, patch, fields)
 	dependencyConflictCached := cached && cacheEventDependencyConflict(currentDeps, depsKnown, patch, fields)
 	conflictsCached := fieldConflictCached || dependencyConflictCached
+	ownershipConflictCached := cached && cacheEventOwnershipConflict(current, patch, fields)
 	var conflictBase Bead
 	if conflictsCached {
 		conflictBase = cloneBead(current)
@@ -56,6 +57,8 @@ func (c *CachingStore) ApplyEvent(eventType string, payload json.RawMessage) {
 	var verifiedClosedBase Bead
 	verifiedRecentLocal := false
 	var verifiedRecentLocalBase Bead
+	verifiedExternalConflict := false
+	var verifiedExternalConflictBase Bead
 	if conflictsCached && eventType == "bead.closed" {
 		matchesBacking, verifyErr := c.cacheClosedEventMatchesBacking(patch.ID)
 		if verifyErr != nil {
@@ -79,6 +82,17 @@ func (c *CachingStore) ApplyEvent(eventType string, payload json.RawMessage) {
 	if conflictsCached && recentlyLocal && !verifiedConflict {
 		verifiedRecentLocal = true
 		verifiedRecentLocalBase = conflictBase
+		matchesBacking, verifyErr := c.cacheEventMatchesBacking(patch.ID, patch, fields)
+		if verifyErr == nil && !matchesBacking {
+			return
+		}
+		if verifyErr != nil {
+			c.recordProblem(fmt.Sprintf("verify %s event", eventType), verifyErr)
+		}
+	}
+	if conflictsCached && eventType != "bead.closed" && ownershipConflictCached && !locallyMutated && !recentlyLocal && !verifiedConflict {
+		verifiedExternalConflict = true
+		verifiedExternalConflictBase = conflictBase
 		matchesBacking, verifyErr := c.cacheEventMatchesBacking(patch.ID, patch, fields)
 		if verifyErr == nil && !matchesBacking {
 			return
@@ -133,6 +147,10 @@ func (c *CachingStore) ApplyEvent(eventType string, payload json.RawMessage) {
 				}
 				if recentLocalMutation(c.localBeadAt[patch.ID], time.Now()) &&
 					(!verifiedRecentLocal || beadChanged(current, verifiedRecentLocalBase)) {
+					return
+				}
+				if cacheEventOwnershipConflict(current, patch, fields) && !recentLocalMutation(c.localBeadAt[patch.ID], time.Now()) &&
+					(!verifiedExternalConflict || beadChanged(current, verifiedExternalConflictBase)) {
 					return
 				}
 			}
@@ -343,6 +361,16 @@ func (c *CachingStore) cacheClosedEventMatchesBacking(id string) (bool, error) {
 
 func cacheEventPatchMatchesBead(current, patch Bead, fields map[string]json.RawMessage) bool {
 	return !cacheEventConflictsCached(current, depsFromBeadFields(current), true, patch, fields)
+}
+
+func cacheEventOwnershipConflict(current, patch Bead, fields map[string]json.RawMessage) bool {
+	if hasCacheEventField(fields, "status") && current.Status != patch.Status {
+		return true
+	}
+	if hasCacheEventField(fields, "assignee") && current.Assignee != patch.Assignee {
+		return true
+	}
+	return false
 }
 
 func recentLocalMutation(mutatedAt time.Time, now time.Time) bool {

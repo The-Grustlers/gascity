@@ -16,7 +16,7 @@ type sessionRuntimeTarget struct {
 }
 
 func defaultSessionDisplayIdentity() string {
-	for _, key := range []string{"GC_ALIAS", "GC_SESSION_ID", "GC_AGENT"} {
+	for _, key := range []string{"GC_ALIAS", "GC_SESSION_ID", "GC_AGENT", "GC_SESSION_NAME"} {
 		if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 			return v
 		}

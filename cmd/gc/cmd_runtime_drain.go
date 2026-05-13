@@ -7,6 +7,7 @@ import (
 	"io"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -290,8 +291,9 @@ arguments, uses the current session context.`,
 }
 
 func cmdRuntimeDrainCheck(args []string, stderr io.Writer) int {
-	if len(args) > 0 {
-		target, err := resolveSessionRuntimeTarget(args[0], stderr)
+	identifier := firstNonEmptyArg(args)
+	if identifier != "" {
+		target, err := resolveSessionRuntimeTarget(identifier, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc runtime drain-check: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1                                                 // silent — same as current "not draining" behavior
@@ -344,8 +346,9 @@ finished its current work in response to a drain signal.`,
 }
 
 func cmdRuntimeDrainAck(args []string, stdout, stderr io.Writer) int {
-	if len(args) > 0 {
-		target, err := resolveSessionRuntimeTarget(args[0], stderr)
+	identifier := firstNonEmptyArg(args)
+	if identifier != "" {
+		target, err := resolveSessionRuntimeTarget(identifier, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "gc runtime drain-ack: %v\n", err) //nolint:errcheck // best-effort stderr
 			return 1
@@ -363,6 +366,15 @@ func cmdRuntimeDrainAck(args []string, stdout, stderr io.Writer) int {
 	sp := newSessionProvider()
 	dops := newDrainOps(sp)
 	return doRuntimeDrainAck(dops, current.sessionName, stdout, stderr)
+}
+
+func firstNonEmptyArg(args []string) string {
+	for _, arg := range args {
+		if trimmed := strings.TrimSpace(arg); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------

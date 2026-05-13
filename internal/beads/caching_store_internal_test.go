@@ -145,6 +145,41 @@ func TestCachingStoreApplyEventRecordsBackingVerificationErrorAndAppliesUpdate(t
 	}
 }
 
+func TestCachingStoreApplyEventDropsStaleConflictingUpdateBeyondRecentWindow(t *testing.T) {
+	t.Parallel()
+
+	backing := NewMemStore()
+	bead, err := backing.Create(Bead{Title: "claimable", Status: "open"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	cache := NewCachingStoreForTest(backing, nil)
+	if err := cache.Prime(context.Background()); err != nil {
+		t.Fatalf("Prime: %v", err)
+	}
+
+	status := "in_progress"
+	assignee := "infra-worker-gc-ms1etum"
+	if err := cache.Update(bead.ID, UpdateOpts{Status: &status, Assignee: &assignee}); err != nil {
+		t.Fatalf("Update claim: %v", err)
+	}
+	cache.mu.Lock()
+	delete(cache.beadSeq, bead.ID)
+	cache.localBeadAt[bead.ID] = time.Now().Add(-time.Minute)
+	cache.mu.Unlock()
+
+	cache.ApplyEvent("bead.updated", json.RawMessage(`{"id":"`+bead.ID+`","status":"open","assignee":""}`))
+
+	got, err := cache.Get(bead.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "in_progress" || got.Assignee != assignee {
+		t.Fatalf("stale event won: status=%q assignee=%q, want in_progress/%s", got.Status, got.Assignee, assignee)
+	}
+}
+
 func TestCachingStoreIgnoresStaleClosedEventAfterLocalReopenBeyondRecentWindow(t *testing.T) {
 	backing := NewMemStore()
 	bead, err := backing.Create(Bead{Title: "reopen me"})
