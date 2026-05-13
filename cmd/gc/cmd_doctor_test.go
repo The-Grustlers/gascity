@@ -242,6 +242,57 @@ dolt_port = "3308"
 	}
 }
 
+func TestDoDoctorReportsInheritedRigSplitBrain(t *testing.T) {
+	cityDir := t.TempDir()
+	rigDir := filepath.Join(cityDir, "rabble")
+	if err := os.MkdirAll(filepath.Join(cityDir, ".gc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(rigDir, ".beads", "dolt", "rb", ".dolt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, "city.toml"), []byte(`[workspace]
+name = "demo"
+
+[beads]
+provider = "file"
+
+[[rigs]]
+name = "rabble"
+path = "rabble"
+prefix = "rb"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeCanonicalScopeConfig(t, rigDir, contract.ConfigState{
+		IssuePrefix:    "rb",
+		EndpointOrigin: contract.EndpointOriginInheritedCity,
+		EndpointStatus: contract.EndpointStatusVerified,
+	})
+	if _, err := contract.EnsureCanonicalMetadata(fsys.OSFS{}, filepath.Join(rigDir, ".beads", "metadata.json"), contract.MetadataState{
+		Database:     "dolt",
+		Backend:      "dolt",
+		DoltMode:     "server",
+		DoltDatabase: "rb",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GC_CITY_PATH", cityDir)
+	t.Setenv("GC_BEADS", "file")
+	t.Setenv("GC_DOLT", "skip")
+
+	var stdout, stderr bytes.Buffer
+	code := doDoctor(false, false, []string{"inherited-rig-split-brain"}, &stdout, &stderr)
+	out := stdout.String() + stderr.String()
+
+	if code != 1 {
+		t.Fatalf("doctor exit code = %d, want 1; output:\n%s", code, out)
+	}
+	if !strings.Contains(out, "inherited-rig-split-brain") || !strings.Contains(out, "rig-local Dolt database") {
+		t.Fatalf("doctor output missing inherited-rig split-brain evidence:\n%s", out)
+	}
+}
+
 func TestDoDoctorReportsLegacyBDSplitStore(t *testing.T) {
 	cityDir := t.TempDir()
 	writeMinimalCityToml(t, cityDir)
