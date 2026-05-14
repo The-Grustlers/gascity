@@ -23,11 +23,15 @@ func TestGenerateDockerfile(t *testing.T) {
 		t.Error("missing touch .gc-workspace-ready")
 	}
 
-	// Must expose baked GR7N scripts and wrap gh with the GitHub App token helper.
+	// Must expose baked GR7N scripts, install platform shims, and wrap gh with
+	// the GitHub App token helper.
 	if !strings.Contains(content, `ENV PATH="/workspace/scripts:`) {
 		t.Error("missing /workspace/scripts on PATH")
 	}
-	if !strings.Contains(content, "/workspace/scripts/github-app-token.sh") {
+	if !strings.Contains(content, "GR7N_PLATFORM_BIN_DIR=/usr/local/bin /workspace/gr7n-platform/scripts/install-bins.sh") {
+		t.Error("missing gr7n-platform shim install")
+	}
+	if !strings.Contains(content, "gr7n-github-app token") {
 		t.Error("missing gh GitHub App token wrapper")
 	}
 

@@ -21,11 +21,14 @@ USER root
 COPY --chown=gcagent:gcagent workspace/ /workspace/
 ENV PATH="/workspace/scripts:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 RUN set -eu; \
+    if [ -x /workspace/gr7n-platform/scripts/install-bins.sh ]; then \
+      GR7N_CITY_DIR=/workspace GR7N_PLATFORM_BIN_DIR=/usr/local/bin /workspace/gr7n-platform/scripts/install-bins.sh >/tmp/gr7n-platform-install.log; \
+    fi; \
     if [ -x /usr/bin/gh ]; then \
       printf '%%s\n' \
         '#!/usr/bin/env sh' \
-        'if [ -z "${GH_TOKEN:-}" ] && [ -x /workspace/scripts/github-app-token.sh ]; then' \
-        '  token="$(/workspace/scripts/github-app-token.sh 2>/dev/null || true)"' \
+        'if [ -z "${GH_TOKEN:-}" ] && command -v gr7n-github-app >/dev/null 2>&1; then' \
+        '  token="$(gr7n-github-app token 2>/dev/null || true)"' \
         '  if [ -n "$token" ]; then' \
         '    export GH_TOKEN="$token"' \
         '    if [ -z "${GITHUB_TOKEN:-}" ]; then' \
