@@ -3063,6 +3063,7 @@ func reassignTestSetup(t *testing.T, assignee string) (SlingOpts, SlingDeps, bea
 	}
 	a := config.Agent{Name: "polecat", Dir: "myrig", MaxActiveSessions: intPtr(2)}
 	deps := testDeps(cfg, runtime.NewFake(), runner.run)
+	deps.StoreRef = "rig:myrig"
 	bead, err := deps.Store.Create(beads.Bead{Title: "task", Type: "task", Assignee: assignee})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
