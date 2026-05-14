@@ -748,16 +748,27 @@ func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg runtime
 	if err != nil {
 		return err
 	}
-	if len(projected) == 0 {
-		return nil
-	}
-	doltHost := projected["GC_DOLT_HOST"]
-	doltPort := projected["GC_DOLT_PORT"]
 	storeRoot := projectedPodStoreRoot(cfg, workDir)
 	prefix := strings.TrimSpace(cfg.Env["GC_BEADS_PREFIX"])
 	if prefix == "" {
 		return fmt.Errorf("missing projected GC_BEADS_PREFIX")
 	}
+	if len(projected) == 0 {
+		doltHost := strings.TrimSpace(managedServiceHost)
+		if doltHost == "" {
+			doltHost = podManagedDoltHost
+		}
+		doltPort := strings.TrimSpace(managedServicePort)
+		if doltPort == "" {
+			doltPort = podManagedDoltPort
+		}
+		projected = map[string]string{
+			"GC_DOLT_HOST": doltHost,
+			"GC_DOLT_PORT": doltPort,
+		}
+	}
+	doltHost := projected["GC_DOLT_HOST"]
+	doltPort := projected["GC_DOLT_PORT"]
 
 	portNum, err := strconv.Atoi(doltPort)
 	if err != nil {
@@ -773,6 +784,7 @@ func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg runtime
 	patchB64 := base64.StdEncoding.EncodeToString(patchJSON)
 	prefixB64 := base64.StdEncoding.EncodeToString([]byte(prefix))
 	storeRootB64 := base64.StdEncoding.EncodeToString([]byte(storeRoot))
+	linuxUserB64 := base64.StdEncoding.EncodeToString([]byte(strings.TrimSpace(cfg.Env["LINUX_USERNAME"])))
 
 	patchCmd := fmt.Sprintf(
 		`WD=$(echo '%s' | base64 -d) && cd "$WD" && PATCH=$(echo '%s' | base64 -d) && `+
@@ -788,10 +800,12 @@ func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg runtime
 			`else PREFIX=$(echo '%s' | base64 -d) && `+
 			`DOLT_HOST=$(echo '%s' | base64 -d) && `+
 			`DOLT_PORT=$(echo '%s' | base64 -d) && `+
-			`yes | BEADS_DIR="$WD/.beads" bd init --server --server-host "$DOLT_HOST" --server-port "$DOLT_PORT" -p "$PREFIX" --skip-hooks --skip-agents; fi`,
+			`yes | BEADS_DIR="$WD/.beads" bd init --server --server-host "$DOLT_HOST" --server-port "$DOLT_PORT" -p "$PREFIX" --skip-hooks --skip-agents; fi; `+
+			`USER_NAME=$(echo '%s' | base64 -d) && if [ -n "$USER_NAME" ]; then chown -R "$USER_NAME" "$WD/.beads" 2>/dev/null || true; fi`,
 		storeRootB64, patchB64, prefixB64,
 		base64.StdEncoding.EncodeToString([]byte(doltHost)),
 		base64.StdEncoding.EncodeToString([]byte(doltPort)),
+		linuxUserB64,
 	)
 	_, err = ops.execInPod(ctx, podName, "agent", []string{"sh", "-c", patchCmd}, nil)
 	return err

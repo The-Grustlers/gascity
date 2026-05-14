@@ -1401,8 +1401,9 @@ func TestBuildPodPrebaked(t *testing.T) {
 		Command: "claude --settings .gc/settings.json",
 		WorkDir: "/city/demo-rig",
 		Env: map[string]string{
-			"GC_AGENT": "demo-rig/polecat",
-			"GC_CITY":  "/city",
+			"GC_AGENT":       "demo-rig/polecat",
+			"GC_CITY":        "/city",
+			"LINUX_USERNAME": "bryce",
 		},
 		OverlayDir: "/some/overlay", // would normally trigger staging
 	}
@@ -1460,6 +1461,12 @@ func TestBuildPodPrebaked(t *testing.T) {
 	if !containsStr(entrypoint, "/tmp/github-app-secret") {
 		t.Error("prebaked entrypoint should copy optional GitHub App credentials")
 	}
+	if !containsStr(entrypoint, "GR7N_GITHUB_APP_PRIVATE_KEY_FILE=$HOME/.config/gr7n/github-app-private-key.pem") {
+		t.Error("prebaked entrypoint should rewrite GitHub App private-key path for the pod home")
+	}
+	if !containsStr(entrypoint, `chown -R "bryce" "$HOME/.claude" "$HOME/.config/gr7n"`) {
+		t.Error("prebaked entrypoint should make copied credentials readable by the dynamic pod user")
+	}
 }
 
 func TestInitBeadsInPodUsesProjectedStoreRootAndPrefix(t *testing.T) {
@@ -1503,6 +1510,39 @@ func TestInitBeadsInPodUsesProjectedStoreRootAndPrefix(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("initBeadsInPod did not use projected store root and prefix")
+	}
+}
+
+func TestInitBeadsInPodUsesManagedTargetWhenNoProjectedDolt(t *testing.T) {
+	fake := newFakeK8sOps()
+	cfg := runtime.Config{
+		WorkDir: "/host/city",
+		Env: map[string]string{
+			"GC_CITY":         "/host/city",
+			"GC_STORE_ROOT":   "/host/city",
+			"GC_BEADS_PREFIX": "hq",
+		},
+	}
+
+	if err := initBeadsInPod(context.Background(), fake, "gc-test-pod", cfg, "/workspace", podManagedDoltHost, podManagedDoltPort); err != nil {
+		t.Fatalf("initBeadsInPod: %v", err)
+	}
+
+	var script string
+	for _, c := range fake.calls {
+		if c.method == "execInPod" && len(c.cmd) >= 3 && c.cmd[0] == "sh" && c.cmd[1] == "-c" {
+			script = c.cmd[2]
+			break
+		}
+	}
+	if script == "" {
+		t.Fatal("no sh -c exec call found")
+	}
+	if !strings.Contains(script, base64.StdEncoding.EncodeToString([]byte(podManagedDoltHost))) {
+		t.Fatalf("managed Dolt host missing from bootstrap script:\n%s", script)
+	}
+	if !strings.Contains(script, base64.StdEncoding.EncodeToString([]byte(podManagedDoltPort))) {
+		t.Fatalf("managed Dolt port missing from bootstrap script:\n%s", script)
 	}
 }
 

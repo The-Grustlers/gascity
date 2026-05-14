@@ -228,8 +228,15 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 	}
 	credCopy := `mkdir -p $HOME/.claude && cp -rL /tmp/claude-secret/. $HOME/.claude/ 2>/dev/null; ` +
 		`mkdir -p $HOME/.config/gr7n && cp -rL /tmp/github-app-secret/. $HOME/.config/gr7n/ 2>/dev/null; ` +
+		`if [ -f "$HOME/.config/gr7n/github-app.env" ]; then ` +
+		`grep -q '^GR7N_GITHUB_APP_PRIVATE_KEY_FILE=' "$HOME/.config/gr7n/github-app.env" && ` +
+		`sed -i "s|^GR7N_GITHUB_APP_PRIVATE_KEY_FILE=.*|GR7N_GITHUB_APP_PRIVATE_KEY_FILE=$HOME/.config/gr7n/github-app-private-key.pem|" "$HOME/.config/gr7n/github-app.env" || ` +
+		`printf '\nGR7N_GITHUB_APP_PRIVATE_KEY_FILE=%s/.config/gr7n/github-app-private-key.pem\n' "$HOME" >> "$HOME/.config/gr7n/github-app.env"; fi; ` +
 		`chmod 0600 $HOME/.config/gr7n/github-app-private-key.pem 2>/dev/null; ` +
 		`git config --global --add safe.directory '*' 2>/dev/null; `
+	if linuxUsername != "" {
+		credCopy += fmt.Sprintf(`chown -R "%s" "$HOME/.claude" "$HOME/.config/gr7n" 2>/dev/null; `, linuxUsername)
+	}
 	codexConfig := `mkdir -p "$HOME/.codex" && cat > "$HOME/.codex/config.toml" <<'EOF'
 [projects."/workspace"]
 trust_level = "trusted"
