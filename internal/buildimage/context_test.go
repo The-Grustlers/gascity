@@ -184,6 +184,12 @@ name = "test-city"
 	writeFile(t, rigDir, "README.md", "# Rig")
 	writeFile(t, rigDir, ".git/HEAD", "ref: refs/heads/main\n")
 	writeFile(t, rigDir, ".beads/metadata.json", "{}")
+	writeFile(t, rigDir, "planning/contexts/base.md", "base")
+	writeFile(t, rigDir, "test-results/history.jsonl", "{}\n")
+	mkdirAll(t, rigDir, ".agent/rules")
+	if err := os.Symlink("../../planning/contexts/base.md", filepath.Join(rigDir, ".agent", "rules", "monorepo.md")); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
 
 	err := AssembleContext(Options{
 		CityPath:  cityDir,
@@ -198,6 +204,8 @@ name = "test-city"
 	assertFileExists(t, outputDir, "workspace/my-rig/main.go")
 	assertFileExists(t, outputDir, "workspace/my-rig/README.md")
 	assertFileExists(t, outputDir, "workspace/my-rig/.git/HEAD")
+	assertFileExists(t, outputDir, "workspace/my-rig/test-results/history.jsonl")
+	assertSymlink(t, outputDir, "workspace/my-rig/.agent/rules/monorepo.md", "../../planning/contexts/base.md")
 	assertFileNotExists(t, outputDir, "workspace/my-rig/.beads/metadata.json")
 }
 
@@ -340,5 +348,17 @@ func assertFileNotExists(t *testing.T, dir, rel string) {
 	path := filepath.Join(dir, rel)
 	if _, err := os.Stat(path); err == nil {
 		t.Errorf("expected file to NOT exist: %s", rel)
+	}
+}
+
+func assertSymlink(t *testing.T, dir, rel, wantTarget string) {
+	t.Helper()
+	path := filepath.Join(dir, rel)
+	got, err := os.Readlink(path)
+	if err != nil {
+		t.Fatalf("expected symlink %s: %v", rel, err)
+	}
+	if got != wantTarget {
+		t.Fatalf("symlink %s target = %q, want %q", rel, got, wantTarget)
 	}
 }

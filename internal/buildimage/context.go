@@ -54,7 +54,12 @@ func excludedPathWithOptions(rel string, opts copyOptions) bool {
 			if !opts.IncludeGit {
 				return true
 			}
-		case ".beads", ".dolt", ".gradle", ".godot", ".mypy_cache", ".nx", ".pnpm-store", ".pytest_cache", ".ruff_cache", ".runtime", ".turbo", ".venv", ".next", ".cache", "node_modules", "dist", "build", "coverage", "test-results", "__pycache__", "target", "venv":
+		case ".beads", ".dolt", ".gradle", ".godot", ".mypy_cache", ".nx", ".pnpm-store", ".pytest_cache", ".ruff_cache", ".runtime", ".turbo", ".venv", ".next", ".cache", "node_modules", "dist", "build", "coverage", "__pycache__", "target", "venv":
+			return true
+		case "test-results":
+			if opts.IncludeGit {
+				continue
+			}
 			return true
 		}
 	}
@@ -178,11 +183,18 @@ func copyDirFilteredWithOptions(src, dst string, opts copyOptions) error {
 		target := filepath.Join(dst, rel)
 
 		if info.Mode()&os.ModeSymlink != 0 {
-			targetInfo, err := os.Stat(path)
-			if err != nil || targetInfo.IsDir() {
+			linkTarget, err := os.Readlink(path)
+			if err != nil {
+				return err
+			}
+			resolvedInfo, err := os.Stat(path)
+			if err != nil || resolvedInfo.IsDir() {
 				return nil
 			}
-			return copyFile(path, target, targetInfo.Mode())
+			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+				return err
+			}
+			return os.Symlink(linkTarget, target)
 		}
 
 		if info.IsDir() {
