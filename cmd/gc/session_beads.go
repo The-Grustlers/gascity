@@ -577,6 +577,9 @@ func unclaimWorkAssignedToRetiredSessionBead(
 						continue
 					}
 					seen[key] = struct{}{}
+					if poolClaimLeaseActive(item.Metadata, time.Now()) {
+						continue
+					}
 					update := beads.UpdateOpts{Assignee: &empty}
 					// Clearing assignee on an in_progress bead leaves it invisible to
 					// the work_query: Tier 1 needs an assignee match, Tiers 2/3 only

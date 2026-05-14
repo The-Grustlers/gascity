@@ -5302,6 +5302,52 @@ func TestUnclaimResetsInProgressStatus(t *testing.T) {
 	}
 }
 
+func TestUnclaimSkipsActivePoolClaimLease(t *testing.T) {
+	store := beads.NewMemStore()
+	sessionBead, err := store.Create(beads.Bead{
+		Title:  "worker",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel},
+		Metadata: map[string]string{
+			"session_name": "worker-1",
+			"state":        "retired",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session bead: %v", err)
+	}
+
+	work, err := store.Create(beads.Bead{
+		Title:    "starting pod work",
+		Status:   "in_progress",
+		Assignee: "worker-1",
+		Metadata: map[string]string{
+			"gc.routed_to":              "worker",
+			poolClaimLeaseUntilMetadata: time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339),
+		},
+	})
+	if err != nil {
+		t.Fatalf("create work bead: %v", err)
+	}
+	inProgress := "in_progress"
+	if err := store.Update(work.ID, beads.UpdateOpts{Status: &inProgress}); err != nil {
+		t.Fatalf("mark work in_progress: %v", err)
+	}
+
+	unclaimWorkAssignedToRetiredSessionBead(store, nil, sessionBead, "worker", io.Discard)
+
+	got, err := store.Get(work.ID)
+	if err != nil {
+		t.Fatalf("get work: %v", err)
+	}
+	if got.Status != "in_progress" {
+		t.Fatalf("status = %q, want in_progress while claim lease is active", got.Status)
+	}
+	if got.Assignee != "worker-1" {
+		t.Fatalf("assignee = %q, want worker-1 while claim lease is active", got.Assignee)
+	}
+}
+
 // closeBead is the low-level metadata+close helper. Ownership checks live in
 // closeSessionBeadIfUnassigned, which has the full multi-store, multi-identifier
 // view of assigned work. closeBead itself must stay dumb so it doesn't
