@@ -255,13 +255,15 @@ func poolSessionConsumesNewDemand(session beads.Bead) bool {
 		return sessionpkg.PendingCreateClaimWakeEligible(session.Metadata)
 	}
 	// This pure desired-state pass has no reconciler clock. Sessions that are
-	// already being created, active, or awake still represent already-spent new
-	// demand until they claim work or drain. Otherwise a slow startup/claim turn
-	// can make the next reconcile create another pool member for the same ready
-	// bead.
+	// already being created, active, awake, or parked in a normal idle sleep
+	// still represent already-spent new demand until they claim work, drain, or
+	// time out. Otherwise a slow startup/claim turn can make the next reconcile
+	// create another pool member for the same ready bead.
 	switch strings.TrimSpace(session.Metadata["state"]) {
 	case "creating", "active", "awake":
 		return true
+	case "asleep":
+		return strings.TrimSpace(session.Metadata["sleep_reason"]) == "idle"
 	default:
 		return false
 	}

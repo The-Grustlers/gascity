@@ -257,6 +257,55 @@ func TestComputePoolDesiredStates_ActivePoolSessionConsumesNewDemand(t *testing.
 	}
 }
 
+func TestComputePoolDesiredStates_AsleepIdlePoolSessionConsumesNewDemand(t *testing.T) {
+	cfg := &config.City{
+		Agents: []config.Agent{poolAgent("claude", "", intPtr(2), 0)},
+	}
+	session := poolSessionBeadWithState("s1", "asleep", "")
+	session.Metadata["sleep_reason"] = "idle"
+	sessions := []beads.Bead{session}
+	scaleCheck := map[string]int{"claude": 1}
+
+	result := ComputePoolDesiredStates(cfg, nil, sessions, scaleCheck)
+
+	if len(result) != 1 {
+		t.Fatalf("len(result) = %d, want 1", len(result))
+	}
+	reqs := result[0].Requests
+	if len(reqs) != 1 {
+		t.Fatalf("len(requests) = %d, want 1 asleep-idle in-flight request", len(reqs))
+	}
+	if reqs[0].SessionBeadID != "s1" {
+		t.Fatalf("SessionBeadID = %q, want s1", reqs[0].SessionBeadID)
+	}
+	if reqs[0].Tier != "new" {
+		t.Fatalf("tier = %q, want new", reqs[0].Tier)
+	}
+}
+
+func TestComputePoolDesiredStates_AsleepIdleTimeoutDoesNotConsumeNewDemand(t *testing.T) {
+	cfg := &config.City{
+		Agents: []config.Agent{poolAgent("claude", "", intPtr(2), 0)},
+	}
+	session := poolSessionBeadWithState("s1", "asleep", "")
+	session.Metadata["sleep_reason"] = "idle-timeout"
+	sessions := []beads.Bead{session}
+	scaleCheck := map[string]int{"claude": 1}
+
+	result := ComputePoolDesiredStates(cfg, nil, sessions, scaleCheck)
+
+	if len(result) != 1 {
+		t.Fatalf("len(result) = %d, want 1", len(result))
+	}
+	reqs := result[0].Requests
+	if len(reqs) != 1 {
+		t.Fatalf("len(requests) = %d, want 1 anonymous new request", len(reqs))
+	}
+	if reqs[0].SessionBeadID != "" {
+		t.Fatalf("SessionBeadID = %q, want anonymous new request", reqs[0].SessionBeadID)
+	}
+}
+
 func TestComputePoolDesiredStates_MaxCapsResumeBeads(t *testing.T) {
 	cfg := &config.City{
 		Agents: []config.Agent{poolAgent("claude", "rig", intPtr(2), 0)},
