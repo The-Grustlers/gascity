@@ -369,9 +369,29 @@ func liveWorkAssignmentStillReleasable(store beads.Store, id, assignee string) b
 		if wb.ID != id {
 			continue
 		}
+		if poolClaimLeaseActive(wb.Metadata, time.Now()) {
+			return false
+		}
 		return strings.TrimSpace(wb.Assignee) == strings.TrimSpace(assignee)
 	}
 	return false
+}
+
+const poolClaimLeaseUntilMetadata = "gc.pool_claim_lease_until"
+
+func poolClaimLeaseActive(metadata map[string]string, now time.Time) bool {
+	if len(metadata) == 0 {
+		return false
+	}
+	raw := strings.TrimSpace(metadata[poolClaimLeaseUntilMetadata])
+	if raw == "" {
+		return false
+	}
+	leaseUntil, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return false
+	}
+	return leaseUntil.After(now.UTC())
 }
 
 func assigneePreservesNamedSessionRoute(cfg *config.City, cityPath, template, assignee, workStoreRef string, storeRefAware bool) bool {
