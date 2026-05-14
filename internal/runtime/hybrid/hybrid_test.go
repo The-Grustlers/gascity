@@ -142,6 +142,24 @@ func TestStop_RoutesCorrectly(t *testing.T) {
 	}
 }
 
+func TestStop_CleansFallbackRuntimeWhenRouteMissesLiveSession(t *testing.T) {
+	local, remote := runtime.NewFake(), runtime.NewFake()
+	h := New(local, remote, func(string) bool { return false })
+
+	const name = "web-worker-gc-196sxfk"
+	if err := remote.Start(context.Background(), name, runtime.Config{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := h.Stop(name); err != nil {
+		t.Fatal(err)
+	}
+
+	if remote.IsRunning(name) {
+		t.Fatalf("remote session %q still running after fallback cleanup", name)
+	}
+}
+
 func TestPendingAndRespond_RouteToBackend(t *testing.T) {
 	local, remote := runtime.NewFake(), runtime.NewFake()
 	h := New(local, remote, isRemote)

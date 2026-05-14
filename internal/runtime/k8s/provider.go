@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -313,15 +314,54 @@ func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) e
 
 // Stop deletes the pod for the named session. Idempotent.
 func (p *Provider) Stop(name string) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer cancel()
 	label := SanitizeLabel(name)
+	podName := SanitizeName(name)
 
 	pods, err := p.ops.listPods(ctx, "gc-session="+label, "")
+	var errs []error
 	if err != nil {
-		return nil // best-effort
+		// Keep Stop idempotent by falling back to the deterministic pod
+		// name below. Older or partially-written pods may have bad labels,
+		// and list failures should not strand a directly-addressable pod.
+		errs = append(errs, fmt.Errorf("listing pods for session %q: %w", name, err))
 	}
+	seen := make(map[string]bool, len(pods)+1)
 	for i := range pods {
-		_ = p.ops.deletePod(ctx, pods[i].Name, 5)
+		seen[pods[i].Name] = true
+		if stopErr := p.stopPod(ctx, pods[i].Name); stopErr != nil {
+			errs = append(errs, stopErr)
+		}
+	}
+	if !seen[podName] {
+		if _, getErr := p.ops.getPod(ctx, podName); getErr == nil {
+			if stopErr := p.stopPod(ctx, podName); stopErr != nil {
+				errs = append(errs, stopErr)
+			}
+		} else if len(pods) > 0 {
+			// A labelled pod was already handled; missing deterministic name is fine.
+		} else if err != nil {
+			// No labelled pods and the deterministic name is gone/unknown. Preserve
+			// idempotent Stop semantics instead of surfacing an unhelpful list error.
+			errs = nil
+		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
+	return nil
+}
+
+func (p *Provider) stopPod(ctx context.Context, podName string) error {
+	if err := p.ops.deletePod(ctx, podName, 5); err != nil {
+		if _, getErr := p.ops.getPod(ctx, podName); getErr != nil {
+			return nil
+		}
+		return fmt.Errorf("deleting pod %q: %w", podName, err)
+	}
+	if err := waitForDeletion(ctx, p.ops, podName, 30*time.Second); err != nil {
+		return fmt.Errorf("waiting for pod %q deletion: %w", podName, err)
 	}
 	return nil
 }

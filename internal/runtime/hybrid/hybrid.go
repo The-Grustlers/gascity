@@ -4,6 +4,7 @@ package hybrid
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/gastownhall/gascity/internal/runtime"
@@ -38,6 +39,13 @@ func (p *Provider) route(name string) runtime.Provider {
 	return p.local
 }
 
+func (p *Provider) routePair(name string) (runtime.Provider, runtime.Provider) {
+	if p.isRemote(name) {
+		return p.remote, p.local
+	}
+	return p.local, p.remote
+}
+
 // Start delegates to the routed backend.
 func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) error {
 	return p.route(name).Start(ctx, name, cfg)
@@ -45,7 +53,19 @@ func (p *Provider) Start(ctx context.Context, name string, cfg runtime.Config) e
 
 // Stop delegates to the routed backend.
 func (p *Provider) Stop(name string) error {
-	return p.route(name).Stop(name)
+	primary, fallback := p.routePair(name)
+	fallbackRunning := fallback != nil && fallback.IsRunning(name)
+	err := primary.Stop(name)
+	if fallbackRunning {
+		fallbackErr := fallback.Stop(name)
+		if err != nil && fallbackErr != nil {
+			return errors.Join(err, fallbackErr)
+		}
+		if fallbackErr != nil {
+			return fallbackErr
+		}
+	}
+	return err
 }
 
 // Interrupt delegates to the routed backend.

@@ -298,6 +298,41 @@ func TestStop(t *testing.T) {
 	}
 }
 
+func TestStopFallsBackToDeterministicPodName(t *testing.T) {
+	fake := newFakeK8sOps()
+	p := newProviderWithOps(fake)
+
+	fake.pods["gc-test-agent"] = &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "gc-test-agent",
+			Labels: map[string]string{"app": "gc-agent", "gc-session": "wrong-label"},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+
+	if err := p.Stop("gc-test-agent"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if _, exists := fake.pods["gc-test-agent"]; exists {
+		t.Fatal("pod still exists after deterministic-name Stop fallback")
+	}
+}
+
+func TestStopReturnsDeleteErrorWhenPodRemains(t *testing.T) {
+	fake := newFakeK8sOps()
+	p := newProviderWithOps(fake)
+	addRunningPod(fake, "gc-test-agent", "gc-test-agent")
+	fake.deleteErr = fmt.Errorf("delete failed")
+
+	err := p.Stop("gc-test-agent")
+	if err == nil {
+		t.Fatal("Stop error = nil, want delete failure")
+	}
+	if !contains(err.Error(), "delete failed") {
+		t.Fatalf("Stop error = %v, want delete failure", err)
+	}
+}
+
 func TestListRunning(t *testing.T) {
 	fake := newFakeK8sOps()
 	p := newProviderWithOps(fake)
