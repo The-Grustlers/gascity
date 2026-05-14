@@ -1589,6 +1589,45 @@ func TestInitBeadsInPodInfersCityStoreForAgentWorkDir(t *testing.T) {
 	}
 }
 
+func TestInitBeadsInPodInfersPrefixFromControllerCWDWhenEnvIsPodProjected(t *testing.T) {
+	cityDir := t.TempDir()
+	t.Chdir(cityDir)
+	if err := os.MkdirAll(filepath.Join(cityDir, ".beads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, ".beads", "config.yaml"), []byte("issue_prefix: gc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fake := newFakeK8sOps()
+	cfg := runtime.Config{
+		WorkDir: "/workspace/.gc/agents/k8s-canary",
+		Env: map[string]string{
+			"GC_CITY": "/workspace",
+		},
+	}
+
+	if err := initBeadsInPod(context.Background(), fake, "gc-test-pod", cfg, "/workspace/.gc/agents/k8s-canary", podManagedDoltHost, podManagedDoltPort); err != nil {
+		t.Fatalf("initBeadsInPod: %v", err)
+	}
+
+	var script string
+	for _, c := range fake.calls {
+		if c.method == "execInPod" && len(c.cmd) >= 3 && c.cmd[0] == "sh" && c.cmd[1] == "-c" {
+			script = c.cmd[2]
+			break
+		}
+	}
+	if script == "" {
+		t.Fatal("no sh -c exec call found")
+	}
+	if !strings.Contains(script, base64.StdEncoding.EncodeToString([]byte("/workspace"))) {
+		t.Fatalf("bootstrap script did not target projected city root:\n%s", script)
+	}
+	if !strings.Contains(script, base64.StdEncoding.EncodeToString([]byte("gc"))) {
+		t.Fatalf("bootstrap script did not infer issue prefix from controller cwd:\n%s", script)
+	}
+}
+
 func TestVerifyBeadsInPodChecksCanonicalFiles(t *testing.T) {
 	fake := newFakeK8sOps()
 	cfg := runtime.Config{

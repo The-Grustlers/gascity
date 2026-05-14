@@ -817,12 +817,14 @@ func projectedBeadsPrefix(cfg runtime.Config, controllerRoot string) string {
 	if prefix := strings.TrimSpace(cfg.Env["GC_BEADS_PREFIX"]); prefix != "" {
 		return prefix
 	}
+	cwd, _ := os.Getwd()
 	for _, root := range []string{
 		controllerRoot,
 		strings.TrimSpace(cfg.Env["GC_STORE_ROOT"]),
 		strings.TrimSpace(cfg.Env["GC_RIG_ROOT"]),
 		strings.TrimSpace(cfg.WorkDir),
 		controllerCityPath(cfg.Env),
+		cwd,
 	} {
 		if prefix := readBeadsIssuePrefix(root); prefix != "" {
 			return prefix
