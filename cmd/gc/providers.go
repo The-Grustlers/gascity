@@ -780,6 +780,16 @@ func newHybridProvider(sc config.SessionConfig, cityName, cityPath string) (runt
 		pattern = v
 	}
 	return sessionhybrid.New(local, remote, func(name string) bool {
-		return pattern != "" && strings.Contains(name, pattern)
+		return hybridRemoteMatch(name, pattern)
 	}), nil
+}
+
+func hybridRemoteMatch(name, patterns string) bool {
+	for _, pattern := range strings.Split(patterns, ",") {
+		pattern = strings.TrimSpace(pattern)
+		if pattern != "" && strings.Contains(name, pattern) {
+			return true
+		}
+	}
+	return false
 }

@@ -31,6 +31,30 @@ func TestTmuxConfigFromSessionPreservesExplicitSocket(t *testing.T) {
 	}
 }
 
+func TestHybridRemoteMatchSupportsCommaSeparatedPatterns(t *testing.T) {
+	tests := []struct {
+		name     string
+		session  string
+		patterns string
+		want     bool
+	}{
+		{name: "empty", session: "k8s-canary", patterns: "", want: false},
+		{name: "single match", session: "k8s-canary-gc-1", patterns: "k8s-canary", want: true},
+		{name: "single miss", session: "mayor", patterns: "k8s-canary", want: false},
+		{name: "comma match first", session: "k8s-canary-gc-1", patterns: "k8s-canary,grustle-monorepo/web-worker", want: true},
+		{name: "comma match second", session: "grustle-monorepo/web-worker-gc-1", patterns: "k8s-canary, grustle-monorepo/web-worker", want: true},
+		{name: "comma ignores blanks", session: "planner", patterns: " , k8s-canary, ,grustle-monorepo/web-worker ", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hybridRemoteMatch(tt.session, tt.patterns); got != tt.want {
+				t.Fatalf("hybridRemoteMatch(%q, %q) = %v, want %v", tt.session, tt.patterns, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSessionProviderContextForCityUsesTargetCityAndEnvOverride(t *testing.T) {
 	t.Setenv("GC_SESSION", "subprocess")
 
