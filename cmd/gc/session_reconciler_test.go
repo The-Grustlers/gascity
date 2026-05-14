@@ -4037,7 +4037,7 @@ func TestReconcileSessionBeads_RateLimitPendingCreateBatchFailureRetriesBeforeRo
 	}
 	env.sp.Zombies["worker"] = true
 	env.sp.SetPeekOutput("worker", "You've hit your limit, Pro plan\n\n/rate-limit-options")
-	lastWoke := env.clk.Now().Add(-2 * time.Minute).UTC().Format(time.RFC3339)
+	lastWoke := env.clk.Now().Add(-4 * time.Minute).UTC().Format(time.RFC3339)
 	session := env.createSessionBead("worker", "worker")
 	session.CreatedAt = env.clk.Now().Add(-5 * time.Minute)
 	env.setSessionMetadata(&session, map[string]string{

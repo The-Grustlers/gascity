@@ -1660,6 +1660,19 @@ func runningSessionMatchesPendingCreate(session *beads.Bead, sessionName string,
 	return expectedToken != "" && liveToken == expectedToken
 }
 
+func pendingCreateRuntimeIdentityMissing(sessionName string, sp runtime.Provider) bool {
+	if sp == nil {
+		return true
+	}
+	if value, err := sp.GetMeta(sessionName, "GC_SESSION_ID"); err == nil && strings.TrimSpace(value) != "" {
+		return false
+	}
+	if value, err := sp.GetMeta(sessionName, "GC_INSTANCE_TOKEN"); err == nil && strings.TrimSpace(value) != "" {
+		return false
+	}
+	return true
+}
+
 func rollbackPendingCreate(session *beads.Bead, store beads.Store, now time.Time, stderr io.Writer) {
 	if session == nil || store == nil {
 		return

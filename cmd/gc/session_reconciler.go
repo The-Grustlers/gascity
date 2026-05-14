@@ -869,6 +869,22 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 			}
 		}
 		if alive && shouldRollbackPendingCreate(session) && !runningSessionMatchesPendingCreate(session, name, sp) {
+			identityMissing := pendingCreateRuntimeIdentityMissing(name, sp)
+			if identityMissing && peek != nil {
+				if content, err := peek(rateLimitPeekLines); err == nil && runtime.ContainsProviderRateLimitScreen(content) {
+					if err := recordRateLimitQuarantine(session, store, clk); err != nil {
+						continue
+					}
+					continue
+				}
+			}
+			stateBeforeRollback := sessionpkg.State(strings.TrimSpace(session.Metadata["state"]))
+			if identityMissing && stateBeforeRollback == sessionpkg.StateCreating && pendingCreateStartInFlight(*session, clk, startupTimeout) {
+				if trace != nil {
+					trace.recordDecision("reconciler.session.pending_create", tp.TemplateName, name, "pending_create_identity_probe_in_flight", "deferred", nil, nil, "")
+				}
+				continue
+			}
 			attemptRollbackPendingCreate(session, tp.TemplateName, name, "pending_create_rollback", "live runtime belongs to another session")
 			continue
 		}

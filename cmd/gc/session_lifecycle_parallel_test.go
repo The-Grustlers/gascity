@@ -2524,6 +2524,78 @@ func TestReconcileSessionBeads_SkipsPendingCreateStartAlreadyInFlight(t *testing
 	sp.ensureNoFurtherStart(t, 100*time.Millisecond)
 }
 
+func TestReconcileSessionBeads_DefersPendingCreateRollbackWhileRuntimeIdentityStarts(t *testing.T) {
+	store := beads.NewMemStore()
+	clk := &clock.Fake{Time: time.Date(2026, 5, 14, 12, 40, 0, 0, time.UTC)}
+	session, err := store.Create(beads.Bead{
+		ID:     "gc-worker",
+		Title:  "worker",
+		Type:   sessionBeadType,
+		Labels: []string{sessionBeadLabel},
+		Metadata: creatingMeta(map[string]string{
+			"session_name":         "worker",
+			"template":             "worker",
+			"generation":           "2",
+			"continuation_epoch":   "1",
+			"instance_token":       "tok-worker",
+			"pending_create_claim": "true",
+			"last_woke_at":         clk.Now().Add(-10 * time.Second).UTC().Format(time.RFC3339),
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp := runtime.NewFake()
+	if err := sp.Start(context.Background(), "worker", runtime.Config{}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.City{
+		Agents: []config.Agent{{Name: "worker"}},
+	}
+	tp := TemplateParams{
+		Command:      "worker",
+		SessionName:  "worker",
+		TemplateName: "worker",
+	}
+	woken := reconcileSessionBeads(
+		context.Background(),
+		[]beads.Bead{session},
+		map[string]TemplateParams{"worker": tp},
+		configuredSessionNames(cfg, "", store),
+		cfg,
+		sp,
+		store,
+		nil,
+		nil,
+		nil,
+		newDrainTracker(),
+		map[string]int{"worker": 1},
+		false,
+		map[string]bool{"worker": true},
+		"test-city",
+		nil,
+		clk,
+		events.Discard,
+		time.Minute,
+		0,
+		ioDiscard{},
+		ioDiscard{},
+	)
+	if woken != 0 {
+		t.Fatalf("woken = %d, want 0 while live runtime identity is still starting", woken)
+	}
+	updated, err := store.Get(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status == "closed" {
+		t.Fatal("pending-create bead was rolled back while live runtime identity metadata was still starting")
+	}
+	if got := updated.Metadata["pending_create_claim"]; got != "true" {
+		t.Fatalf("pending_create_claim = %q, want true", got)
+	}
+}
+
 func TestCommitAsyncStartResult_IgnoresStaleSessionSnapshot(t *testing.T) {
 	store := beads.NewMemStore()
 	clk := &clock.Fake{Time: time.Date(2026, 4, 26, 12, 2, 0, 0, time.UTC)}
