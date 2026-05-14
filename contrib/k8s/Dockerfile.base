@@ -12,7 +12,7 @@ FROM ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194
 
 ENV DEBIAN_FRONTEND=noninteractive
 ARG CLAUDE_CODE_VERSION=2.1.123
-ARG CODEX_CLI_VERSION=0.125.0
+ARG CODEX_CLI_VERSION=0.130.0
 ARG DOLT_VERSION=1.88.0
 ARG NODE_MAJOR=22
 ARG PNPM_VERSION=10.14.0
@@ -64,7 +64,8 @@ RUN /tmp/install-dolt-archive.sh "${DOLT_VERSION}" \
 # Default non-root user for Claude Code (--dangerously-skip-permissions rejects root).
 # When LINUX_USERNAME is set at runtime, the pod entrypoint creates a dynamic
 # user via useradd and drops privileges via su. gcagent is kept as fallback.
-RUN useradd -m -s /bin/bash gcagent \
+RUN userdel -r ubuntu 2>/dev/null || true \
+    && useradd -m -s /bin/bash -u 1000 gcagent \
     && echo "gcagent ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/gcagent \
     && chmod 0440 /etc/sudoers.d/gcagent
 ENV HOME=/home/gcagent

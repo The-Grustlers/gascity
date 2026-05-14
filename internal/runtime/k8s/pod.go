@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -325,7 +326,7 @@ EOF
 			Containers: []corev1.Container{{
 				Name:            "agent",
 				Image:           p.image,
-				ImagePullPolicy: corev1.PullAlways,
+				ImagePullPolicy: agentImagePullPolicy(p.prebaked),
 				WorkingDir:      podWorkDir,
 				Command:         []string{"/bin/sh", "-c"},
 				Args:            []string{tmuxCmd},
@@ -368,6 +369,21 @@ EOF
 	}
 
 	return pod, nil
+}
+
+func agentImagePullPolicy(prebaked bool) corev1.PullPolicy {
+	switch strings.TrimSpace(os.Getenv("GC_K8S_IMAGE_PULL_POLICY")) {
+	case "Always":
+		return corev1.PullAlways
+	case "IfNotPresent":
+		return corev1.PullIfNotPresent
+	case "Never":
+		return corev1.PullNever
+	}
+	if prebaked {
+		return corev1.PullIfNotPresent
+	}
+	return corev1.PullAlways
 }
 
 func cloneTolerations(in []corev1.Toleration) []corev1.Toleration {

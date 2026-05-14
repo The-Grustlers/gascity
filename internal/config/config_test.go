@@ -3857,8 +3857,8 @@ func TestSessionNudgeLockTimeoutInvalid(t *testing.T) {
 func TestSessionStartupTimeoutDefault(t *testing.T) {
 	s := SessionConfig{}
 	got := s.StartupTimeoutDuration()
-	if got != 60*time.Second {
-		t.Errorf("StartupTimeoutDuration() = %v, want 60s", got)
+	if got != 180*time.Second {
+		t.Errorf("StartupTimeoutDuration() = %v, want 180s", got)
 	}
 }
 
@@ -3873,8 +3873,8 @@ func TestSessionStartupTimeoutCustom(t *testing.T) {
 func TestSessionStartupTimeoutInvalid(t *testing.T) {
 	s := SessionConfig{StartupTimeout: "bad"}
 	got := s.StartupTimeoutDuration()
-	if got != 60*time.Second {
-		t.Errorf("StartupTimeoutDuration() = %v, want 60s (default for invalid)", got)
+	if got != 180*time.Second {
+		t.Errorf("StartupTimeoutDuration() = %v, want 180s (default for invalid)", got)
 	}
 }
 
