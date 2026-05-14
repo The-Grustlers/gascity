@@ -182,6 +182,8 @@ name = "test-city"
 `)
 	writeFile(t, rigDir, "main.go", "package main")
 	writeFile(t, rigDir, "README.md", "# Rig")
+	writeFile(t, rigDir, ".git/HEAD", "ref: refs/heads/main\n")
+	writeFile(t, rigDir, ".beads/metadata.json", "{}")
 
 	err := AssembleContext(Options{
 		CityPath:  cityDir,
@@ -195,6 +197,8 @@ name = "test-city"
 	// Verify rig content was copied.
 	assertFileExists(t, outputDir, "workspace/my-rig/main.go")
 	assertFileExists(t, outputDir, "workspace/my-rig/README.md")
+	assertFileExists(t, outputDir, "workspace/my-rig/.git/HEAD")
+	assertFileNotExists(t, outputDir, "workspace/my-rig/.beads/metadata.json")
 }
 
 func TestAssembleContextWithWorkspacePaths(t *testing.T) {
@@ -207,6 +211,7 @@ name = "test-city"
 `)
 	writeFile(t, platformDir, "package.json", `{"name":"gr7n-platform"}`)
 	writeFile(t, platformDir, "packages/node-access/src/cli.mjs", "#!/usr/bin/env node\n")
+	writeFile(t, platformDir, ".git/HEAD", "ref: refs/heads/main\n")
 
 	err := AssembleContext(Options{
 		CityPath:       cityDir,
@@ -219,6 +224,7 @@ name = "test-city"
 
 	assertFileExists(t, outputDir, "workspace/gr7n-platform/package.json")
 	assertFileExists(t, outputDir, "workspace/gr7n-platform/packages/node-access/src/cli.mjs")
+	assertFileExists(t, outputDir, "workspace/gr7n-platform/.git/HEAD")
 }
 
 func TestAssembleContextPreservesCustomReferencedCityFiles(t *testing.T) {

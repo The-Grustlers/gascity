@@ -37,12 +37,24 @@ type Manifest struct {
 	BaseImage string    `json:"base_image"`
 }
 
+type copyOptions struct {
+	IncludeGit bool
+}
+
 // excludedPaths returns true for paths that should never be baked.
 func excludedPath(rel string) bool {
+	return excludedPathWithOptions(rel, copyOptions{})
+}
+
+func excludedPathWithOptions(rel string, opts copyOptions) bool {
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	for _, part := range parts {
 		switch part {
-		case ".beads", ".dolt", ".git", ".gradle", ".godot", ".mypy_cache", ".nx", ".pnpm-store", ".pytest_cache", ".ruff_cache", ".runtime", ".turbo", ".venv", ".next", ".cache", "node_modules", "dist", "build", "coverage", "test-results", "__pycache__", "target", "venv":
+		case ".git":
+			if !opts.IncludeGit {
+				return true
+			}
+		case ".beads", ".dolt", ".gradle", ".godot", ".mypy_cache", ".nx", ".pnpm-store", ".pytest_cache", ".ruff_cache", ".runtime", ".turbo", ".venv", ".next", ".cache", "node_modules", "dist", "build", "coverage", "test-results", "__pycache__", "target", "venv":
 			return true
 		}
 	}
@@ -97,13 +109,13 @@ func AssembleContext(opts Options) error {
 	// Copy rig paths into workspace.
 	for rigName, rigPath := range opts.RigPaths {
 		rigDst := filepath.Join(wsDir, rigName)
-		if err := copyDirFiltered(rigPath, rigDst); err != nil {
+		if err := copyDirFilteredWithOptions(rigPath, rigDst, copyOptions{IncludeGit: true}); err != nil {
 			return fmt.Errorf("copying rig %q: %w", rigName, err)
 		}
 	}
 	for workspaceName, workspacePath := range opts.WorkspacePaths {
 		workspaceDst := filepath.Join(wsDir, workspaceName)
-		if err := copyDirFiltered(workspacePath, workspaceDst); err != nil {
+		if err := copyDirFilteredWithOptions(workspacePath, workspaceDst, copyOptions{IncludeGit: true}); err != nil {
 			return fmt.Errorf("copying workspace %q: %w", workspaceName, err)
 		}
 	}
@@ -135,6 +147,10 @@ func AssembleContext(opts Options) error {
 
 // copyDirFiltered copies src directory to dst, skipping excluded paths.
 func copyDirFiltered(src, dst string) error {
+	return copyDirFilteredWithOptions(src, dst, copyOptions{})
+}
+
+func copyDirFilteredWithOptions(src, dst string, opts copyOptions) error {
 	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -152,7 +168,7 @@ func copyDirFiltered(src, dst string) error {
 		if err != nil {
 			return err
 		}
-		if excludedPath(rel) || excludedPath(fullRel) {
+		if excludedPathWithOptions(rel, opts) || excludedPathWithOptions(fullRel, opts) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
