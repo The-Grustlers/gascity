@@ -763,7 +763,7 @@ func TestPodManifestCompatibility(t *testing.T) {
 	for _, v := range pod.Spec.Volumes {
 		volNames[v.Name] = true
 	}
-	for _, name := range []string{"ws", "claude-config", "city"} {
+	for _, name := range []string{"ws", "claude-config", "github-app-config", "city"} {
 		if !volNames[name] {
 			t.Errorf("missing volume %q", name)
 		}
@@ -1434,21 +1434,31 @@ func TestBuildPodPrebaked(t *testing.T) {
 		}
 	}
 
-	// claude-config Secret volume must still be present.
+	// Credential Secret volumes must still be present.
 	hasClaudeConfig := false
+	hasGitHubAppConfig := false
 	for _, v := range pod.Spec.Volumes {
 		if v.Name == "claude-config" {
 			hasClaudeConfig = true
 		}
+		if v.Name == "github-app-config" {
+			hasGitHubAppConfig = true
+		}
 	}
 	if !hasClaudeConfig {
 		t.Error("prebaked pod missing claude-config Secret volume")
+	}
+	if !hasGitHubAppConfig {
+		t.Error("prebaked pod missing github-app-config Secret volume")
 	}
 
 	// Entrypoint should NOT contain workspace-ready wait.
 	entrypoint := pod.Spec.Containers[0].Args[0]
 	if containsStr(entrypoint, ".gc-workspace-ready") {
 		t.Error("prebaked entrypoint should not wait for .gc-workspace-ready")
+	}
+	if !containsStr(entrypoint, "/tmp/github-app-secret") {
+		t.Error("prebaked entrypoint should copy optional GitHub App credentials")
 	}
 }
 

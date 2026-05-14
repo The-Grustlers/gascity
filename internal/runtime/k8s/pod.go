@@ -226,7 +226,10 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 			linuxUsername,
 		)
 	}
-	credCopy := `mkdir -p $HOME/.claude && cp -rL /tmp/claude-secret/. $HOME/.claude/ 2>/dev/null; git config --global --add safe.directory '*' 2>/dev/null; `
+	credCopy := `mkdir -p $HOME/.claude && cp -rL /tmp/claude-secret/. $HOME/.claude/ 2>/dev/null; ` +
+		`mkdir -p $HOME/.config/gr7n && cp -rL /tmp/github-app-secret/. $HOME/.config/gr7n/ 2>/dev/null; ` +
+		`chmod 0600 $HOME/.config/gr7n/github-app-private-key.pem 2>/dev/null; ` +
+		`git config --global --add safe.directory '*' 2>/dev/null; `
 	codexConfig := `mkdir -p "$HOME/.codex" && cat > "$HOME/.codex/config.toml" <<'EOF'
 [projects."/workspace"]
 trust_level = "trusted"
@@ -288,10 +291,21 @@ EOF
 	mainVolMounts = append(mainVolMounts, corev1.VolumeMount{
 		Name: "claude-config", MountPath: "/tmp/claude-secret", ReadOnly: true,
 	})
+	mainVolMounts = append(mainVolMounts, corev1.VolumeMount{
+		Name: "github-app-config", MountPath: "/tmp/github-app-secret", ReadOnly: true,
+	})
 	volumes = append(volumes, corev1.Volume{
 		Name: "claude-config", VolumeSource: corev1.VolumeSource{
 			Secret: &corev1.SecretVolumeSource{
 				SecretName: "claude-credentials",
+				Optional:   boolPtr(true),
+			},
+		},
+	})
+	volumes = append(volumes, corev1.Volume{
+		Name: "github-app-config", VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: "github-app-credentials",
 				Optional:   boolPtr(true),
 			},
 		},

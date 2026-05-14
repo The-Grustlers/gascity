@@ -238,3 +238,81 @@ func TestResolveTemplateInjectsPerDispatcherTraceDefault(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveTemplateInjectsCityBeadsPrefix(t *testing.T) {
+	cityPath := t.TempDir()
+	writeTemplateResolveCityConfig(t, cityPath, "file")
+	cfg := &config.City{Workspace: config.Workspace{Prefix: "hq"}}
+
+	params := &agentBuildParams{
+		city:       cfg,
+		cityName:   "city",
+		cityPath:   cityPath,
+		workspace:  &config.Workspace{Provider: "test"},
+		providers:  map[string]config.ProviderSpec{"test": {Command: "echo", PromptMode: "none"}},
+		lookPath:   func(string) (string, error) { return "/bin/echo", nil },
+		fs:         fsys.OSFS{},
+		beaconTime: time.Unix(0, 0),
+		beadNames:  make(map[string]string),
+		stderr:     io.Discard,
+	}
+
+	agent := &config.Agent{Name: "runner"}
+	tp, err := resolveTemplate(params, agent, agent.QualifiedName(), nil)
+	if err != nil {
+		t.Fatalf("resolveTemplate: %v", err)
+	}
+
+	if got := tp.Env["GC_STORE_ROOT"]; got != cityPath {
+		t.Fatalf("GC_STORE_ROOT = %q, want %q", got, cityPath)
+	}
+	if got := tp.Env["GC_STORE_SCOPE"]; got != "city" {
+		t.Fatalf("GC_STORE_SCOPE = %q, want city", got)
+	}
+	if got := tp.Env["GC_BEADS_PREFIX"]; got != "hq" {
+		t.Fatalf("GC_BEADS_PREFIX = %q, want hq", got)
+	}
+}
+
+func TestResolveTemplateInjectsRigBeadsPrefix(t *testing.T) {
+	cityPath := t.TempDir()
+	writeTemplateResolveCityConfig(t, cityPath, "file")
+	rigRoot := filepath.Join(t.TempDir(), "demo")
+	if err := os.MkdirAll(rigRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &config.City{
+		Workspace: config.Workspace{Prefix: "hq"},
+		Rigs:      []config.Rig{{Name: "demo", Path: rigRoot, Prefix: "dm"}},
+	}
+
+	params := &agentBuildParams{
+		city:       cfg,
+		cityName:   "city",
+		cityPath:   cityPath,
+		workspace:  &config.Workspace{Provider: "test"},
+		providers:  map[string]config.ProviderSpec{"test": {Command: "echo", PromptMode: "none"}},
+		lookPath:   func(string) (string, error) { return "/bin/echo", nil },
+		fs:         fsys.OSFS{},
+		rigs:       cfg.Rigs,
+		beaconTime: time.Unix(0, 0),
+		beadNames:  make(map[string]string),
+		stderr:     io.Discard,
+	}
+
+	agent := &config.Agent{Name: "runner", Dir: "demo"}
+	tp, err := resolveTemplate(params, agent, agent.QualifiedName(), nil)
+	if err != nil {
+		t.Fatalf("resolveTemplate: %v", err)
+	}
+
+	if got := tp.Env["GC_STORE_ROOT"]; got != rigRoot {
+		t.Fatalf("GC_STORE_ROOT = %q, want %q", got, rigRoot)
+	}
+	if got := tp.Env["GC_STORE_SCOPE"]; got != "rig" {
+		t.Fatalf("GC_STORE_SCOPE = %q, want rig", got)
+	}
+	if got := tp.Env["GC_BEADS_PREFIX"]; got != "dm" {
+		t.Fatalf("GC_BEADS_PREFIX = %q, want dm", got)
+	}
+}
