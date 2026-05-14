@@ -354,6 +354,24 @@ func TestParseDoctorCheckFilterSplitsCommas(t *testing.T) {
 	}
 }
 
+func TestMissingDoctorChecksReportsUnknownRequestedNames(t *testing.T) {
+	cityDir := t.TempDir()
+	writeMinimalCityToml(t, cityDir)
+	t.Setenv("GC_CITY_PATH", cityDir)
+	t.Setenv("GC_BEADS", "file")
+
+	var stdout, stderr bytes.Buffer
+	code := doDoctor(false, false, []string{"not-a-real-check"}, &stdout, &stderr)
+	out := stdout.String() + stderr.String()
+
+	if code == 0 {
+		t.Fatalf("doDoctor returned 0, want non-zero for unknown requested check; output:\n%s", out)
+	}
+	if !strings.Contains(out, "unknown doctor check(s): not-a-real-check") {
+		t.Fatalf("doctor output missing unknown check diagnostic:\n%s", out)
+	}
+}
+
 func TestCollectPackDirsEmpty(t *testing.T) {
 	cfg := &config.City{}
 	dirs := collectPackDirs(cfg)
