@@ -1505,8 +1505,14 @@ func TestInitBeadsInPodUsesProjectedStoreRootAndPrefix(t *testing.T) {
 		if strings.Contains(script, wrongWorkDirB64) {
 			t.Fatalf("repair script used pod workdir instead of projected store root: %s", script)
 		}
+		if strings.Contains(script, "<<<") {
+			t.Fatalf("repair script must stay POSIX-sh compatible, found here-string: %s", script)
+		}
 		if !strings.Contains(script, "m.pop('project_id'") {
 			t.Fatalf("repair script did not strip project_id: %s", script)
+		}
+		if !strings.Contains(script, "bd init --server") || strings.Count(script, "m.pop('project_id'") < 2 {
+			t.Fatalf("repair script must strip project_id for existing and newly initialized metadata: %s", script)
 		}
 		found = true
 	}

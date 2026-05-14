@@ -794,15 +794,15 @@ func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg runtime
 			`python3 -c "import json,sys; `+
 			`m=json.load(open('.beads/metadata.json')); `+
 			`p=json.loads(sys.argv[1]); m.update(p); m.pop('project_id', None); `+
-			`json.dump(m,open('.beads/metadata.json','w'),indent=2)" "$PATCH" 2>/dev/null || `+
-			`python3 -c "import json,sys; `+
-			`m=json.load(open('.beads/metadata.json')); `+
-			`p=json.loads(sys.stdin.read()); m.update(p); m.pop('project_id', None); `+
-			`json.dump(m,open('.beads/metadata.json','w'),indent=2)" <<< "$PATCH"; `+
+			`json.dump(m,open('.beads/metadata.json','w'),indent=2)" "$PATCH"; `+
 			`else PREFIX=$(echo '%s' | base64 -d) && `+
 			`DOLT_HOST=$(echo '%s' | base64 -d) && `+
 			`DOLT_PORT=$(echo '%s' | base64 -d) && `+
-			`yes | BEADS_DIR="$WD/.beads" bd init --server --server-host "$DOLT_HOST" --server-port "$DOLT_PORT" -p "$PREFIX" --skip-hooks --skip-agents; fi; `+
+			`yes | BEADS_DIR="$WD/.beads" bd init --server --server-host "$DOLT_HOST" --server-port "$DOLT_PORT" -p "$PREFIX" --skip-hooks --skip-agents && `+
+			`python3 -c "import json,sys; `+
+			`m=json.load(open('.beads/metadata.json')); `+
+			`p=json.loads(sys.argv[1]); m.update(p); m.pop('project_id', None); `+
+			`json.dump(m,open('.beads/metadata.json','w'),indent=2)" "$PATCH"; fi; `+
 			`USER_NAME=$(echo '%s' | base64 -d) && if [ -n "$USER_NAME" ]; then chown -R "$USER_NAME" "$WD/.beads" 2>/dev/null || true; fi`,
 		storeRootB64, patchB64, prefixB64,
 		base64.StdEncoding.EncodeToString([]byte(doltHost)),
