@@ -19,7 +19,25 @@ ARG BASE=%s
 FROM ${BASE}
 USER root
 COPY --chown=gcagent:gcagent workspace/ /workspace/
-RUN touch /workspace/.gc-workspace-ready
+ENV PATH="/workspace/scripts:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+RUN set -eu; \
+    if [ -x /usr/bin/gh ]; then \
+      cat >/usr/local/bin/gh <<'EOF'
+#!/usr/bin/env sh
+if [ -z "${GH_TOKEN:-}" ] && [ -x /workspace/scripts/github-app-token.sh ]; then
+  token="$(/workspace/scripts/github-app-token.sh 2>/dev/null || true)"
+  if [ -n "$token" ]; then
+    export GH_TOKEN="$token"
+    if [ -z "${GITHUB_TOKEN:-}" ]; then
+      export GITHUB_TOKEN="$token"
+    fi
+  fi
+fi
+exec /usr/bin/gh "$@"
+EOF
+      chmod 0755 /usr/local/bin/gh; \
+    fi; \
+    touch /workspace/.gc-workspace-ready
 USER gcagent
 `
 	return []byte(fmt.Sprintf(tmpl, baseImage))

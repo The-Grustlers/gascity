@@ -24,6 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
     jq \
+    openssh-client \
     procps \
     python3 \
     ripgrep \

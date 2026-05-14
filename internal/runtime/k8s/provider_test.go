@@ -1548,6 +1548,12 @@ func TestBuildPodPrebaked(t *testing.T) {
 	if !containsStr(entrypoint, "GR7N_GITHUB_APP_PRIVATE_KEY_FILE=$HOME/.config/gr7n/github-app-private-key.pem") {
 		t.Error("prebaked entrypoint should rewrite GitHub App private-key path for the pod home")
 	}
+	if !containsStr(entrypoint, "credential.https://github.com.helper /workspace/scripts/github-app-git-credential-helper.sh") {
+		t.Error("prebaked entrypoint should configure the GitHub App git credential helper")
+	}
+	if !containsStr(entrypoint, "url.https://github.com/The-Grustlers/.insteadOf git@github.com:The-Grustlers/") {
+		t.Error("prebaked entrypoint should rewrite The-Grustlers SSH remotes to HTTPS")
+	}
 	if !containsStr(entrypoint, `chown -R "bryce" "$HOME/.claude" "$HOME/.config/gr7n"`) {
 		t.Error("prebaked entrypoint should make copied credentials readable by the dynamic pod user")
 	}

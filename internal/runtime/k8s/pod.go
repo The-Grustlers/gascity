@@ -286,7 +286,13 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 		`sed -i "s|^GR7N_GITHUB_APP_PRIVATE_KEY_FILE=.*|GR7N_GITHUB_APP_PRIVATE_KEY_FILE=$HOME/.config/gr7n/github-app-private-key.pem|" "$HOME/.config/gr7n/github-app.env" || ` +
 		`printf '\nGR7N_GITHUB_APP_PRIVATE_KEY_FILE=%s/.config/gr7n/github-app-private-key.pem\n' "$HOME" >> "$HOME/.config/gr7n/github-app.env"; fi; ` +
 		`chmod 0600 $HOME/.config/gr7n/github-app-private-key.pem 2>/dev/null; ` +
-		`git config --global --add safe.directory '*' 2>/dev/null; `
+		`git config --global --add safe.directory '*' 2>/dev/null; ` +
+		`if [ -x /workspace/scripts/github-app-git-credential-helper.sh ]; then ` +
+		`git config --global credential.https://github.com.helper /workspace/scripts/github-app-git-credential-helper.sh; ` +
+		`git config --global credential.useHttpPath true; ` +
+		`git config --global --replace-all url.https://github.com/The-Grustlers/.insteadOf ssh://git@github.com/The-Grustlers/ 2>/dev/null || true; ` +
+		`git config --global --add url.https://github.com/The-Grustlers/.insteadOf git@github.com:The-Grustlers/ 2>/dev/null || true; ` +
+		`fi; `
 	if linuxUsername != "" {
 		credCopy += fmt.Sprintf(`chown -R "%s" "$HOME/.claude" "$HOME/.config/gr7n" 2>/dev/null; `, linuxUsername)
 	}

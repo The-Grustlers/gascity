@@ -23,6 +23,14 @@ func TestGenerateDockerfile(t *testing.T) {
 		t.Error("missing touch .gc-workspace-ready")
 	}
 
+	// Must expose baked GR7N scripts and wrap gh with the GitHub App token helper.
+	if !strings.Contains(content, `ENV PATH="/workspace/scripts:`) {
+		t.Error("missing /workspace/scripts on PATH")
+	}
+	if !strings.Contains(content, "/workspace/scripts/github-app-token.sh") {
+		t.Error("missing gh GitHub App token wrapper")
+	}
+
 	// Must set USER.
 	if !strings.Contains(content, "USER gcagent") {
 		t.Error("missing USER gcagent")
