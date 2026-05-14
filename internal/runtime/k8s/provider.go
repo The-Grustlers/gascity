@@ -755,6 +755,7 @@ func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg runtime
 	if prefix == "" {
 		return fmt.Errorf("missing projected GC_BEADS_PREFIX")
 	}
+	database := projectedBeadsDatabase(cfg, controllerRoot, prefix)
 	if len(projected) == 0 {
 		doltHost := strings.TrimSpace(managedServiceHost)
 		if doltHost == "" {
@@ -777,6 +778,10 @@ func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg runtime
 		return fmt.Errorf("invalid projected GC_DOLT_PORT %q: %w", doltPort, err)
 	}
 	patchJSON, err := json.Marshal(map[string]any{
+		"backend":          "dolt",
+		"database":         "dolt",
+		"dolt_database":    database,
+		"dolt_mode":        "server",
 		"dolt_server_host": doltHost,
 		"dolt_server_port": portNum,
 	})
@@ -790,12 +795,14 @@ func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg runtime
 
 	patchCmd := fmt.Sprintf(
 		`WD=$(echo '%s' | base64 -d) && cd "$WD" && PATCH=$(echo '%s' | base64 -d) && `+
+			`PREFIX=$(echo '%s' | base64 -d) && `+
+			`mkdir -p .beads && `+
 			`if [ -f .beads/metadata.json ]; then `+
 			`python3 -c "import json,sys; `+
 			`m=json.load(open('.beads/metadata.json')); `+
 			`p=json.loads(sys.argv[1]); m.update(p); m.pop('project_id', None); `+
 			`json.dump(m,open('.beads/metadata.json','w'),indent=2)" "$PATCH"; `+
-			`else PREFIX=$(echo '%s' | base64 -d) && `+
+			`else `+
 			`DOLT_HOST=$(echo '%s' | base64 -d) && `+
 			`DOLT_PORT=$(echo '%s' | base64 -d) && `+
 			`yes | BEADS_DIR="$WD/.beads" bd init --server --server-host "$DOLT_HOST" --server-port "$DOLT_PORT" -p "$PREFIX" --skip-hooks --skip-agents && `+
@@ -803,6 +810,15 @@ func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg runtime
 			`m=json.load(open('.beads/metadata.json')); `+
 			`p=json.loads(sys.argv[1]); m.update(p); m.pop('project_id', None); `+
 			`json.dump(m,open('.beads/metadata.json','w'),indent=2)" "$PATCH"; fi; `+
+			`python3 -c "from pathlib import Path; import sys; `+
+			`p=Path('.beads/config.yaml'); prefix=sys.argv[1]; `+
+			`text=p.read_text() if p.exists() else ''; lines=text.splitlines(); seen_u=seen_h=False; out=[]; `+
+			`for line in lines: `+
+			`s=line.strip(); `+
+			`out.append('issue_prefix: '+prefix) if s.startswith('issue_prefix:') else out.append('issue-prefix: '+prefix) if s.startswith('issue-prefix:') else out.append(line); `+
+			`seen_u = seen_u or s.startswith('issue_prefix:'); seen_h = seen_h or s.startswith('issue-prefix:'); `+
+			`out.insert(0,'issue_prefix: '+prefix) if not seen_u else None; out.insert(1 if not seen_u else 0,'issue-prefix: '+prefix) if not seen_h else None; `+
+			`p.write_text('\n'.join(out).rstrip()+'\n')" "$PREFIX"; `+
 			`USER_NAME=$(echo '%s' | base64 -d) && if [ -n "$USER_NAME" ]; then chown -R "$USER_NAME" "$WD/.beads" 2>/dev/null || true; fi`,
 		storeRootB64, patchB64, prefixB64,
 		base64.StdEncoding.EncodeToString([]byte(doltHost)),
@@ -811,6 +827,45 @@ func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg runtime
 	)
 	_, err = ops.execInPod(ctx, podName, "agent", []string{"sh", "-c", patchCmd}, nil)
 	return err
+}
+
+func projectedBeadsDatabase(cfg runtime.Config, controllerRoot, fallback string) string {
+	if database := strings.TrimSpace(cfg.Env["GC_BEADS_DATABASE"]); database != "" {
+		return database
+	}
+	cwd, _ := os.Getwd()
+	for _, root := range []string{
+		controllerRoot,
+		strings.TrimSpace(cfg.Env["GC_STORE_ROOT"]),
+		strings.TrimSpace(cfg.Env["GC_RIG_ROOT"]),
+		strings.TrimSpace(cfg.WorkDir),
+		controllerCityPath(cfg.Env),
+		cwd,
+	} {
+		if database := readBeadsDoltDatabase(root); database != "" {
+			return database
+		}
+	}
+	return fallback
+}
+
+func readBeadsDoltDatabase(root string) string {
+	root = strings.TrimSpace(root)
+	if root == "" || strings.HasPrefix(root, "/workspace") {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".beads", "metadata.json"))
+	if err != nil {
+		return ""
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return ""
+	}
+	if database, ok := meta["dolt_database"].(string); ok {
+		return strings.TrimSpace(database)
+	}
+	return ""
 }
 
 func projectedBeadsPrefix(cfg runtime.Config, controllerRoot string) string {

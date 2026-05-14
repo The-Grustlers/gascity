@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -1518,6 +1519,66 @@ func TestInitBeadsInPodUsesProjectedStoreRootAndPrefix(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("initBeadsInPod did not use projected store root and prefix")
+	}
+}
+
+func TestInitBeadsInPodProjectsControllerDoltDatabase(t *testing.T) {
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".beads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, ".beads", "config.yaml"), []byte("issue_prefix: gc\nissue-prefix: gc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, ".beads", "metadata.json"), []byte(`{"backend":"dolt","database":"dolt","dolt_mode":"server","dolt_database":"hq","project_id":"host-only"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fake := newFakeK8sOps()
+	cfg := runtime.Config{
+		WorkDir: filepath.Join(cityDir, ".gc", "agents", "k8s-canary"),
+		Env: map[string]string{
+			"GC_CITY":         cityDir,
+			"GC_STORE_ROOT":   cityDir,
+			"GC_BEADS_PREFIX": "gc",
+			"GC_DOLT_HOST":    "127.0.0.1",
+			"GC_DOLT_PORT":    "19384",
+		},
+	}
+
+	if got := projectedBeadsDatabase(cfg, controllerStoreRoot(cfg), "gc"); got != "hq" {
+		t.Fatalf("projectedBeadsDatabase = %q, want hq", got)
+	}
+	if err := initBeadsInPod(context.Background(), fake, "gc-test-pod", cfg, "/workspace/.gc/agents/k8s-canary", podManagedDoltHost, podManagedDoltPort); err != nil {
+		t.Fatalf("initBeadsInPod: %v", err)
+	}
+
+	var script string
+	for _, c := range fake.calls {
+		if c.method == "execInPod" && len(c.cmd) >= 3 && c.cmd[0] == "sh" && c.cmd[1] == "-c" {
+			script = c.cmd[2]
+			break
+		}
+	}
+	if script == "" {
+		t.Fatal("no sh -c exec call found")
+	}
+	wantPatch, err := json.Marshal(map[string]any{
+		"backend":          "dolt",
+		"database":         "dolt",
+		"dolt_database":    "hq",
+		"dolt_mode":        "server",
+		"dolt_server_host": podManagedDoltHost,
+		"dolt_server_port": 3307,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(script, base64.StdEncoding.EncodeToString(wantPatch)) {
+		t.Fatalf("bootstrap patch does not project controller dolt_database hq:\n%s", script)
+	}
+	if !strings.Contains(script, "issue_prefix: '+prefix") || !strings.Contains(script, "issue-prefix: '+prefix") {
+		t.Fatalf("bootstrap script does not force both issue prefix spellings:\n%s", script)
 	}
 }
 
