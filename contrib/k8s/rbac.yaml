@@ -14,12 +14,12 @@ metadata:
   labels:
     app.kubernetes.io/part-of: gas-city
 rules:
-  # Agent pods only need TCP access to Dolt — no K8s API access needed.
-  # This minimal role exists so the ServiceAccount is properly scoped.
-  # The gc controller (on laptop) uses the user's kubeconfig for pod management.
+  # Agent pods normally only need TCP access to Dolt. Delete access lets a
+  # one-shot pod clean up its own session during `gc session close`; the
+  # controller still owns pod creation and broader reconciliation.
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["get"]
+    verbs: ["get", "list", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
