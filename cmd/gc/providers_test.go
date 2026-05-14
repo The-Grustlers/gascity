@@ -43,6 +43,8 @@ func TestHybridRemoteMatchSupportsCommaSeparatedPatterns(t *testing.T) {
 		{name: "single miss", session: "mayor", patterns: "k8s-canary", want: false},
 		{name: "comma match first", session: "k8s-canary-gc-1", patterns: "k8s-canary,grustle-monorepo/web-worker", want: true},
 		{name: "comma match second", session: "grustle-monorepo/web-worker-gc-1", patterns: "k8s-canary, grustle-monorepo/web-worker", want: true},
+		{name: "qualified pattern matches pool runtime name", session: "web-worker-gc-1", patterns: "k8s-canary, grustle-monorepo/web-worker", want: true},
+		{name: "qualified pattern does not match loose infix", session: "my-web-worker-gc-1", patterns: "grustle-monorepo/web-worker", want: false},
 		{name: "comma ignores blanks", session: "planner", patterns: " , k8s-canary, ,grustle-monorepo/web-worker ", want: false},
 	}
 

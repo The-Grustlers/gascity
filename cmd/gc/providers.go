@@ -785,11 +785,33 @@ func newHybridProvider(sc config.SessionConfig, cityName, cityPath string) (runt
 }
 
 func hybridRemoteMatch(name, patterns string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
 	for _, pattern := range strings.Split(patterns, ",") {
 		pattern = strings.TrimSpace(pattern)
 		if pattern != "" && strings.Contains(name, pattern) {
 			return true
 		}
+		if hybridRemoteQualifiedPatternMatch(name, pattern) {
+			return true
+		}
 	}
 	return false
+}
+
+func hybridRemoteQualifiedPatternMatch(name, pattern string) bool {
+	if pattern == "" || !strings.ContainsAny(pattern, `/\`) {
+		return false
+	}
+	i := strings.LastIndexAny(pattern, `/\`)
+	if i >= 0 {
+		pattern = pattern[i+1:]
+	}
+	base := agent.SanitizeQualifiedNameForSession(strings.TrimSpace(pattern))
+	if base == "" {
+		return false
+	}
+	return name == base || strings.HasPrefix(name, base+"-")
 }
