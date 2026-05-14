@@ -1167,6 +1167,7 @@ func commitAsyncStartResultWithContext(
 	}
 	if ctx != nil && ctx.Err() != nil {
 		if refreshed.err != nil && refreshed.rollbackPending {
+			stopCanceledAsyncStartRuntime(refreshed, sp, stderr)
 			return commitStartResultTraced(refreshed, store, clk, rec, wave, stdout, stderr, trace)
 		}
 		if refreshed.err == nil && shouldRollbackPendingCreate(refreshed.prepared.candidate.session) {
@@ -1178,6 +1179,9 @@ func commitAsyncStartResultWithContext(
 	}
 	if sp != nil && refreshed.err == nil && refreshed.outcome != "session_initializing" {
 		clearReconcilerDrainAckMetadata(sp, refreshed.prepared.candidate.name())
+	}
+	if refreshed.err != nil && refreshed.rollbackPending {
+		stopCanceledAsyncStartRuntime(refreshed, sp, stderr)
 	}
 	return commitStartResultTraced(refreshed, store, clk, rec, wave, stdout, stderr, trace)
 }
@@ -1232,6 +1236,19 @@ func stopStaleAsyncStartRuntime(result startResult, sp runtime.Provider, stderr 
 	}
 	if err := sp.Stop(name); err != nil && !runtime.IsSessionGone(err) {
 		fmt.Fprintf(stderr, "session reconciler: stopping stale async start runtime %s: %v\n", name, err) //nolint:errcheck
+	}
+}
+
+func stopCanceledAsyncStartRuntime(result startResult, sp runtime.Provider, stderr io.Writer) {
+	if sp == nil || result.prepared.candidate.session == nil || result.err == nil {
+		return
+	}
+	if !errors.Is(result.err, context.Canceled) && !errors.Is(result.err, context.DeadlineExceeded) {
+		return
+	}
+	name := result.prepared.candidate.name()
+	if err := sp.Stop(name); err != nil && !runtime.IsSessionGone(err) {
+		fmt.Fprintf(stderr, "session reconciler: stopping canceled async start runtime %s: %v\n", name, err) //nolint:errcheck
 	}
 }
 

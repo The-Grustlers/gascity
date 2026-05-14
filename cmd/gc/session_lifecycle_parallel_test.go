@@ -85,6 +85,19 @@ type closedMetadataMatchStore struct {
 	matches []beads.Bead
 }
 
+func countRuntimeCalls(sp *runtime.Fake, method, name string) int {
+	if sp == nil {
+		return 0
+	}
+	count := 0
+	for _, call := range sp.Calls {
+		if call.Method == method && call.Name == name {
+			count++
+		}
+	}
+	return count
+}
+
 func (s *closedMetadataMatchStore) ListByMetadata(filters map[string]string, _ int, _ ...beads.QueryOpt) ([]beads.Bead, error) {
 	var out []beads.Bead
 	for _, match := range s.matches {
@@ -3287,8 +3300,9 @@ func TestCommitAsyncStartResultWithContext_RollsBackCanceledPendingCreateError(t
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
+	sp := runtime.NewFake()
 
-	if commitAsyncStartResultWithContext(ctx, result, nil, store, clk, events.Discard, 0, ioDiscard{}, ioDiscard{}, nil) {
+	if commitAsyncStartResultWithContext(ctx, result, sp, store, clk, events.Discard, 0, ioDiscard{}, ioDiscard{}, nil) {
 		t.Fatal("canceled async error commit should report not committed")
 	}
 	updated, err := store.Get(session.ID)
@@ -3297,6 +3311,9 @@ func TestCommitAsyncStartResultWithContext_RollsBackCanceledPendingCreateError(t
 	}
 	if updated.Status != "closed" {
 		t.Fatalf("status = %q, want closed so pending-create can be retried by replacement bead", updated.Status)
+	}
+	if got := countRuntimeCalls(sp, "Stop", "worker"); got != 1 {
+		t.Fatalf("Stop(worker) calls = %d, want 1 to clean up any materialized runtime", got)
 	}
 }
 
