@@ -804,6 +804,7 @@ func (m *Manager) Close(id string) error {
 			return err
 		}
 		if b.Status == "closed" {
+			_ = m.sp.Stop(sessName)
 			_ = clearRuntimeMCPServersSnapshot(m.cityPath, id)
 			return nil // idempotent: already closed
 		}

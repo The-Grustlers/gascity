@@ -726,8 +726,14 @@ func TestClose(t *testing.T) {
 	}
 
 	// Close again is idempotent.
+	if err := sp.Start(context.Background(), info.SessionName, runtime.Config{}); err != nil {
+		t.Fatalf("fake restart after close: %v", err)
+	}
 	if err := mgr.Close(info.ID); err != nil {
 		t.Fatalf("Close (idempotent): %v", err)
+	}
+	if sp.IsRunning(info.SessionName) {
+		t.Error("runtime session should be stopped after idempotent close")
 	}
 }
 
