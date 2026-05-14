@@ -770,6 +770,84 @@ func TestDoSlingCrossRigBlocks(t *testing.T) {
 	}
 }
 
+func TestDoSlingRejectsCityStoreForRigScopedTarget(t *testing.T) {
+	runner := newFakeRunner()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "repo", Path: "/repo", Prefix: "RP"}},
+		Agents:    []config.Agent{{Name: "worker", Dir: "repo", MaxActiveSessions: intPtr(1)}},
+	}
+	a := config.Agent{Name: "worker", Dir: "repo", MaxActiveSessions: intPtr(1)}
+	deps := testDeps(cfg, runtime.NewFake(), runner.run)
+	deps.Store = seededStore("RP-42")
+	deps.StoreRef = "city:test-city"
+
+	_, err := DoSling(testOpts(a, "RP-42"), deps, nil)
+	if err == nil {
+		t.Fatal("DoSling error = nil, want route/store mismatch")
+	}
+	var scopeErr *RouteStoreScopeError
+	if !errors.As(err, &scopeErr) {
+		t.Fatalf("DoSling error = %T %[1]v, want RouteStoreScopeError", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("runner calls = %#v, want none", runner.calls)
+	}
+}
+
+func TestDoSlingRejectsRigStoreForCityScopedTarget(t *testing.T) {
+	runner := newFakeRunner()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "repo", Path: "/repo", Prefix: "RP"}},
+		Agents:    []config.Agent{{Name: "infra-worker", Scope: "city", MaxActiveSessions: intPtr(1)}},
+	}
+	a := config.Agent{Name: "infra-worker", Scope: "city", MaxActiveSessions: intPtr(1)}
+	deps := testDeps(cfg, runtime.NewFake(), runner.run)
+	deps.Store = seededStore("RP-42")
+	deps.StoreRef = "rig:repo"
+
+	_, err := DoSling(testOpts(a, "RP-42"), deps, nil)
+	if err == nil {
+		t.Fatal("DoSling error = nil, want route/store mismatch")
+	}
+	var scopeErr *RouteStoreScopeError
+	if !errors.As(err, &scopeErr) {
+		t.Fatalf("DoSling error = %T %[1]v, want RouteStoreScopeError", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("runner calls = %#v, want none", runner.calls)
+	}
+}
+
+func TestDoSlingRejectsOtherRigStoreForRigScopedTarget(t *testing.T) {
+	runner := newFakeRunner()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Rigs: []config.Rig{
+			{Name: "repo", Path: "/repo", Prefix: "RP"},
+			{Name: "other", Path: "/other", Prefix: "OT"},
+		},
+		Agents: []config.Agent{{Name: "worker", Dir: "repo", MaxActiveSessions: intPtr(1)}},
+	}
+	a := config.Agent{Name: "worker", Dir: "repo", MaxActiveSessions: intPtr(1)}
+	deps := testDeps(cfg, runtime.NewFake(), runner.run)
+	deps.Store = seededStore("RP-42")
+	deps.StoreRef = "rig:other"
+
+	_, err := DoSling(testOpts(a, "RP-42"), deps, nil)
+	if err == nil {
+		t.Fatal("DoSling error = nil, want route/store mismatch")
+	}
+	var scopeErr *RouteStoreScopeError
+	if !errors.As(err, &scopeErr) {
+		t.Fatalf("DoSling error = %T %[1]v, want RouteStoreScopeError", err)
+	}
+	if len(runner.calls) != 0 {
+		t.Fatalf("runner calls = %#v, want none", runner.calls)
+	}
+}
+
 func TestDoSlingIdempotent(t *testing.T) {
 	runner := newFakeRunner()
 	sp := runtime.NewFake()
@@ -934,6 +1012,7 @@ func TestDoSlingCustomSlingQueryExpandsTemplateContext(t *testing.T) {
 	deps.CityPath = cityPath
 	deps.CityName = ""
 	deps.Store = seededStore("FR-99")
+	deps.StoreRef = "rig:frontend"
 	opts := testOpts(a, "FR-99")
 	result, err := DoSling(opts, deps, nil)
 	if err != nil {
@@ -3306,5 +3385,30 @@ func TestSlingFormulaTargetBranch_FallsBackToProbeWhenUnset(t *testing.T) {
 	got := SlingFormulaTargetBranch("SC-1", deps, a)
 	if got != "trunk" {
 		t.Errorf("SlingFormulaTargetBranch = %q, want %q (fallback to live probe)", got, "trunk")
+	}
+}
+
+func TestDoSlingForceSkipsRouteStoreScope(t *testing.T) {
+	runner := newFakeRunner()
+	cfg := &config.City{
+		Workspace: config.Workspace{Name: "test-city"},
+		Rigs:      []config.Rig{{Name: "repo", Path: "/repo", Prefix: "RP"}},
+		Agents:    []config.Agent{{Name: "worker", Dir: "repo", MaxActiveSessions: intPtr(1)}},
+	}
+	a := config.Agent{Name: "worker", Dir: "repo", MaxActiveSessions: intPtr(1)}
+	deps := testDeps(cfg, runtime.NewFake(), runner.run)
+	deps.Store = seededStore("RP-42")
+	deps.StoreRef = "city:test-city"
+
+	_, err := DoSling(SlingOpts{
+		Target:        a,
+		BeadOrFormula: "RP-42",
+		Force:         true,
+	}, deps, nil)
+	if err != nil {
+		t.Fatalf("DoSling force should skip route/store mismatch, got %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("runner calls = %#v, want one", runner.calls)
 	}
 }

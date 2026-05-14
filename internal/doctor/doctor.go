@@ -27,6 +27,15 @@ func (d *Doctor) Register(c Check) {
 	d.checks = append(d.checks, c)
 }
 
+// CheckNames returns the currently registered check names.
+func (d *Doctor) CheckNames() map[string]bool {
+	names := make(map[string]bool, len(d.checks))
+	for _, c := range d.checks {
+		names[c.Name()] = true
+	}
+	return names
+}
+
 // Filter keeps only checks whose names are present in names. Unknown names are
 // ignored so callers can compose optional checks without making old binaries
 // fail hard on newer check filters.

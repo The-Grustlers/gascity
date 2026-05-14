@@ -92,6 +92,11 @@ func preflight(opts SlingOpts, deps SlingDeps, querier BeadQuerier) (SlingResult
 			return result, err
 		}
 	}
+	if shouldGuardRouteStoreScope(opts) {
+		if err := CheckRouteStoreScope(a.QualifiedName(), deps.StoreRef, deps.CityName, deps.Cfg); err != nil {
+			return result, err
+		}
+	}
 
 	// Pre-flight idempotency check.
 	if shouldCheckBeadState(opts) {
@@ -149,6 +154,10 @@ func usesFormulaBackedRoute(opts SlingOpts) bool {
 
 func shouldGuardCrossRig(opts SlingOpts) bool {
 	return !opts.IsFormula && !opts.Force && !opts.DryRun
+}
+
+func shouldGuardRouteStoreScope(opts SlingOpts) bool {
+	return !opts.Force && !opts.DryRun
 }
 
 func shouldCheckBeadState(opts SlingOpts) bool {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gastownhall/gascity/internal/beads"
@@ -146,6 +147,25 @@ func (c *inheritedRigSplitBrainCheck) Run(_ *doctor.CheckContext) *doctor.CheckR
 func (c *inheritedRigSplitBrainCheck) CanFix() bool { return false }
 
 func (c *inheritedRigSplitBrainCheck) Fix(_ *doctor.CheckContext) error { return nil }
+
+type missingDoctorChecksCheck struct {
+	names []string
+}
+
+func (c *missingDoctorChecksCheck) Name() string { return "requested-checks" }
+
+func (c *missingDoctorChecksCheck) Run(_ *doctor.CheckContext) *doctor.CheckResult {
+	return &doctor.CheckResult{
+		Name:    c.Name(),
+		Status:  doctor.StatusError,
+		Message: fmt.Sprintf("unknown doctor check(s): %s", strings.Join(c.names, ", ")),
+		FixHint: "run `gc doctor` without --check to list available checks in this build, or update the gc binary",
+	}
+}
+
+func (c *missingDoctorChecksCheck) CanFix() bool { return false }
+
+func (c *missingDoctorChecksCheck) Fix(_ *doctor.CheckContext) error { return nil }
 
 func doDoctor(fix, verbose bool, checks []string, stdout, stderr io.Writer) int {
 	cityPath, err := resolveCity()
@@ -301,6 +321,10 @@ func doDoctor(fix, verbose bool, checks []string, stdout, stderr io.Writer) int 
 	}
 
 	checkFilter := parseDoctorCheckFilter(checks)
+	if missing := missingDoctorChecks(d, checkFilter); len(missing) > 0 {
+		d.Register(&missingDoctorChecksCheck{names: missing})
+		checkFilter["requested-checks"] = true
+	}
 	d.Filter(checkFilter)
 
 	report := d.Run(ctx, stdout, fix)
@@ -326,6 +350,21 @@ func parseDoctorCheckFilter(checks []string) map[string]bool {
 		}
 	}
 	return result
+}
+
+func missingDoctorChecks(d *doctor.Doctor, requested map[string]bool) []string {
+	if len(requested) == 0 {
+		return nil
+	}
+	available := d.CheckNames()
+	var missing []string
+	for name := range requested {
+		if !available[name] {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 // collectPackDirs returns all unique pack directories from the city
