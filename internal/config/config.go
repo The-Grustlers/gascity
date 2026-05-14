@@ -2143,7 +2143,7 @@ func (a *Agent) AttachEnabled() bool {
 // was used when assigning.
 //
 // State priority: in_progress+assigned (crash recovery) >
-// ready+assigned (pre-assigned) > ready+unassigned+routed_to (pool).
+// ready+assigned (pre-assigned) > ready+routed_to (pool).
 // Formula roots that are themselves executable must be represented as ready()
 // work (for example type=wisp); molecule containers are not routable demand.
 //
@@ -2184,13 +2184,14 @@ func (a *Agent) EffectiveWorkQuery() string {
 			`r=$(bd ready --assignee="$id" --exclude-type=epic --json --limit=1 2>/dev/null); ` +
 			`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 			`done; ` +
-			// Tier 3: ready unassigned routed to this config (shared routed queue).
+			// Tier 3: ready work routed to this config (shared routed queue).
+			// Workers still claim atomically before editing.
 			// Only ephemeral sessions and controller probes consume generic config demand.
 			`case "$GC_SESSION_ORIGIN" in ` +
 			`ephemeral|"") ;; ` +
 			`*) exit 0 ;; ` +
 			`esac; ` +
-			`r=$(bd ready --unassigned --exclude-type=epic --json --limit=0 2>/dev/null | jq --arg route "$GC_ROUTE_TARGET" "map(select(.metadata[\"gc.routed_to\"] == \$route)) | .[:1]" 2>/dev/null); ` +
+			`r=$(bd ready --exclude-type=epic --json --limit=0 2>/dev/null | jq --arg route "$GC_ROUTE_TARGET" "map(select(.metadata[\"gc.routed_to\"] == \$route)) | .[:1]" 2>/dev/null); ` +
 			`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 			`printf "[]"'`
 	}
@@ -2217,16 +2218,17 @@ func (a *Agent) EffectiveWorkQuery() string {
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 		`done; ` +
 		`done; ` +
-		// Tier 3: ready unassigned routed to this config (shared routed queue),
+		// Tier 3: ready work routed to this config (shared routed queue),
 		// then the legacy workflow-control route for pre-rename graphs.
+		// Workers still claim atomically before editing.
 		// Only ephemeral sessions and controller probes consume generic config demand.
 		`case "$GC_SESSION_ORIGIN" in ` +
 		`ephemeral|"") ;; ` +
 		`*) exit 0 ;; ` +
 		`esac; ` +
-		`r=$(bd ready --unassigned --exclude-type=epic --json --limit=0 2>/dev/null | jq --arg route "$GC_ROUTE_TARGET" "map(select(.metadata[\"gc.routed_to\"] == \$route)) | .[:1]" 2>/dev/null); ` +
+		`r=$(bd ready --exclude-type=epic --json --limit=0 2>/dev/null | jq --arg route "$GC_ROUTE_TARGET" "map(select(.metadata[\"gc.routed_to\"] == \$route)) | .[:1]" 2>/dev/null); ` +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
-		`bd ready --unassigned --exclude-type=epic --json --limit=0 2>/dev/null | jq --arg route "$GC_ROUTE_LEGACY_TARGET" "map(select(.metadata[\"gc.routed_to\"] == \$route)) | .[:1]" 2>/dev/null'`
+		`bd ready --exclude-type=epic --json --limit=0 2>/dev/null | jq --arg route "$GC_ROUTE_LEGACY_TARGET" "map(select(.metadata[\"gc.routed_to\"] == \$route)) | .[:1]" 2>/dev/null'`
 }
 
 func legacyWorkflowControlQualifiedName(target string) string {
@@ -2289,7 +2291,7 @@ func (a *Agent) DrainTimeoutDuration() time.Duration {
 
 // EffectiveScaleCheck returns the scale check command for this agent.
 // If ScaleCheck is set, returns it. Otherwise returns a default that
-// counts new unassigned work routed to this agent's template via ready().
+// counts ready work routed to this agent's template via ready().
 // Assigned in-progress work is resumed from session beads, so it must not
 // create additional generic pool demand here.
 func (a *Agent) EffectiveScaleCheck() string {
@@ -2298,7 +2300,7 @@ func (a *Agent) EffectiveScaleCheck() string {
 	}
 	template := a.QualifiedName()
 	return `GC_ROUTE_TARGET=` + shellquote.Quote(template) +
-		` sh -c 'bd ready --unassigned --limit 0 --json | jq --arg route "$GC_ROUTE_TARGET" "map(select(.metadata[\"gc.routed_to\"] == \$route)) | length"'`
+		` sh -c 'bd ready --limit 0 --json | jq --arg route "$GC_ROUTE_TARGET" "map(select(.metadata[\"gc.routed_to\"] == \$route)) | length"'`
 }
 
 // EffectiveMaxActiveSessions returns the agent's max active sessions.

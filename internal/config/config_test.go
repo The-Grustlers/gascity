@@ -1462,7 +1462,7 @@ func assertRouteFilteredWorkQuery(t *testing.T, got, route string) {
 	t.Helper()
 	wantSnippets := []string{
 		"GC_ROUTE_TARGET='" + route + "'",
-		"bd ready --unassigned --exclude-type=epic --json --limit=0",
+		"bd ready --exclude-type=epic --json --limit=0",
 		`metadata[\"gc.routed_to\"]`,
 	}
 	for _, want := range wantSnippets {
@@ -1476,7 +1476,7 @@ func assertRouteFilteredScaleCheck(t *testing.T, got, route string) {
 	t.Helper()
 	wantSnippets := []string{
 		"GC_ROUTE_TARGET='" + route + "'",
-		"bd ready --unassigned --limit 0 --json",
+		"bd ready --limit 0 --json",
 		`metadata[\"gc.routed_to\"]`,
 	}
 	for _, want := range wantSnippets {
@@ -1630,7 +1630,7 @@ func TestEffectiveWorkQueryControlDispatcherClaimsLegacyUnassignedRoute(t *testi
 	out := runEffectiveWorkQuery(t, a, nil, `#!/bin/sh
 set -eu
 case "$*" in
-  "ready --unassigned --exclude-type=epic --json --limit=0")
+  "ready --exclude-type=epic --json --limit=0")
     printf '[{"id":"ga-legacy-route","metadata":{"gc.routed_to":"gascity/workflow-control"}}]'
     ;;
   *)
@@ -1671,7 +1671,7 @@ func TestEffectiveWorkQueryExcludesEpics(t *testing.T) {
 	wantSnippets := []string{
 		`bd list --status in_progress --assignee="$id" --exclude-type=epic --json`,
 		`bd ready --assignee="$id" --exclude-type=epic --json`,
-		`bd ready --unassigned --exclude-type=epic --json --limit=0`,
+		`bd ready --exclude-type=epic --json --limit=0`,
 		`GC_ROUTE_TARGET='hello-world/worker'`,
 		`metadata[\"gc.routed_to\"]`,
 	}
@@ -1691,7 +1691,7 @@ func TestEffectiveWorkQueryExcludesEpicsControlDispatcher(t *testing.T) {
 	wantSnippets := []string{
 		`bd list --status in_progress --assignee="$cand" --exclude-type=epic --json`,
 		`bd ready --assignee="$cand" --exclude-type=epic --json`,
-		`bd ready --unassigned --exclude-type=epic --json --limit=0`,
+		`bd ready --exclude-type=epic --json --limit=0`,
 		`GC_ROUTE_TARGET='gascity/control-dispatcher'`,
 		`GC_ROUTE_LEGACY_TARGET='gascity/workflow-control'`,
 		`metadata[\"gc.routed_to\"]`,
@@ -1730,7 +1730,7 @@ func TestEffectiveWorkQuerySkipsEpicLeafScenario(t *testing.T) {
 	}, `#!/bin/sh
 set -eu
 case "$*" in
-  "ready --unassigned --exclude-type=epic --json --limit=0")
+  "ready --exclude-type=epic --json --limit=0")
     printf '[{"id":"leaf-child","issue_type":"task","metadata":{"gc.routed_to":"hello-world/worker"}}]'
     ;;
   *)
@@ -1867,9 +1867,6 @@ func TestEffectiveScaleCheckDefaults(t *testing.T) {
 	check := a.EffectiveScaleCheck()
 	// Default check uses bd ready for blocker-aware routed demand.
 	assertRouteFilteredScaleCheck(t, check, "refinery")
-	if !strings.Contains(check, "--unassigned") {
-		t.Errorf("EffectiveScaleCheck = %q, want --unassigned for new unassigned demand", check)
-	}
 	if strings.Contains(check, "--type=molecule") || strings.Contains(check, "${molecules:-0}") {
 		t.Errorf("EffectiveScaleCheck = %q, should not count molecule containers as demand", check)
 	}
@@ -1887,9 +1884,6 @@ func TestEffectiveScaleCheckDefaultsQualified(t *testing.T) {
 	}
 	check := a.EffectiveScaleCheck()
 	assertRouteFilteredScaleCheck(t, check, "myproject/polecat")
-	if !strings.Contains(check, "--unassigned") {
-		t.Errorf("EffectiveScaleCheck = %q, want --unassigned for new unassigned demand", check)
-	}
 	if strings.Contains(check, "--type=molecule") {
 		t.Errorf("EffectiveScaleCheck = %q, should not count molecule containers as demand", check)
 	}
