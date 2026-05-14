@@ -1577,7 +1577,7 @@ func TestInitBeadsInPodProjectsControllerDoltDatabase(t *testing.T) {
 	if !strings.Contains(script, base64.StdEncoding.EncodeToString(wantPatch)) {
 		t.Fatalf("bootstrap patch does not project controller dolt_database hq:\n%s", script)
 	}
-	if !strings.Contains(script, "issue_prefix: '+prefix") || !strings.Contains(script, "issue-prefix: '+prefix") {
+	if !strings.Contains(script, "issue_prefix: $PREFIX") || !strings.Contains(script, "issue-prefix: $PREFIX") {
 		t.Fatalf("bootstrap script does not force both issue prefix spellings:\n%s", script)
 	}
 }

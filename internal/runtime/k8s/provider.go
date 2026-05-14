@@ -810,15 +810,13 @@ func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg runtime
 			`m=json.load(open('.beads/metadata.json')); `+
 			`p=json.loads(sys.argv[1]); m.update(p); m.pop('project_id', None); `+
 			`json.dump(m,open('.beads/metadata.json','w'),indent=2)" "$PATCH"; fi; `+
-			`python3 -c "from pathlib import Path; import sys; `+
-			`p=Path('.beads/config.yaml'); prefix=sys.argv[1]; `+
-			`text=p.read_text() if p.exists() else ''; lines=text.splitlines(); seen_u=seen_h=False; out=[]; `+
-			`for line in lines: `+
-			`s=line.strip(); `+
-			`out.append('issue_prefix: '+prefix) if s.startswith('issue_prefix:') else out.append('issue-prefix: '+prefix) if s.startswith('issue-prefix:') else out.append(line); `+
-			`seen_u = seen_u or s.startswith('issue_prefix:'); seen_h = seen_h or s.startswith('issue-prefix:'); `+
-			`out.insert(0,'issue_prefix: '+prefix) if not seen_u else None; out.insert(1 if not seen_u else 0,'issue-prefix: '+prefix) if not seen_h else None; `+
-			`p.write_text('\n'.join(out).rstrip()+'\n')" "$PREFIX"; `+
+			`touch .beads/config.yaml; `+
+			`if grep -q '^[[:space:]]*issue_prefix:' .beads/config.yaml; then `+
+			`sed -i "s|^[[:space:]]*issue_prefix:.*|issue_prefix: $PREFIX|" .beads/config.yaml; `+
+			`else tmp=$(mktemp) && printf 'issue_prefix: %%s\n' "$PREFIX" > "$tmp" && cat .beads/config.yaml >> "$tmp" && cat "$tmp" > .beads/config.yaml && rm -f "$tmp"; fi; `+
+			`if grep -q '^[[:space:]]*issue-prefix:' .beads/config.yaml; then `+
+			`sed -i "s|^[[:space:]]*issue-prefix:.*|issue-prefix: $PREFIX|" .beads/config.yaml; `+
+			`else tmp=$(mktemp) && printf 'issue-prefix: %%s\n' "$PREFIX" > "$tmp" && cat .beads/config.yaml >> "$tmp" && cat "$tmp" > .beads/config.yaml && rm -f "$tmp"; fi; `+
 			`USER_NAME=$(echo '%s' | base64 -d) && if [ -n "$USER_NAME" ]; then chown -R "$USER_NAME" "$WD/.beads" 2>/dev/null || true; fi`,
 		storeRootB64, patchB64, prefixB64,
 		base64.StdEncoding.EncodeToString([]byte(doltHost)),
