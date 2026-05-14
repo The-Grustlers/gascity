@@ -5,6 +5,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1543,6 +1545,47 @@ func TestInitBeadsInPodUsesManagedTargetWhenNoProjectedDolt(t *testing.T) {
 	}
 	if !strings.Contains(script, base64.StdEncoding.EncodeToString([]byte(podManagedDoltPort))) {
 		t.Fatalf("managed Dolt port missing from bootstrap script:\n%s", script)
+	}
+}
+
+func TestInitBeadsInPodInfersCityStoreForAgentWorkDir(t *testing.T) {
+	cityDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cityDir, ".beads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cityDir, ".beads", "config.yaml"), []byte("issue_prefix: gc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fake := newFakeK8sOps()
+	cfg := runtime.Config{
+		WorkDir: filepath.Join(cityDir, ".gc", "agents", "k8s-canary"),
+		Env: map[string]string{
+			"GC_CITY": cityDir,
+		},
+	}
+
+	if err := initBeadsInPod(context.Background(), fake, "gc-test-pod", cfg, "/workspace/.gc/agents/k8s-canary", podManagedDoltHost, podManagedDoltPort); err != nil {
+		t.Fatalf("initBeadsInPod: %v", err)
+	}
+
+	var script string
+	for _, c := range fake.calls {
+		if c.method == "execInPod" && len(c.cmd) >= 3 && c.cmd[0] == "sh" && c.cmd[1] == "-c" {
+			script = c.cmd[2]
+			break
+		}
+	}
+	if script == "" {
+		t.Fatal("no sh -c exec call found")
+	}
+	if !strings.Contains(script, base64.StdEncoding.EncodeToString([]byte("/workspace"))) {
+		t.Fatalf("bootstrap script did not target city store root:\n%s", script)
+	}
+	if !strings.Contains(script, base64.StdEncoding.EncodeToString([]byte("gc"))) {
+		t.Fatalf("bootstrap script did not infer city issue prefix:\n%s", script)
+	}
+	if strings.Contains(script, base64.StdEncoding.EncodeToString([]byte("/workspace/.gc/agents/k8s-canary"))) {
+		t.Fatalf("bootstrap script incorrectly used agent workdir as store root:\n%s", script)
 	}
 }
 

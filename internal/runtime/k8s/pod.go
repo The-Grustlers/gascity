@@ -58,18 +58,35 @@ func projectedPodWorkDir(cfg runtime.Config) string {
 }
 
 func projectedPodStoreRoot(cfg runtime.Config, podWorkDir string) string {
-	storeRoot := strings.TrimSpace(cfg.Env["GC_STORE_ROOT"])
-	if storeRoot == "" {
-		storeRoot = strings.TrimSpace(cfg.WorkDir)
-	}
-	if storeRoot == "" {
-		storeRoot = controllerCityPath(cfg.Env)
-	}
+	storeRoot := controllerStoreRoot(cfg)
 	storeRoot = remapControllerPathToPod(storeRoot, controllerCityPath(cfg.Env))
 	if storeRoot == "" {
 		return podWorkDir
 	}
 	return storeRoot
+}
+
+func controllerStoreRoot(cfg runtime.Config) string {
+	if storeRoot := strings.TrimSpace(cfg.Env["GC_STORE_ROOT"]); storeRoot != "" {
+		return storeRoot
+	}
+	if rigRoot := strings.TrimSpace(cfg.Env["GC_RIG_ROOT"]); rigRoot != "" {
+		return rigRoot
+	}
+	ctrlCity := controllerCityPath(cfg.Env)
+	workDir := strings.TrimSpace(cfg.WorkDir)
+	if workDir != "" {
+		if ctrlCity != "" && pathutil.PathWithin(ctrlCity, workDir) {
+			if rel, err := filepath.Rel(pathutil.NormalizePathForCompare(ctrlCity), pathutil.NormalizePathForCompare(workDir)); err == nil {
+				rel = filepath.ToSlash(rel)
+				if rel == "." || strings.HasPrefix(rel, ".gc/agents/") || rel == ".gc/agents" {
+					return ctrlCity
+				}
+			}
+		}
+		return workDir
+	}
+	return ctrlCity
 }
 
 func projectedPodRuntimeDir(cfgEnv map[string]string, ctrlCity string) string {

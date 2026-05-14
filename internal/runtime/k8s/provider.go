@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -748,8 +749,9 @@ func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg runtime
 	if err != nil {
 		return err
 	}
+	controllerRoot := controllerStoreRoot(cfg)
 	storeRoot := projectedPodStoreRoot(cfg, workDir)
-	prefix := strings.TrimSpace(cfg.Env["GC_BEADS_PREFIX"])
+	prefix := projectedBeadsPrefix(cfg, controllerRoot)
 	if prefix == "" {
 		return fmt.Errorf("missing projected GC_BEADS_PREFIX")
 	}
@@ -809,6 +811,44 @@ func initBeadsInPod(ctx context.Context, ops k8sOps, podName string, cfg runtime
 	)
 	_, err = ops.execInPod(ctx, podName, "agent", []string{"sh", "-c", patchCmd}, nil)
 	return err
+}
+
+func projectedBeadsPrefix(cfg runtime.Config, controllerRoot string) string {
+	if prefix := strings.TrimSpace(cfg.Env["GC_BEADS_PREFIX"]); prefix != "" {
+		return prefix
+	}
+	for _, root := range []string{
+		controllerRoot,
+		strings.TrimSpace(cfg.Env["GC_STORE_ROOT"]),
+		strings.TrimSpace(cfg.Env["GC_RIG_ROOT"]),
+		strings.TrimSpace(cfg.WorkDir),
+		controllerCityPath(cfg.Env),
+	} {
+		if prefix := readBeadsIssuePrefix(root); prefix != "" {
+			return prefix
+		}
+	}
+	return ""
+}
+
+func readBeadsIssuePrefix(root string) string {
+	root = strings.TrimSpace(root)
+	if root == "" || strings.HasPrefix(root, "/workspace") {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".beads", "config.yaml"))
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		for _, key := range []string{"issue_prefix:", "issue-prefix:"} {
+			if rest, ok := strings.CutPrefix(line, key); ok {
+				return strings.Trim(strings.TrimSpace(rest), `"'`)
+			}
+		}
+	}
+	return ""
 }
 
 // verifyBeadsInPod confirms that canonical tracked .beads files are already
