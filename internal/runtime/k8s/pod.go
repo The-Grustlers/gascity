@@ -212,6 +212,11 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 		agentCmd = strings.ReplaceAll(agentCmd, ctrlCity, "/workspace")
 	}
 	cmdB64 := base64.StdEncoding.EncodeToString([]byte(agentCmd))
+	cmdFile := "/tmp/gc-agent-command.sh"
+	cmdSetup := fmt.Sprintf(
+		"CMD=$(echo '%s' | base64 -d) && printf '%%s\\n' \"$CMD\" > %s && chmod 0755 %s && ",
+		cmdB64, cmdFile, cmdFile,
+	)
 
 	// Pod entrypoint: wait for workspace ready → pre_start → tmux → keepalive.
 	// Each pre_start command is base64-encoded and decoded at runtime to prevent
@@ -280,15 +285,15 @@ EOF
 	if linuxUsername != "" {
 		// Run tmux session as the dynamic user via su.
 		tmuxCmd = fmt.Sprintf(
-			"%s%s%s%s%sCMD=$(echo '%s' | base64 -d) && "+
-				`su - %s -c "cd %s && tmux new-session -d -s %s \"$CMD\" && sleep infinity"`,
-			userSetup, credCopy, codexConfig, wsWait, preStartCmds, cmdB64,
-			linuxUsername, podWorkDir, tmuxSession,
+			"%s%s%s%s%s%s"+
+				`su - %s -c "cd %s && tmux new-session -d -s %s /bin/bash %s && sleep infinity"`,
+			userSetup, credCopy, codexConfig, wsWait, preStartCmds, cmdSetup,
+			linuxUsername, podWorkDir, tmuxSession, cmdFile,
 		)
 	} else {
 		tmuxCmd = fmt.Sprintf(
-			"%s%s%s%sCMD=$(echo '%s' | base64 -d) && tmux new-session -d -s %s \"$CMD\" && sleep infinity",
-			credCopy, codexConfig, wsWait, preStartCmds, cmdB64, tmuxSession,
+			"%s%s%s%s%stmux new-session -d -s %s /bin/bash %s && sleep infinity",
+			credCopy, codexConfig, wsWait, preStartCmds, cmdSetup, tmuxSession, cmdFile,
 		)
 	}
 

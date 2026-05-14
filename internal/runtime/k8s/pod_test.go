@@ -136,6 +136,37 @@ func TestBuildPod_IncludesPromptFlagInTmuxCommand(t *testing.T) {
 	}
 }
 
+func TestBuildPod_WritesDecodedCommandToScriptForDynamicUser(t *testing.T) {
+	p := newProviderWithOps(newFakeK8sOps())
+	command := `bash -lc 'exec "$GC_CITY_PATH/scripts/gr7n-router-cli" "$@"' gr7n-router-cli`
+	pod, err := buildPod("test-session", runtime.Config{
+		Command: command,
+		WorkDir: "/city/.gc/agents/k8s-canary",
+		Env: map[string]string{
+			"GC_CITY":        "/city",
+			"LINUX_USERNAME": "bryce",
+		},
+	}, p)
+	if err != nil {
+		t.Fatalf("buildPod: %v", err)
+	}
+
+	got := decodedTmuxCommand(t, pod)
+	if got != command {
+		t.Fatalf("tmux command = %q, want %q", got, command)
+	}
+	args := pod.Spec.Containers[0].Args[0]
+	if !strings.Contains(args, "/tmp/gc-agent-command.sh") {
+		t.Fatalf("pod args do not write/run decoded command script:\n%s", args)
+	}
+	if strings.Contains(args, `tmux new-session -d -s main "$CMD"`) {
+		t.Fatalf("pod args still inline decoded command through nested su shell:\n%s", args)
+	}
+	if !strings.Contains(args, `tmux new-session -d -s main /bin/bash /tmp/gc-agent-command.sh`) {
+		t.Fatalf("pod args do not run decoded command script via tmux:\n%s", args)
+	}
+}
+
 func decodedTmuxCommand(t *testing.T, pod *corev1.Pod) string {
 	t.Helper()
 	if len(pod.Spec.Containers) == 0 || len(pod.Spec.Containers[0].Args) == 0 {
