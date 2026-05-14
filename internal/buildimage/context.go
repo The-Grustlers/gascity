@@ -42,7 +42,7 @@ func excludedPath(rel string) bool {
 	parts := strings.Split(filepath.ToSlash(rel), "/")
 	for _, part := range parts {
 		switch part {
-		case ".beads", ".dolt", ".git", ".gradle", ".godot", ".mypy_cache", ".nx", ".pnpm-store", ".pytest_cache", ".ruff_cache", ".runtime", ".turbo", ".venv", ".next", ".cache", "node_modules", "dist", "build", "coverage", "__pycache__", "target", "venv":
+		case ".beads", ".dolt", ".git", ".gradle", ".godot", ".mypy_cache", ".nx", ".pnpm-store", ".pytest_cache", ".ruff_cache", ".runtime", ".turbo", ".venv", ".next", ".cache", "node_modules", "dist", "build", "coverage", "test-results", "__pycache__", "target", "venv":
 			return true
 		}
 	}
@@ -161,8 +161,20 @@ func copyDirFiltered(src, dst string) error {
 
 		target := filepath.Join(dst, rel)
 
+		if info.Mode()&os.ModeSymlink != 0 {
+			targetInfo, err := os.Stat(path)
+			if err != nil || targetInfo.IsDir() {
+				return nil
+			}
+			return copyFile(path, target, targetInfo.Mode())
+		}
+
 		if info.IsDir() {
 			return os.MkdirAll(target, info.Mode())
+		}
+
+		if !info.Mode().IsRegular() {
+			return nil
 		}
 
 		return copyFile(path, target, info.Mode())

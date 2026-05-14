@@ -80,6 +80,7 @@ name = "test-city"
 	writeFile(t, cityDir, ".git/HEAD", "ref: refs/heads/main\n")
 	writeFile(t, cityDir, "node_modules/pkg/index.js", "module")
 	writeFile(t, cityDir, "dist/app.js", "built")
+	writeFile(t, cityDir, "test-results/e2e/output.txt", "runtime artifact")
 	writeFile(t, cityDir, "__pycache__/tool.pyc", "cache")
 
 	// Create files that should be included.
@@ -106,6 +107,7 @@ name = "test-city"
 	assertFileNotExists(t, outputDir, "workspace/.git/HEAD")
 	assertFileNotExists(t, outputDir, "workspace/node_modules/pkg/index.js")
 	assertFileNotExists(t, outputDir, "workspace/dist/app.js")
+	assertFileNotExists(t, outputDir, "workspace/test-results/e2e/output.txt")
 	assertFileNotExists(t, outputDir, "workspace/__pycache__/tool.pyc")
 
 	// Verify included files ARE present.
@@ -144,6 +146,30 @@ name = "test-city"
 	assertFileNotExists(t, outputDir, filepath.Join("workspace", ".gc", "formulas", "legacy.formula.toml"))
 	assertFileNotExists(t, outputDir, filepath.Join("workspace", ".gc", "scripts", "setup.sh"))
 	assertFileNotExists(t, outputDir, filepath.Join("workspace", ".gc", "settings.json"))
+}
+
+func TestAssembleContextSkipsDirectorySymlinks(t *testing.T) {
+	cityDir := t.TempDir()
+	outputDir := t.TempDir()
+
+	writeFile(t, cityDir, "city.toml", `[workspace]
+name = "test-city"
+`)
+	writeFile(t, cityDir, "runs/latest/output.txt", "artifact")
+	if err := os.Symlink("latest", filepath.Join(cityDir, "runs", "current")); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+
+	err := AssembleContext(Options{
+		CityPath:  cityDir,
+		OutputDir: outputDir,
+	})
+	if err != nil {
+		t.Fatalf("AssembleContext: %v", err)
+	}
+
+	assertFileExists(t, outputDir, "workspace/runs/latest/output.txt")
+	assertFileNotExists(t, outputDir, "workspace/runs/current")
 }
 
 func TestAssembleContextWithRigPaths(t *testing.T) {
@@ -260,6 +286,7 @@ func TestExcludedPath(t *testing.T) {
 		{".env", true},
 		{"credentials.json", true},
 		{"path/to/secret.key", true},
+		{"test-results/e2e/output.txt", true},
 		{"city.toml", false},
 		{"formulas/test.toml", false},
 		{"prompts/mayor.md", false},
