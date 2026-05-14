@@ -56,6 +56,15 @@ func (d *Doctor) Filter(names map[string]bool) {
 // completes. When fix is true, fixable checks that fail are remediated
 // and re-run. Returns a summary report.
 func (d *Doctor) Run(ctx *CheckContext, w io.Writer, fix bool) *Report {
+	if ctx == nil {
+		ctx = &CheckContext{}
+	}
+	runCtx := *ctx
+	if runCtx.Output == nil {
+		runCtx.Output = w
+	}
+	ctx = &runCtx
+
 	r := &Report{}
 	for _, c := range d.checks {
 		result := c.Run(ctx)
