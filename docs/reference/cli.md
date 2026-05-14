@@ -277,11 +277,14 @@ gc build-image [city-path] [flags]
   # Build and tag image
   gc build-image ~/bright-lights --tag my-city:latest
 
-  # Build with rig content baked in
-  gc build-image ~/bright-lights --tag my-city:latest --rig-path demo:/path/to/demo
+	  # Build with rig content baked in
+	  gc build-image ~/bright-lights --tag my-city:latest --rig-path demo:/path/to/demo
 
-  # Build and push to registry
-  gc build-image ~/bright-lights --tag registry.io/my-city:latest --push
+	  # Build with shared support tooling baked in
+	  gc build-image ~/bright-lights --tag my-city:latest --workspace-path gr7n-platform:/path/to/gr7n-platform
+
+	  # Build and push to registry
+	  gc build-image ~/bright-lights --tag registry.io/my-city:latest --push
 ```
 
 | Flag | Type | Default | Description |
@@ -291,6 +294,7 @@ gc build-image [city-path] [flags]
 | `--push` | bool |  | push image after building |
 | `--rig-path` | stringSlice |  | rig name:path pairs (repeatable) |
 | `--tag` | string |  | image tag (required unless --context-only) |
+| `--workspace-path` | stringSlice |  | support workspace name:path pairs to bake into /workspace (repeatable) |
 
 ## gc cities
 
@@ -909,10 +913,12 @@ gc doctor [flags]
 gc doctor
   gc doctor --fix
   gc doctor --verbose
+  gc doctor --check route-store-scope --fix
 ```
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
+| `--check` | stringArray |  | run only the named check; repeat for multiple checks |
 | `--fix` | bool |  | attempt to fix issues automatically |
 | `-v`, `--verbose` | bool |  | show extra diagnostic details |
 
