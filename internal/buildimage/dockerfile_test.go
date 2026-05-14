@@ -14,7 +14,7 @@ func TestGenerateDockerfile(t *testing.T) {
 	}
 
 	// Must copy workspace.
-	if !strings.Contains(content, "COPY workspace/ /workspace/") {
+	if !strings.Contains(content, "COPY --chown=gcagent:gcagent workspace/ /workspace/") {
 		t.Error("missing COPY workspace/")
 	}
 
