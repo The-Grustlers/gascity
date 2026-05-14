@@ -1032,14 +1032,16 @@ func (cr *CityRuntime) reloadConfigTraced(
 	nextDops := cr.dops
 	providerChanged := false
 
-	// Detect session provider change.
+	// Detect session provider topology changes. The provider name alone is
+	// not enough for hybrid: remote_match is captured by the provider closure,
+	// so reloads must rebuild it even when provider remains "hybrid".
 	newProviderName := nextCfg.Session.Provider
 	pendingProviderName := *lastProviderName
 	if v := os.Getenv("GC_SESSION"); v != "" {
 		newProviderName = v
 	}
-	if newProviderName != *lastProviderName {
-		newSp, spErr := newSessionProviderByName(newProviderName, nextCfg.Session, cr.cityName, cr.cityPath)
+	if newProviderName != *lastProviderName || sessionProviderRuntimeConfigChanged(newProviderName, cr.cfg.Session, nextCfg.Session) {
+		newSp, spErr := buildSessionProviderByName(newProviderName, nextCfg.Session, cr.cityName, cr.cityPath)
 		if spErr != nil {
 			appendWarning(fmt.Sprintf("new session provider %q: %v (keeping old provider)", newProviderName, spErr))
 		} else {
@@ -1259,6 +1261,35 @@ func (cr *CityRuntime) reloadConfigTraced(
 
 func lockedConfigName(cfg *config.City, cityPath string) string {
 	return loadedCityName(cfg, cityPath)
+}
+
+func sessionProviderRuntimeConfigChanged(providerName string, old, next config.SessionConfig) bool {
+	providerName = strings.TrimSpace(providerName)
+	switch providerName {
+	case "hybrid":
+		return strings.TrimSpace(old.RemoteMatch) != strings.TrimSpace(next.RemoteMatch)
+	case "", "tmux":
+		return old.Socket != next.Socket ||
+			old.SetupTimeout != next.SetupTimeout ||
+			old.NudgeReadyTimeout != next.NudgeReadyTimeout ||
+			old.NudgeRetryInterval != next.NudgeRetryInterval ||
+			old.NudgeLockTimeout != next.NudgeLockTimeout ||
+			optionalIntValue(old.DebounceMs) != optionalIntValue(next.DebounceMs) ||
+			optionalIntValue(old.DisplayMs) != optionalIntValue(next.DisplayMs)
+	case "acp":
+		return old.ACP.HandshakeTimeout != next.ACP.HandshakeTimeout ||
+			old.ACP.NudgeBusyTimeout != next.ACP.NudgeBusyTimeout ||
+			old.ACP.OutputBufferLines != next.ACP.OutputBufferLines
+	default:
+		return false
+	}
+}
+
+func optionalIntValue(v *int) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d", *v)
 }
 
 func (cr *CityRuntime) configWatcherTargets() []config.WatchTarget {

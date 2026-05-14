@@ -2753,6 +2753,65 @@ func TestCityRuntimeReloadProviderSwapPreservesDrainTracker(t *testing.T) {
 	}
 }
 
+func TestCityRuntimeReloadRebuildsHybridProviderWhenRemoteMatchChanges(t *testing.T) {
+	cityPath := t.TempDir()
+	tomlPath := filepath.Join(cityPath, "city.toml")
+	writeCityRuntimeConfigWithRemoteMatch(t, tomlPath, "hybrid", "k8s-canary")
+
+	cfg, err := config.Load(osFS{}, tomlPath)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	oldSP := runtime.NewFake()
+	newSP := runtime.NewFake()
+	var gotName, gotRemoteMatch string
+
+	oldBuild := buildSessionProviderByName
+	buildSessionProviderByName = func(name string, sc config.SessionConfig, cityName, cityPath string) (runtime.Provider, error) {
+		gotName = name
+		gotRemoteMatch = sc.RemoteMatch
+		return newSP, nil
+	}
+	t.Cleanup(func() { buildSessionProviderByName = oldBuild })
+
+	var stdout bytes.Buffer
+	cr := newTestCityRuntime(t, CityRuntimeParams{
+		CityPath: cityPath,
+		CityName: "test-city",
+		TomlPath: tomlPath,
+		Cfg:      cfg,
+		SP:       oldSP,
+		BuildFn: func(*config.City, runtime.Provider, beads.Store) DesiredStateResult {
+			return DesiredStateResult{State: map[string]TemplateParams{}}
+		},
+		Dops:   newDrainOps(oldSP),
+		Rec:    events.Discard,
+		Stdout: &stdout,
+		Stderr: io.Discard,
+	})
+	cs := newControllerState(context.Background(), cfg, oldSP, events.NewFake(), "test-city", cityPath)
+	cs.cityBeadStore = beads.NewMemStore()
+	cr.setControllerState(cs)
+	cr.sessionDrains = newDrainTracker()
+
+	writeCityRuntimeConfigWithRemoteMatch(t, tomlPath, "hybrid", "k8s-canary,grustle-monorepo/web-worker")
+	lastProviderName := "hybrid"
+	cr.reloadConfig(context.Background(), &lastProviderName, cityPath)
+
+	if gotName != "hybrid" {
+		t.Fatalf("rebuilt provider name = %q, want hybrid", gotName)
+	}
+	if gotRemoteMatch != "k8s-canary,grustle-monorepo/web-worker" {
+		t.Fatalf("rebuilt remote_match = %q", gotRemoteMatch)
+	}
+	if cr.sp != newSP {
+		t.Fatal("runtime did not install rebuilt hybrid provider")
+	}
+	if lastProviderName != "hybrid" {
+		t.Fatalf("lastProviderName = %q, want hybrid", lastProviderName)
+	}
+}
+
 func TestCityRuntimeReloadProviderSwapFailsOnPartialSessionListing(t *testing.T) {
 	cityPath := t.TempDir()
 	tomlPath := filepath.Join(cityPath, "city.toml")
@@ -4620,6 +4679,16 @@ func writeCityRuntimeConfigNamed(t *testing.T, tomlPath, name, provider string) 
 	clearInheritedBeadsEnv(t)
 	requireNoLeakedDoltAfterForPaths(t, filepath.Dir(tomlPath))
 	data := []byte("[workspace]\nname = \"" + name + "\"\n\n[beads]\nprovider = \"file\"\n\n[session]\nprovider = \"" + provider + "\"\n")
+	if err := os.WriteFile(tomlPath, data, 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+}
+
+func writeCityRuntimeConfigWithRemoteMatch(t *testing.T, tomlPath, provider, remoteMatch string) {
+	t.Helper()
+	clearInheritedBeadsEnv(t)
+	requireNoLeakedDoltAfterForPaths(t, filepath.Dir(tomlPath))
+	data := []byte("[workspace]\nname = \"test-city\"\n\n[beads]\nprovider = \"file\"\n\n[session]\nprovider = \"" + provider + "\"\nremote_match = \"" + remoteMatch + "\"\n")
 	if err := os.WriteFile(tomlPath, data, 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
