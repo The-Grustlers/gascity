@@ -1,6 +1,8 @@
 package k8s
 
 import (
+	"encoding/base64"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -97,6 +99,64 @@ func TestBuildPod_NoSchedulingFields_NoBehaviorChange(t *testing.T) {
 	if pod.Spec.PriorityClassName != "" {
 		t.Errorf("PriorityClassName should be empty when not set")
 	}
+}
+
+func TestBuildPod_IncludesPromptSuffixInTmuxCommand(t *testing.T) {
+	p := newProviderWithOps(newFakeK8sOps())
+	pod, err := buildPod("test-session", runtime.Config{
+		Command:      "agent-cli",
+		PromptSuffix: "'Run the startup prompt.'",
+	}, p)
+	if err != nil {
+		t.Fatalf("buildPod: %v", err)
+	}
+
+	got := decodedTmuxCommand(t, pod)
+	want := "agent-cli 'Run the startup prompt.'"
+	if got != want {
+		t.Fatalf("tmux command = %q, want %q", got, want)
+	}
+}
+
+func TestBuildPod_IncludesPromptFlagInTmuxCommand(t *testing.T) {
+	p := newProviderWithOps(newFakeK8sOps())
+	pod, err := buildPod("test-session", runtime.Config{
+		Command:      "agent-cli",
+		PromptFlag:   "--prompt",
+		PromptSuffix: "'Run the startup prompt.'",
+	}, p)
+	if err != nil {
+		t.Fatalf("buildPod: %v", err)
+	}
+
+	got := decodedTmuxCommand(t, pod)
+	want := "agent-cli --prompt 'Run the startup prompt.'"
+	if got != want {
+		t.Fatalf("tmux command = %q, want %q", got, want)
+	}
+}
+
+func decodedTmuxCommand(t *testing.T, pod *corev1.Pod) string {
+	t.Helper()
+	if len(pod.Spec.Containers) == 0 || len(pod.Spec.Containers[0].Args) == 0 {
+		t.Fatal("pod has no agent args")
+	}
+	args := pod.Spec.Containers[0].Args[0]
+	const prefix = "CMD=$(echo '"
+	start := strings.Index(args, prefix)
+	if start == -1 {
+		t.Fatalf("pod args missing encoded command prefix: %s", args)
+	}
+	start += len(prefix)
+	end := strings.Index(args[start:], "' | base64 -d)")
+	if end == -1 {
+		t.Fatalf("pod args missing encoded command suffix: %s", args)
+	}
+	decoded, err := base64.StdEncoding.DecodeString(args[start : start+end])
+	if err != nil {
+		t.Fatalf("decode command: %v", err)
+	}
+	return string(decoded)
 }
 
 func TestBuildPod_ClonesSchedulingFields(t *testing.T) {
