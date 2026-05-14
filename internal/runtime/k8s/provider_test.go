@@ -205,6 +205,52 @@ func TestProjectedPodStoreRootPrefersGCStoreRoot(t *testing.T) {
 	}
 }
 
+func TestProjectedPodStoreRootRemapsSiblingRigRoot(t *testing.T) {
+	cfg := runtime.Config{
+		WorkDir: "/home/bryce/projects/gr7n-city/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1",
+		Env: map[string]string{
+			"GC_CITY":     "/home/bryce/projects/gr7n-city",
+			"GC_RIG":      "grustle-monorepo",
+			"GC_RIG_ROOT": "/home/bryce/projects/grustle-monorepo",
+		},
+	}
+
+	podWorkDir := projectedPodWorkDir(cfg)
+	if podWorkDir != "/workspace/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1" {
+		t.Fatalf("projectedPodWorkDir = %q, want web-worker pod workdir", podWorkDir)
+	}
+	if got := projectedPodStoreRoot(cfg, podWorkDir); got != "/workspace/grustle-monorepo" {
+		t.Fatalf("projectedPodStoreRoot = %q, want /workspace/grustle-monorepo", got)
+	}
+}
+
+func TestBuildPodEnvRemapsSiblingRigRoot(t *testing.T) {
+	cfgEnv := map[string]string{
+		"GC_CITY":       "/home/bryce/projects/gr7n-city",
+		"GC_CITY_PATH":  "/home/bryce/projects/gr7n-city",
+		"GC_RIG":        "grustle-monorepo",
+		"GC_RIG_ROOT":   "/home/bryce/projects/grustle-monorepo",
+		"GC_STORE_ROOT": "/home/bryce/projects/grustle-monorepo",
+		"BEADS_DIR":     "/home/bryce/projects/grustle-monorepo/.beads",
+	}
+
+	env := mustBuildPodEnv(t, cfgEnv, "/workspace/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1", podManagedDoltHost, podManagedDoltPort)
+	envMap := map[string]string{}
+	for _, e := range env {
+		envMap[e.Name] = e.Value
+	}
+
+	if envMap["GC_RIG_ROOT"] != "/workspace/grustle-monorepo" {
+		t.Fatalf("GC_RIG_ROOT = %q, want /workspace/grustle-monorepo", envMap["GC_RIG_ROOT"])
+	}
+	if envMap["GC_STORE_ROOT"] != "/workspace/grustle-monorepo" {
+		t.Fatalf("GC_STORE_ROOT = %q, want /workspace/grustle-monorepo", envMap["GC_STORE_ROOT"])
+	}
+	if envMap["BEADS_DIR"] != "/workspace/grustle-monorepo/.beads" {
+		t.Fatalf("BEADS_DIR = %q, want /workspace/grustle-monorepo/.beads", envMap["BEADS_DIR"])
+	}
+}
+
 func TestIsRunning(t *testing.T) {
 	fake := newFakeK8sOps()
 	p := newProviderWithOps(fake)

@@ -167,6 +167,21 @@ func TestBuildPod_WritesDecodedCommandToScriptForDynamicUser(t *testing.T) {
 	}
 }
 
+func TestRemapControllerCommandToPodRemapsSiblingRigRoot(t *testing.T) {
+	cfgEnv := map[string]string{
+		"GC_CITY":     "/home/bryce/projects/gr7n-city",
+		"GC_RIG":      "grustle-monorepo",
+		"GC_RIG_ROOT": "/home/bryce/projects/grustle-monorepo",
+	}
+	cmd := "/home/bryce/projects/gr7n-city/scripts/project-worker-worktree-setup.sh /home/bryce/projects/grustle-monorepo /home/bryce/projects/gr7n-city/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1 web-worker-1 --sync"
+
+	got := remapControllerCommandToPod(cmd, cfgEnv)
+	want := "/workspace/scripts/project-worker-worktree-setup.sh /workspace/grustle-monorepo /workspace/.gc/worktrees/grustle-monorepo/web-workers/web-worker-1 web-worker-1 --sync"
+	if got != want {
+		t.Fatalf("remapped command = %q, want %q", got, want)
+	}
+}
+
 func decodedTmuxCommand(t *testing.T, pod *corev1.Pod) string {
 	t.Helper()
 	if len(pod.Spec.Containers) == 0 || len(pod.Spec.Containers[0].Args) == 0 {

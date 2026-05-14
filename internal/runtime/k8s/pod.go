@@ -46,12 +46,47 @@ func remapControllerPathToPod(val, ctrlCity string) string {
 	return val
 }
 
+func projectedPodRigRoot(cfgEnv map[string]string) string {
+	rig := strings.TrimSpace(cfgEnv["GC_RIG"])
+	if rig == "" {
+		rig = filepath.Base(strings.TrimSpace(cfgEnv["GC_RIG_ROOT"]))
+	}
+	if rig == "" || rig == "." || rig == string(filepath.Separator) {
+		return ""
+	}
+	return "/workspace/" + filepath.ToSlash(rig)
+}
+
+func remapControllerPathToPodForConfig(val string, cfgEnv map[string]string) string {
+	val = remapControllerPathToPod(val, controllerCityPath(cfgEnv))
+	rigRoot := strings.TrimSpace(cfgEnv["GC_RIG_ROOT"])
+	podRigRoot := projectedPodRigRoot(cfgEnv)
+	if val == "" || rigRoot == "" || podRigRoot == "" {
+		return val
+	}
+	if val == rigRoot || strings.HasPrefix(val, rigRoot+"/") {
+		return podRigRoot + val[len(rigRoot):]
+	}
+	return val
+}
+
+func remapControllerCommandToPod(cmd string, cfgEnv map[string]string) string {
+	if ctrlCity := controllerCityPath(cfgEnv); ctrlCity != "" {
+		cmd = strings.ReplaceAll(cmd, ctrlCity, "/workspace")
+	}
+	rigRoot := strings.TrimSpace(cfgEnv["GC_RIG_ROOT"])
+	podRigRoot := projectedPodRigRoot(cfgEnv)
+	if rigRoot != "" && podRigRoot != "" {
+		cmd = strings.ReplaceAll(cmd, rigRoot, podRigRoot)
+	}
+	return cmd
+}
+
 func projectedPodWorkDir(cfg runtime.Config) string {
 	podWorkDir := "/workspace"
-	ctrlCity := controllerCityPath(cfg.Env)
-	if ctrlCity != "" && cfg.WorkDir != "" && cfg.WorkDir != ctrlCity {
-		if rel, ok := strings.CutPrefix(cfg.WorkDir, ctrlCity+"/"); ok {
-			podWorkDir = "/workspace/" + rel
+	if cfg.WorkDir != "" {
+		if remapped := remapControllerPathToPodForConfig(cfg.WorkDir, cfg.Env); strings.HasPrefix(remapped, "/workspace") {
+			podWorkDir = remapped
 		}
 	}
 	return podWorkDir
@@ -59,7 +94,7 @@ func projectedPodWorkDir(cfg runtime.Config) string {
 
 func projectedPodStoreRoot(cfg runtime.Config, podWorkDir string) string {
 	storeRoot := controllerStoreRoot(cfg)
-	storeRoot = remapControllerPathToPod(storeRoot, controllerCityPath(cfg.Env))
+	storeRoot = remapControllerPathToPodForConfig(storeRoot, cfg.Env)
 	if storeRoot == "" {
 		return podWorkDir
 	}
@@ -208,9 +243,7 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 	// Remap controller-side city path references to pod-side /workspace.
 	// The controller expands {{.ConfigDir}} templates using its own city path
 	// (e.g. /city/packs/...) but pods have files at /workspace/....
-	if ctrlCity != "" {
-		agentCmd = strings.ReplaceAll(agentCmd, ctrlCity, "/workspace")
-	}
+	agentCmd = remapControllerCommandToPod(agentCmd, cfg.Env)
 	cmdB64 := base64.StdEncoding.EncodeToString([]byte(agentCmd))
 	cmdFile := "/tmp/gc-agent-command.sh"
 	cmdSetup := fmt.Sprintf(
@@ -224,9 +257,7 @@ func buildPod(name string, cfg runtime.Config, p *Provider) (*corev1.Pod, error)
 	var preStartCmds string
 	for _, cmd := range cfg.PreStart {
 		c := cmd
-		if ctrlCity != "" {
-			c = strings.ReplaceAll(c, ctrlCity, "/workspace")
-		}
+		c = remapControllerCommandToPod(c, cfg.Env)
 		b64 := base64.StdEncoding.EncodeToString([]byte(c))
 		preStartCmds += fmt.Sprintf("echo '%s' | base64 -d | sh; ", b64)
 	}
@@ -518,7 +549,7 @@ func buildPodEnv(cfgEnv map[string]string, podWorkDir, managedServiceHost, manag
 		case "GC_CONTROL_DISPATCHER_TRACE_DEFAULT", "GC_PACK_STATE_DIR":
 			val = projectControllerRuntimePathToPod(val, ctrlCity, ctrlRuntimeDir, podRuntimeDir)
 		case "GC_STORE_ROOT", "GC_RIG_ROOT", "BEADS_DIR", "GT_ROOT", "GC_PACK_DIR":
-			val = remapControllerPathToPod(val, ctrlCity)
+			val = remapControllerPathToPodForConfig(val, cfgEnv)
 		}
 		env = append(env, corev1.EnvVar{Name: k, Value: val})
 	}
