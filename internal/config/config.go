@@ -17,6 +17,7 @@ import (
 	"github.com/gastownhall/gascity/internal/fsys"
 	"github.com/gastownhall/gascity/internal/orders"
 	"github.com/gastownhall/gascity/internal/pricing"
+	"github.com/gastownhall/gascity/internal/shellquote"
 )
 
 // validAgentName matches names safe for use in session identifiers.
@@ -2165,8 +2166,12 @@ func (a *Agent) EffectiveWorkQuery() string {
 		target = a.PoolName
 	}
 	legacyTarget := legacyWorkflowControlQualifiedName(target)
+	queryPrefix := `GC_ROUTE_TARGET=` + shellquote.Quote(target)
+	if legacyTarget != "" {
+		queryPrefix += ` GC_ROUTE_LEGACY_TARGET=` + shellquote.Quote(legacyTarget)
+	}
 	if legacyTarget == "" {
-		return `sh -c '` +
+		return queryPrefix + ` sh -c '` +
 			// Tier 1: in_progress assigned to any of my identifiers (crash recovery)
 			`for id in "$GC_SESSION_ID" "$GC_SESSION_NAME" "$GC_ALIAS"; do ` +
 			`[ -z "$id" ] && continue; ` +
@@ -2185,12 +2190,11 @@ func (a *Agent) EffectiveWorkQuery() string {
 			`ephemeral|"") ;; ` +
 			`*) exit 0 ;; ` +
 			`esac; ` +
-			`r=$(bd ready --metadata-field gc.routed_to=` + target +
-			` --unassigned --exclude-type=epic --json --limit=1 2>/dev/null); ` +
+			`r=$(bd ready --unassigned --exclude-type=epic --json --limit=0 2>/dev/null | jq --arg route "$GC_ROUTE_TARGET" "map(select(.metadata[\"gc.routed_to\"] == \$route)) | .[:1]" 2>/dev/null); ` +
 			`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
 			`printf "[]"'`
 	}
-	return `sh -c '` +
+	return queryPrefix + ` sh -c '` +
 		// Tier 1: in_progress assigned to any of my identifiers (crash recovery).
 		// Built-in control-dispatchers also claim legacy workflow-control names so
 		// pre-rename workflows keep moving without live metadata rewrites.
@@ -2220,11 +2224,9 @@ func (a *Agent) EffectiveWorkQuery() string {
 		`ephemeral|"") ;; ` +
 		`*) exit 0 ;; ` +
 		`esac; ` +
-		`r=$(bd ready --metadata-field gc.routed_to=` + target +
-		` --unassigned --exclude-type=epic --json --limit=1 2>/dev/null); ` +
+		`r=$(bd ready --unassigned --exclude-type=epic --json --limit=0 2>/dev/null | jq --arg route "$GC_ROUTE_TARGET" "map(select(.metadata[\"gc.routed_to\"] == \$route)) | .[:1]" 2>/dev/null); ` +
 		`[ -n "$r" ] && [ "$r" != "[]" ] && printf "%s" "$r" && exit 0; ` +
-		`bd ready --metadata-field gc.routed_to=` + legacyTarget +
-		` --unassigned --exclude-type=epic --json --limit=1 2>/dev/null'`
+		`bd ready --unassigned --exclude-type=epic --json --limit=0 2>/dev/null | jq --arg route "$GC_ROUTE_LEGACY_TARGET" "map(select(.metadata[\"gc.routed_to\"] == \$route)) | .[:1]" 2>/dev/null'`
 }
 
 func legacyWorkflowControlQualifiedName(target string) string {
@@ -2295,8 +2297,8 @@ func (a *Agent) EffectiveScaleCheck() string {
 		return a.ScaleCheck
 	}
 	template := a.QualifiedName()
-	return `ready_json=$(bd ready --metadata-field gc.routed_to=` + template +
-		` --unassigned --limit 0 --json) && printf '%s\n' "$ready_json" | jq 'length'`
+	return `GC_ROUTE_TARGET=` + shellquote.Quote(template) +
+		` sh -c 'bd ready --unassigned --limit 0 --json | jq --arg route "$GC_ROUTE_TARGET" "map(select(.metadata[\"gc.routed_to\"] == \$route)) | length"'`
 }
 
 // EffectiveMaxActiveSessions returns the agent's max active sessions.
@@ -2427,10 +2429,10 @@ func (a *Agent) EffectiveOnBoot() string {
 	if a.PoolName != "" {
 		template = a.PoolName
 	}
-	return `bd list --metadata-field gc.routed_to=` + template +
-		` --status=in_progress --no-assignee --json 2>/dev/null | ` +
-		`jq -r '.[].id' 2>/dev/null | ` +
-		`xargs -rI{} bd update {} --status open 2>/dev/null`
+	return `GC_ROUTE_TARGET=` + shellquote.Quote(template) +
+		` sh -c 'bd list --status=in_progress --no-assignee --json 2>/dev/null | ` +
+		`jq -r --arg route "$GC_ROUTE_TARGET" ".[] | select(.metadata[\"gc.routed_to\"] == \$route) | .id" 2>/dev/null | ` +
+		`xargs -rI{} bd update {} --status open 2>/dev/null'`
 }
 
 // InjectImplicitAgents adds on-demand agents for each configured provider at

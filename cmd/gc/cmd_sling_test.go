@@ -591,6 +591,7 @@ func TestDoSlingBeadToPool(t *testing.T) {
 	}
 
 	deps, stdout, stderr := testDeps(cfg, sp, runner.run)
+	deps.StoreRef = "rig:hello-world"
 	opts := testOpts(a, "HW-7")
 	code := doSling(opts, deps, nil, stdout, stderr)
 
@@ -6118,6 +6119,7 @@ func TestDoSlingCrossRigSameRigAllowed(t *testing.T) {
 	a := config.Agent{Name: "polecat", Dir: "hello-world"}
 
 	deps, stdout, stderr := testDeps(cfg, sp, runner.run)
+	deps.StoreRef = "rig:hello-world"
 	opts := testOpts(a, "HW-7")
 	code := doSling(opts, deps, nil, stdout, stderr)
 
@@ -6236,7 +6238,7 @@ func TestDryRunBatchCrossRigSection(t *testing.T) {
 	}
 }
 
-func TestDoSlingCrossRigFormulaExempt(t *testing.T) {
+func TestDoSlingCrossRigFormulaStillEnforcesStoreScope(t *testing.T) {
 	runner := newFakeRunner()
 	runner.on("bd mol cook", "WP-1\n", nil)
 	sp := runtime.NewFake()
@@ -6249,14 +6251,15 @@ func TestDoSlingCrossRigFormulaExempt(t *testing.T) {
 	deps, stdout, stderr := testDeps(cfg, sp, runner.run)
 	opts := testOpts(a, "code-review")
 	opts.IsFormula = true
-	// Formula mode — cross-rig check should not apply.
+	// Formula mode bypasses the legacy prefix cross-rig check, but hard
+	// store-scope routing still rejects city-store work routed into a rig.
 	code := doSling(opts, deps, nil, stdout, stderr)
 
-	if code != 0 {
-		t.Fatalf("doSling returned %d, want 0 (formula exempt from cross-rig); stderr: %s", code, stderr.String())
+	if code != 1 {
+		t.Fatalf("doSling returned %d, want 1 (formula store-scope rejection); stderr: %s", code, stderr.String())
 	}
-	if strings.Contains(stderr.String(), "cross-rig") {
-		t.Errorf("formula mode should not trigger cross-rig; stderr = %q", stderr.String())
+	if !strings.Contains(stderr.String(), "route/store mismatch") {
+		t.Errorf("stderr = %q, want route/store mismatch", stderr.String())
 	}
 }
 
