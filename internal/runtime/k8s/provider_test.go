@@ -1166,11 +1166,11 @@ func TestAgentImagePullPolicy(t *testing.T) {
 		want     corev1.PullPolicy
 	}{
 		{name: "non-prebaked default Always", prebaked: false, want: corev1.PullAlways},
-		{name: "prebaked default IfNotPresent", prebaked: true, want: corev1.PullIfNotPresent},
+		{name: "prebaked default Always", prebaked: true, want: corev1.PullAlways},
 		{name: "env override Always wins on prebaked", prebaked: true, envVal: "Always", want: corev1.PullAlways},
 		{name: "env override IfNotPresent wins on non-prebaked", prebaked: false, envVal: "IfNotPresent", want: corev1.PullIfNotPresent},
 		{name: "env override Never honored", prebaked: false, envVal: "Never", want: corev1.PullNever},
-		{name: "unknown env value falls through to default", prebaked: true, envVal: "bogus", want: corev1.PullIfNotPresent},
+		{name: "unknown env value falls through to default", prebaked: true, envVal: "bogus", want: corev1.PullAlways},
 		{name: "whitespace env value trimmed", prebaked: false, envVal: "  Always  ", want: corev1.PullAlways},
 	}
 	for _, tt := range tests {

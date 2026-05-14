@@ -371,7 +371,7 @@ EOF
 	return pod, nil
 }
 
-func agentImagePullPolicy(prebaked bool) corev1.PullPolicy {
+func agentImagePullPolicy(_ bool) corev1.PullPolicy {
 	switch strings.TrimSpace(os.Getenv("GC_K8S_IMAGE_PULL_POLICY")) {
 	case "Always":
 		return corev1.PullAlways
@@ -379,9 +379,6 @@ func agentImagePullPolicy(prebaked bool) corev1.PullPolicy {
 		return corev1.PullIfNotPresent
 	case "Never":
 		return corev1.PullNever
-	}
-	if prebaked {
-		return corev1.PullIfNotPresent
 	}
 	return corev1.PullAlways
 }
