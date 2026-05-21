@@ -1035,6 +1035,53 @@ func loadPackWithCache(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string, 
 	return loadPackWithCacheOptions(fs, topoPath, topoDir, cityRoot, rigName, seen, cache, LoadOptions{})
 }
 
+// LintPackLoad is the pack graph state needed by CLI linting.
+type LintPackLoad struct {
+	Path          string
+	Name          string
+	Agents        []Agent
+	NamedSessions []NamedSession
+	Providers     map[string]ProviderSpec
+	PackDirs      []string
+	Warnings      []string
+}
+
+// LoadPackForLint loads a standalone pack directory using the same parser,
+// include/import expansion, and path adjustment as normal pack loading.
+func LoadPackForLint(fs fsys.FS, packDir string) (*LintPackLoad, error) {
+	if strings.TrimSpace(packDir) == "" {
+		return nil, fmt.Errorf("pack directory is required")
+	}
+	absDir, err := filepath.Abs(packDir)
+	if err != nil {
+		return nil, fmt.Errorf("resolving pack directory %q: %w", packDir, err)
+	}
+	topoPath := filepath.Join(absDir, packFile)
+	cache := &packLoadCache{results: make(map[string]*packLoadResult)}
+	agents, namedSessions, providers, _, topoDirs, _, _, err := loadPackWithCacheOptions(
+		fs, topoPath, absDir, absDir, "", nil, cache, LoadOptions{AllowRootDefaultRigImports: true})
+	if err != nil {
+		return nil, err
+	}
+	data, err := fs.ReadFile(topoPath)
+	if err != nil {
+		return nil, fmt.Errorf("loading %s: %w", packFile, err)
+	}
+	packName, err := decodePackName(data)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", packFile, err)
+	}
+	return &LintPackLoad{
+		Path:          absDir,
+		Name:          packName,
+		Agents:        agents,
+		NamedSessions: namedSessions,
+		Providers:     providers,
+		PackDirs:      topoDirs,
+		Warnings:      cachedPackWarnings(cache, absDir),
+	}, nil
+}
+
 func loadPackWithCacheOptions(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string, seen map[string]bool, cache *packLoadCache, opts LoadOptions) ([]Agent, []NamedSession, map[string]ProviderSpec, []Service, []string, []PackRequirement, []ResolvedPackGlobal, error) {
 	var agents []Agent
 	var namedSessions []NamedSession
@@ -1050,6 +1097,21 @@ func loadPackWithCacheOptions(fs fsys.FS, topoPath, topoDir, cityRoot, rigName s
 		return loadErr
 	})
 	return agents, namedSessions, providers, services, topoDirs, requirements, globals, err
+}
+
+func allowRootDefaultRigImports(opts LoadOptions, topoDir, cityRoot string) bool {
+	if !opts.AllowRootDefaultRigImports {
+		return false
+	}
+	absTopoDir, err := filepath.Abs(topoDir)
+	if err != nil {
+		absTopoDir = topoDir
+	}
+	absCityRoot, err := filepath.Abs(cityRoot)
+	if err != nil {
+		absCityRoot = cityRoot
+	}
+	return absTopoDir == absCityRoot
 }
 
 func loadPackWithCacheOptionsLocked(fs fsys.FS, topoPath, topoDir, cityRoot, rigName string, seen map[string]bool, cache *packLoadCache, opts LoadOptions) ([]Agent, []NamedSession, map[string]ProviderSpec, []Service, []string, []PackRequirement, []ResolvedPackGlobal, error) {
@@ -1099,7 +1161,7 @@ func loadPackWithCacheOptionsLocked(fs fsys.FS, topoPath, topoDir, cityRoot, rig
 	if fatalWarnings := fatalUndecodedWarnings(md, topoPath); len(fatalWarnings) > 0 {
 		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("parsing %s: %s", packFile, strings.Join(fatalWarnings, "; "))
 	}
-	if len(tc.Defaults.Rig.Imports) > 0 {
+	if len(tc.Defaults.Rig.Imports) > 0 && !allowRootDefaultRigImports(opts, topoDir, cityRoot) {
 		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("parsing %s: [defaults.rig.imports] is only supported in a city root pack.toml", packFile)
 	}
 
