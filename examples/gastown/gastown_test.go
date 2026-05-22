@@ -1551,6 +1551,63 @@ func TestGastownPatrolWispCommandsPropagateRoutingNamespace(t *testing.T) {
 	}
 }
 
+func TestGastownPatrolPromptFallbackPreservesLifecycle(t *testing.T) {
+	checks := []struct {
+		rel       string
+		agentName string
+		template  string
+		formula   string
+		pourLine  string
+	}{
+		{
+			rel:       "packs/gastown/agents/deacon/prompt.template.md",
+			agentName: "gascity/gastown.deacon",
+			template:  "deacon",
+			formula:   "mol-deacon-patrol",
+			pourLine:  `NEXT=$(gc bd mol wisp mol-deacon-patrol --root-only --var binding_prefix=gastown. --json | jq -r '.new_epic_id // empty')`,
+		},
+		{
+			rel:       "packs/gastown/agents/witness/prompt.template.md",
+			agentName: "gascity/gastown.witness",
+			template:  "witness",
+			formula:   "mol-witness-patrol",
+			pourLine:  `NEXT=$(gc bd mol wisp mol-witness-patrol --root-only --var binding_prefix='gastown.' --json | jq -r '.new_epic_id // empty')`,
+		},
+	}
+
+	for _, check := range checks {
+		body := renderGastownPromptForPack(t, check.rel, check.agentName, check.template, "gascity", "gastown", "gastown.")
+		section := sectionBetween(t, body, "## CRITICAL: No Idle State Between Cycles", "## Context Exhaustion")
+		assertContainsInOrder(t, section,
+			`run `+"`gc hook`"+` immediately`,
+			`CURRENT_WISP=${GC_BEAD_ID:-}`,
+			`if [ -z "$CURRENT_WISP" ]; then`,
+			`CURRENT_WISP=$(gc bd list --assignee="$GC_AGENT" --status=in_progress --type=wisp --limit=1 --json | jq -r '.[0].id // empty')`,
+			`ASSIGNED_WISP=$(gc bd list --assignee="$GC_AGENT" --status=open --type=wisp --limit=1 --json | jq -r '.[0].id // empty')`,
+			`if [ -n "$CURRENT_WISP" ] && [ -z "$ASSIGNED_WISP" ]; then`,
+			check.pourLine,
+			`if [ -z "$NEXT" ]; then`,
+			`if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then`,
+			`gc bd mol burn "$CURRENT_WISP" --force`,
+			`elif [ -n "$CURRENT_WISP" ]; then`,
+			`gc bd mol burn "$CURRENT_WISP" --force`,
+			`elif [ -z "$ASSIGNED_WISP" ]; then`,
+			check.pourLine,
+			`if [ -z "$NEXT" ]; then`,
+			`if ! gc bd update "$NEXT" --assignee="$GC_AGENT"; then`,
+			`gc hook`,
+		)
+		for _, bad := range []string{`--assignee="$GC_ALIAS"`, "sleep 5"} {
+			if strings.Contains(section, bad) {
+				t.Fatalf("%s no-idle fallback still contains %q", check.rel, bad)
+			}
+		}
+		if !strings.Contains(section, check.formula) {
+			t.Fatalf("%s no-idle fallback does not mention %s", check.rel, check.formula)
+		}
+	}
+}
+
 func TestRefineryPatrolRestartGuidanceAssignsSuccessor(t *testing.T) {
 	dir := exampleDir()
 	promptPath := filepath.Join(dir, "packs", "gastown", "agents", "refinery", "prompt.template.md")
