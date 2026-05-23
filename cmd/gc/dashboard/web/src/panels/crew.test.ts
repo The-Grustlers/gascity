@@ -266,6 +266,102 @@ describe("crew empty states", () => {
     expect(document.getElementById("log-drawer-loading")).not.toBeNull();
   });
 
+  it("splits terminal transcript output into chat bubbles", async () => {
+    document.body.innerHTML = `
+      <div id="crew-loading">Loading crew...</div>
+      <table id="crew-table" style="display:none"><tbody id="crew-tbody"></tbody></table>
+      <div id="crew-empty" style="display:none"><p>No crew configured</p></div>
+      <div id="rigged-body"></div>
+      <div id="pooled-body"></div>
+      <span id="crew-count"></span>
+      <span id="rigged-count"></span>
+      <span id="pooled-count"></span>
+      <div id="agent-log-drawer" style="display:none">
+        <span id="log-drawer-agent-name"></span>
+        <span id="log-drawer-count"></span>
+        <button id="log-drawer-older-btn" style="display:none">Load older</button>
+        <button id="log-drawer-close-btn">Close</button>
+        <div id="log-drawer-body">
+          <div id="log-drawer-messages">
+            <div id="log-drawer-loading">Loading logs...</div>
+          </div>
+        </div>
+      </div>
+    `;
+    vi.spyOn(api, "GET").mockImplementation(async (path: string) => {
+      if (path === "/v0/city/{cityName}/sessions") {
+        return {
+          data: {
+            items: [{
+              active_bead: "",
+              agent_kind: "crew",
+              attached: true,
+              id: "s-director",
+              last_active: "2026-04-18T20:00:00Z",
+              last_output: "",
+              running: true,
+              template: "director",
+            }],
+          },
+        } as never;
+      }
+      if (path === "/v0/city/{cityName}/session/{id}/pending") {
+        return { data: { pending: false } } as never;
+      }
+      if (path === "/v0/city/{cityName}/session/{id}/transcript") {
+        return {
+          data: {
+            turns: [{
+              role: "output",
+              text: [
+                "gr7n-router-cli: codex via gpt-5.5",
+                "",
+                "› [gr7n] director • 2026-05-23T18:55:26",
+                "",
+                "  Run `gc prime` to initialize your context.",
+                "",
+                "• gc prime done. Director context loaded.",
+                "",
+                "────────────────────────────────────────────────────────────────────────────────",
+                "",
+                "› hi!",
+                "",
+                "• Hi. Idle until explicit request.",
+                "",
+                "› Explain this codebase",
+                "",
+                "  gpt-5.5 high · ~/projects/gr7n-platform/gascity/cities/gr7n/.gc/agents/direct…",
+              ].join("\n"),
+              timestamp: "2026-05-23T18:55:26Z",
+            }],
+            pagination: {
+              has_older_messages: false,
+              returned_message_count: 1,
+              total_compactions: 0,
+              total_message_count: 1,
+            },
+          },
+        } as never;
+      }
+      throw new Error(`unexpected GET ${path}`);
+    });
+
+    installCrewInteractions();
+    await renderCrew();
+    document.querySelector<HTMLButtonElement>(".agent-log-link")?.click();
+    await waitFor(() => {
+      expect(document.querySelectorAll(".log-msg-user").length).toBe(2);
+    });
+
+    expect(document.querySelector(".log-msg-result")).toBeNull();
+    expect(document.querySelectorAll(".log-msg-system").length).toBeGreaterThanOrEqual(1);
+    expect(document.querySelectorAll(".log-msg-assistant").length).toBe(2);
+    expect(document.querySelectorAll(".log-msg-user")[0]?.textContent).toContain("hi!");
+    expect(document.querySelectorAll(".log-msg-user")[1]?.textContent).toContain("Explain this codebase");
+    expect(document.querySelectorAll(".log-msg-user")[1]?.textContent).not.toContain("gpt-5.5 high");
+    expect(document.querySelectorAll(".log-msg-assistant")[1]?.textContent).toContain("Hi. Idle until explicit request.");
+  });
+
   it("submits chat messages through the session submit endpoint", async () => {
     document.body.innerHTML = `
       <div id="crew-loading">Loading crew...</div>

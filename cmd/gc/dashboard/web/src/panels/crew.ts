@@ -20,6 +20,12 @@ interface ChatAttachment {
   type: string;
 }
 
+interface DisplayTurn {
+  role: string;
+  text: string;
+  timestamp?: string;
+}
+
 const MAX_CHAT_ATTACHMENTS = 4;
 const MAX_INLINE_IMAGE_BYTES = 350_000;
 let pendingAttachments: ChatAttachment[] = [];
@@ -384,8 +390,7 @@ async function loadTranscript(sessionID: string, prepend: boolean): Promise<void
 
   const fragment = document.createDocumentFragment();
   for (const turn of res.data.turns ?? []) {
-    fragment.append(renderTurn(turn.role, turn.text, turn.timestamp));
-    logCount += 1;
+    logCount += appendDisplayTurns(fragment, expandTranscriptTurn(turn.role, turn.text, turn.timestamp));
   }
   if (prepend) {
     messagesEl.prepend(fragment);
@@ -419,8 +424,11 @@ function appendStreamEvent(msg: AgentOutputMessage): void {
   if (!messagesEl) return;
   const payload = msg.data as { data?: { message?: { role?: string; text?: string; timestamp?: string } }; event?: string } | null;
   if (msg.type !== "message" || !payload?.data?.message) return;
-  messagesEl.append(renderTurn(payload.data.message.role ?? "agent", payload.data.message.text ?? "", payload.data.message.timestamp));
-  logCount += 1;
+  logCount += appendDisplayTurns(messagesEl, expandTranscriptTurn(
+    payload.data.message.role ?? "agent",
+    payload.data.message.text ?? "",
+    payload.data.message.timestamp,
+  ));
   byId("log-drawer-count")!.textContent = String(logCount);
   scrollLogDrawerToBottom();
 }
@@ -568,6 +576,96 @@ function attachmentMarkdownAlt(name: string): string {
 function attachmentOnlyLabel(attachments: ChatAttachment[]): string {
   if (attachments.length === 0) return "";
   return attachments.length === 1 ? attachments[0]?.name ?? "image" : `${attachments.length} images`;
+}
+
+function appendDisplayTurns(container: Node, turns: DisplayTurn[]): number {
+  for (const turn of turns) {
+    container.appendChild(renderTurn(turn.role, turn.text, turn.timestamp));
+  }
+  return turns.length;
+}
+
+function expandTranscriptTurn(role: string, text: string, timestamp: string | undefined): DisplayTurn[] {
+  if (!isTerminalTranscript(role, text)) {
+    return [{ role, text, timestamp }];
+  }
+  const parsed = parseCodexTerminalTranscript(text, timestamp);
+  return parsed.length > 0 ? parsed : [{ role, text, timestamp }];
+}
+
+function isTerminalTranscript(role: string, text: string): boolean {
+  if ((role ?? "").toLowerCase() !== "output") return false;
+  return text.includes("\n› ") || text.startsWith("› ") || text.includes("\n• ") || text.startsWith("• ");
+}
+
+function parseCodexTerminalTranscript(text: string, timestamp: string | undefined): DisplayTurn[] {
+  const turns: DisplayTurn[] = [];
+  let current: { role: string; lines: string[] } | null = null;
+
+  const flush = () => {
+    if (!current) return;
+    const body = trimBlankLines(current.lines).join("\n").trimEnd();
+    if (body !== "") turns.push({ role: current.role, text: body, timestamp });
+    current = null;
+  };
+  const startTurn = (role: string, firstLine: string) => {
+    flush();
+    current = { role, lines: [firstLine] };
+  };
+
+  for (const rawLine of text.replace(/\r\n/g, "\n").split("\n")) {
+    const line = rawLine.replace(/\s+$/g, "");
+    if (isCodexSeparatorLine(line)) {
+      flush();
+      continue;
+    }
+    if (line.startsWith("› ")) {
+      startTurn(roleForCodexPrompt(line.slice(2)), line.slice(2));
+      continue;
+    }
+    if (line.startsWith("• ")) {
+      startTurn("assistant", line.slice(2));
+      continue;
+    }
+    if (isCodexStatusLine(line)) {
+      continue;
+    }
+    if (!current) {
+      current = { role: "system", lines: [] };
+    }
+    current.lines.push(line.startsWith("  ") ? line.slice(2) : line);
+  }
+  flush();
+  return turns;
+}
+
+function roleForCodexPrompt(prompt: string): string {
+  const trimmed = prompt.trim();
+  if (
+    trimmed.startsWith("<system-reminder>") ||
+    /^\[[^\]]+\]\s+\S+\s+•/.test(trimmed) ||
+    trimmed.startsWith("Stay idle.")
+  ) {
+    return "system";
+  }
+  return "user";
+}
+
+function isCodexSeparatorLine(line: string): boolean {
+  return /^[─━═-]{20,}$/.test(line.trim());
+}
+
+function isCodexStatusLine(line: string): boolean {
+  const trimmed = line.trim();
+  return /^(gpt|claude|gemini|kimi|codex|openai)[\w.-]*(\s+\w+)*\s+·\s+/.test(trimmed);
+}
+
+function trimBlankLines(lines: string[]): string[] {
+  let start = 0;
+  let end = lines.length;
+  while (start < end && lines[start]?.trim() === "") start += 1;
+  while (end > start && lines[end - 1]?.trim() === "") end -= 1;
+  return lines.slice(start, end);
 }
 
 function renderTurn(role: string, text: string, timestamp: string | undefined, localAttachments: ChatAttachment[] = []): HTMLElement {
