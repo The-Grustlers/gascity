@@ -265,6 +265,98 @@ describe("crew empty states", () => {
     expect(transcriptQueries.map((query) => query.before)).toEqual([undefined, "cursor-1"]);
     expect(document.getElementById("log-drawer-loading")).not.toBeNull();
   });
+
+  it("submits chat messages through the session submit endpoint", async () => {
+    document.body.innerHTML = `
+      <div id="crew-loading">Loading crew...</div>
+      <table id="crew-table" style="display:none"><tbody id="crew-tbody"></tbody></table>
+      <div id="crew-empty" style="display:none"><p>No crew configured</p></div>
+      <div id="rigged-body"></div>
+      <div id="pooled-body"></div>
+      <span id="crew-count"></span>
+      <span id="rigged-count"></span>
+      <span id="pooled-count"></span>
+      <div id="agent-log-drawer" style="display:none">
+        <span id="log-drawer-agent-name"></span>
+        <span id="log-drawer-count"></span>
+        <span id="log-drawer-status"></span>
+        <button id="log-drawer-older-btn" style="display:none">Load older</button>
+        <button id="log-drawer-close-btn">Close</button>
+        <div id="log-drawer-body">
+          <div id="log-drawer-messages">
+            <div id="log-drawer-loading">Loading logs...</div>
+          </div>
+        </div>
+        <form id="log-drawer-composer">
+          <textarea id="log-drawer-input"></textarea>
+          <button id="log-drawer-send-btn" type="submit">Send</button>
+        </form>
+      </div>
+    `;
+    vi.spyOn(api, "GET").mockImplementation(async (path: string) => {
+      if (path === "/v0/city/{cityName}/sessions") {
+        return {
+          data: {
+            items: [{
+              active_bead: "",
+              agent_kind: "crew",
+              attached: false,
+              id: "s-mayor",
+              last_active: "2026-04-18T20:00:00Z",
+              last_output: "",
+              running: true,
+              template: "mayor",
+            }],
+          },
+        } as never;
+      }
+      if (path === "/v0/city/{cityName}/session/{id}/pending") {
+        return { data: { pending: false } } as never;
+      }
+      if (path === "/v0/city/{cityName}/session/{id}/transcript") {
+        return {
+          data: {
+            turns: [],
+            pagination: {
+              has_older_messages: false,
+              returned_message_count: 0,
+              total_compactions: 0,
+              total_message_count: 0,
+            },
+          },
+        } as never;
+      }
+      throw new Error(`unexpected GET ${path}`);
+    });
+    const posts: Array<{ body?: { intent?: string; message?: string }; path: string }> = [];
+    vi.spyOn(api, "POST").mockImplementation(async (path: string, options?: unknown) => {
+      posts.push({ path, body: (options as { body?: { intent?: string; message?: string } } | undefined)?.body });
+      return { data: { event_cursor: "12", request_id: "req-chat-1", status: "accepted" } } as never;
+    });
+
+    installCrewInteractions();
+    await renderCrew();
+    document.querySelector<HTMLButtonElement>(".agent-log-link")?.click();
+    await waitFor(() => {
+      expect((document.getElementById("agent-log-drawer") as HTMLElement).style.display).toBe("block");
+    });
+
+    const input = document.getElementById("log-drawer-input") as HTMLTextAreaElement;
+    input.value = "Can you check the queue?";
+    document.getElementById("log-drawer-composer")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await waitFor(() => {
+      expect(posts.length).toBe(1);
+    });
+    expect(posts[0]).toEqual({
+      path: "/v0/city/{cityName}/session/{id}/submit",
+      body: { intent: "follow_up", message: "Can you check the queue?" },
+    });
+    expect(input.value).toBe("");
+    expect(document.getElementById("log-drawer-messages")?.textContent).toContain("Can you check the queue?");
+    expect(document.getElementById("log-drawer-status")?.textContent).toBe("Queued");
+    expect(document.getElementById("log-drawer-count")?.textContent).toBe("1");
+  });
 });
 
 // Slow Blacksmith CI runs have shown the openLogDrawer + loadTranscript

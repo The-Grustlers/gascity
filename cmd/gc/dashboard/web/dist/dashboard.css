@@ -3931,12 +3931,17 @@
 
         /* Agent log drawer */
         .agent-log-link {
-            color: var(--cyan);
-            text-decoration: none;
+            background: var(--cyan);
+            color: var(--bg-dark);
+            border: 1px solid var(--cyan);
+            border-radius: 3px;
+            padding: 2px 8px;
+            font-size: 0.75rem;
             cursor: pointer;
         }
         .agent-log-link:hover {
-            text-decoration: underline;
+            background: transparent;
+            color: var(--cyan);
         }
 
         .log-drawer-body {
@@ -3981,6 +3986,58 @@
 
         .log-drawer-messages {
             padding: 0;
+        }
+
+        .log-drawer-composer {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 8px;
+            padding: 10px 12px;
+            border-top: 1px solid var(--border);
+            background: var(--bg-panel);
+        }
+
+        .log-drawer-input {
+            width: 100%;
+            min-height: 72px;
+            max-height: 180px;
+            resize: vertical;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 8px 10px;
+            font-family: inherit;
+            font-size: 0.85rem;
+            line-height: 1.4;
+        }
+
+        .log-drawer-input:focus {
+            outline: none;
+            border-color: var(--cyan);
+            box-shadow: 0 0 0 1px var(--cyan);
+        }
+
+        .log-drawer-send-btn {
+            align-self: end;
+            min-width: 72px;
+            background: var(--green);
+            color: var(--bg-dark);
+            border: 1px solid var(--green);
+            border-radius: 4px;
+            padding: 8px 12px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .log-drawer-send-btn:disabled {
+            opacity: 0.55;
+            cursor: wait;
+        }
+
+        .log-drawer-send-btn:not(:disabled):hover {
+            background: transparent;
+            color: var(--green);
         }
 
         .log-msg {

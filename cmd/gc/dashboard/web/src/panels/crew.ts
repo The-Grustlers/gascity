@@ -1,5 +1,5 @@
 import type { SessionRecord } from "../api";
-import { api, cityScope } from "../api";
+import { api, cityScope, mutationHeaders } from "../api";
 import { byId, clear, el } from "../util/dom";
 import { calculateActivity, formatTimestamp, statusBadgeClass, truncate } from "../util/legacy";
 import { connectAgentOutput, type AgentOutputMessage, type SSEHandle } from "../sse";
@@ -10,6 +10,7 @@ let logHandle: SSEHandle | null = null;
 let logSessionID = "";
 let logBeforeCursor = "";
 let logCount = 0;
+let logSubmitting = false;
 
 export async function renderCrew(): Promise<void> {
   const city = cityScope();
@@ -88,9 +89,9 @@ export async function renderCrew(): Promise<void> {
         ]),
       ]),
       el("td", {}, [
-        attachButton(session.template),
+        chatButton(session.id, session.template),
         " ",
-        logButton(session.id, session.template),
+        attachButton(session.template),
       ]),
     ]);
     crewBody.append(row);
@@ -143,7 +144,7 @@ function classifyCrewState(session: SessionRecord, hasPending: boolean): string 
 }
 
 function attachButton(template: string): HTMLElement {
-  const btn = el("button", { class: "attach-btn", type: "button" }, ["📎 Attach"]);
+  const btn = el("button", { class: "attach-btn", type: "button" }, ["Terminal"]);
   btn.addEventListener("click", async () => {
     const command = `gc agent attach ${template}`;
     try {
@@ -156,10 +157,14 @@ function attachButton(template: string): HTMLElement {
   return btn;
 }
 
-function logButton(sessionID: string, label: string): HTMLElement {
-  const btn = el("button", { class: "agent-log-link", type: "button", "data-session-id": sessionID }, [label]);
+function chatButton(sessionID: string, label: string): HTMLElement {
+  return logButton(sessionID, "Chat", label);
+}
+
+function logButton(sessionID: string, label: string, title = label): HTMLElement {
+  const btn = el("button", { class: "agent-log-link", type: "button", "data-session-id": sessionID, title }, [label]);
   btn.addEventListener("click", () => {
-    void openLogDrawer(sessionID, label);
+    void openLogDrawer(sessionID, title);
   });
   return btn;
 }
@@ -253,6 +258,15 @@ function renderSimpleEmpty(container: HTMLElement, message: string): void {
 
 export function installCrewInteractions(): void {
   byId("log-drawer-close-btn")?.addEventListener("click", () => closeLogDrawer());
+  byId<HTMLFormElement>("log-drawer-composer")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void submitLogDrawerMessage();
+  });
+  byId<HTMLTextAreaElement>("log-drawer-input")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) return;
+    event.preventDefault();
+    void submitLogDrawerMessage();
+  });
   byId("log-drawer-older-btn")?.addEventListener("click", () => {
     logDebug("crew", "Load older transcript clicked", {
       hasCursor: logBeforeCursor !== "",
@@ -284,6 +298,7 @@ async function openLogDrawer(sessionID: string, label: string): Promise<void> {
   clear(messagesEl);
   messagesEl.append(loadingEl);
   loadingEl.style.display = "block";
+  resetLogComposer();
   drawer.style.display = "block";
   pushPause();
 
@@ -298,6 +313,8 @@ function closeLogDrawer(): void {
   logHandle = null;
   logSessionID = "";
   logBeforeCursor = "";
+  logSubmitting = false;
+  resetLogComposer();
   const drawer = byId("agent-log-drawer");
   if (drawer && drawer.style.display !== "none") {
     drawer.style.display = "none";
@@ -371,6 +388,61 @@ function appendStreamEvent(msg: AgentOutputMessage): void {
   byId("log-drawer-count")!.textContent = String(logCount);
   const body = byId("log-drawer-body");
   if (body) body.scrollTop = body.scrollHeight;
+}
+
+async function submitLogDrawerMessage(): Promise<void> {
+  const city = cityScope();
+  const input = byId<HTMLTextAreaElement>("log-drawer-input");
+  const sendBtn = byId<HTMLButtonElement>("log-drawer-send-btn");
+  const statusEl = byId("log-drawer-status");
+  const sessionID = logSessionID;
+  const message = input?.value.trim() ?? "";
+  if (!city || !sessionID || !input || !sendBtn || logSubmitting) return;
+  if (!message) {
+    input.focus();
+    return;
+  }
+
+  logSubmitting = true;
+  sendBtn.disabled = true;
+  statusEl?.replaceChildren(document.createTextNode("Sending..."));
+  const res = await api.POST("/v0/city/{cityName}/session/{id}/submit", {
+    params: { path: { cityName: city, id: sessionID }, header: mutationHeaders },
+    body: { intent: "follow_up", message },
+  });
+  logSubmitting = false;
+  sendBtn.disabled = false;
+
+  if (res.error) {
+    statusEl?.replaceChildren(document.createTextNode(""));
+    showToast("error", "Message failed", res.error.detail ?? "Could not submit message");
+    input.focus();
+    return;
+  }
+
+  input.value = "";
+  appendLocalTurn("user", message);
+  statusEl?.replaceChildren(document.createTextNode("Queued"));
+  showToast("success", "Message queued", res.data?.request_id ?? sessionID);
+  input.focus();
+}
+
+function appendLocalTurn(role: string, text: string): void {
+  const messagesEl = byId("log-drawer-messages");
+  if (!messagesEl) return;
+  messagesEl.append(renderTurn(role, text, new Date().toISOString()));
+  logCount += 1;
+  byId("log-drawer-count")!.textContent = String(logCount);
+  const body = byId("log-drawer-body");
+  if (body) body.scrollTop = body.scrollHeight;
+}
+
+function resetLogComposer(): void {
+  const input = byId<HTMLTextAreaElement>("log-drawer-input");
+  const sendBtn = byId<HTMLButtonElement>("log-drawer-send-btn");
+  if (input) input.value = "";
+  if (sendBtn) sendBtn.disabled = false;
+  byId("log-drawer-status")?.replaceChildren(document.createTextNode(""));
 }
 
 function renderTurn(role: string, text: string, timestamp: string | undefined): HTMLElement {

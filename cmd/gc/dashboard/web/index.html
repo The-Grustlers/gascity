@@ -152,7 +152,7 @@
 
         <div class="panel panel-full" id="agent-log-drawer" style="display: none;">
           <div class="panel-header">
-            <h2>📋 <span id="log-drawer-agent-name">—</span> — Logs</h2>
+            <h2>📋 <span id="log-drawer-agent-name">—</span> — Chat</h2>
             <span class="count" id="log-drawer-count">0</span>
             <span class="log-drawer-status" id="log-drawer-status"></span>
             <button class="log-drawer-btn" id="log-drawer-older-btn" style="display: none;">Load older</button>
@@ -163,6 +163,11 @@
               <div class="loading-state" id="log-drawer-loading">Loading logs...</div>
             </div>
           </div>
+          <form class="log-drawer-composer" id="log-drawer-composer">
+            <label class="sr-only" for="log-drawer-input">Message</label>
+            <textarea id="log-drawer-input" class="log-drawer-input" rows="3" placeholder="Message this session..." autocomplete="off"></textarea>
+            <button class="log-drawer-send-btn" id="log-drawer-send-btn" type="submit">Send</button>
+          </form>
         </div>
 
         <div class="panel" id="rigged-panel">
