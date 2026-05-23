@@ -32,6 +32,11 @@ export interface ActivityEntry {
 type DashboardHistoryRecord = CityEventRecord | SupervisorEventRecord;
 type DashboardEventRecord = DashboardHistoryRecord | CityEventStreamEnvelope | SupervisorEventStreamEnvelope;
 
+interface RoutineActivityStats {
+  eventCount: number;
+  runCount: number;
+}
+
 const MAX_ENTRIES = 150;
 const entries: ActivityEntry[] = [];
 let handle: SSEHandle | null = null;
@@ -120,9 +125,10 @@ export function stopActivityStream(): void {
 
 export function renderActivity(): void {
   const routineEntries = routineActivityEntries();
+  const routineStats = routineActivityStats(routineEntries);
   const foregroundEntries = entries.filter((entry) => !isRoutineControllerActivity(entry));
   const sourceEntries = categoryFilter === "routine" ? routineEntries : foregroundEntries;
-  renderFilters(foregroundEntries, routineEntries);
+  renderFilters(foregroundEntries, routineEntries, routineStats);
   const feed = byId("activity-feed");
   if (!feed) return;
   clear(feed);
@@ -133,13 +139,14 @@ export function renderActivity(): void {
     if (agentFilter !== "all" && entry.actor !== agentFilter) return false;
     return true;
   });
-  byId("activity-count")!.textContent = activityCountText(foregroundEntries, routineEntries, sourceEntries);
+  byId("activity-count")!.textContent = activityCountText(foregroundEntries, routineEntries, sourceEntries, routineStats);
 
   if (filtered.length === 0) {
     if (categoryFilter !== "routine" && foregroundEntries.length === 0 && routineEntries.length > 0) {
       feed.append(el("div", { class: "empty-state" }, [
         el("p", {}, ["No foreground activity"]),
-        filterButton("routine", `Show routine (${routineEntries.length})`),
+        el("p", {}, [`${routineSummaryText(routineStats)}; ${routineEventText(routineStats)} in feed`]),
+        filterButton("routine", `Show routine (${routineSummaryText(routineStats)})`),
       ]));
       return;
     }
@@ -198,7 +205,11 @@ export function installActivityInteractions(): void {
   });
 }
 
-function renderFilters(foregroundEntries: ActivityEntry[], routineEntries: ActivityEntry[]): void {
+function renderFilters(
+  foregroundEntries: ActivityEntry[],
+  routineEntries: ActivityEntry[],
+  routineStats: RoutineActivityStats,
+): void {
   const container = byId("activity-filters");
   if (!container) return;
   clear(container);
@@ -231,7 +242,7 @@ function renderFilters(foregroundEntries: ActivityEntry[], routineEntries: Activ
       filterButton("work", "Work"),
       filterButton("comms", "Comms"),
       filterButton("system", "System"),
-      filterButton("routine", `Routine (${routineEntries.length})`),
+      filterButton("routine", `Routine (${routineSummaryText(routineStats)})`),
     ]),
     el("div", { class: "tl-filter-group" }, [el("label", { for: "tl-rig-filter" }, ["Rig:"]), rigSelect]),
     el("div", { class: "tl-filter-group" }, [el("label", { for: "tl-agent-filter" }, ["Agent:"]), agentSelect]),
@@ -242,12 +253,21 @@ function activityCountText(
   foregroundEntries: ActivityEntry[],
   routineEntries: ActivityEntry[],
   sourceEntries: ActivityEntry[],
+  routineStats: RoutineActivityStats,
 ): string {
-  if (categoryFilter === "routine") return String(routineEntries.length);
+  if (categoryFilter === "routine") return `${routineSummaryText(routineStats)} / ${routineEventText(routineStats)}`;
   if (foregroundEntries.length === 0 && routineEntries.length > 0) {
-    return `0 + ${routineEntries.length} routine`;
+    return `0 foreground / ${routineSummaryText(routineStats)}`;
   }
   return String(sourceEntries.length);
+}
+
+function routineSummaryText(stats: RoutineActivityStats): string {
+  return `${stats.runCount} ${stats.runCount === 1 ? "run" : "runs"}`;
+}
+
+function routineEventText(stats: RoutineActivityStats): string {
+  return `${stats.eventCount} lifecycle ${stats.eventCount === 1 ? "event" : "events"}`;
 }
 
 function filterButton(value: string, label: string): HTMLElement {
@@ -311,6 +331,28 @@ function normalizeEntries(nextEntries: ActivityEntry[]): ActivityEntry[] {
 
 function routineActivityEntries(): ActivityEntry[] {
   return entries.filter((entry) => isRoutineControllerActivity(entry));
+}
+
+function routineActivityStats(routineEntries: ActivityEntry[]): RoutineActivityStats {
+  const wispRuns = new Set<string>();
+  let firedCount = 0;
+  let completedCount = 0;
+  routineEntries.forEach((entry) => {
+    const subject = entry.subject ?? "";
+    if (subject.startsWith("gr-wisp-")) {
+      wispRuns.add(subject);
+    }
+    if (entry.type === "order.fired") {
+      firedCount += 1;
+    }
+    if (entry.type === "order.completed") {
+      completedCount += 1;
+    }
+  });
+  return {
+    eventCount: routineEntries.length,
+    runCount: Math.max(wispRuns.size, firedCount, completedCount),
+  };
 }
 
 function isRoutineControllerActivity(entry: ActivityEntry): boolean {

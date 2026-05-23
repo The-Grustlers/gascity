@@ -78,6 +78,7 @@ describe("activity feed ordering", () => {
       actor: "controller",
       category: "work",
       id: "mc-city:15",
+      message: "order:gate-sweep",
       rig: "city",
       scope: "mc-city",
       seq: 15,
@@ -110,7 +111,7 @@ describe("activity feed ordering", () => {
     const types = [...document.querySelectorAll<HTMLElement>(".tl-entry")].map((node) => node.dataset.type);
     expect(types).toEqual(["order.failed", "bead.created"]);
     expect(document.getElementById("activity-count")?.textContent).toBe("2");
-    expect(document.getElementById("activity-filters")?.textContent).toContain("Routine (2)");
+    expect(document.getElementById("activity-filters")?.textContent).toContain("Routine (1 run)");
     expect(document.getElementById("activity-feed")?.textContent).toContain("dolt-remotes-patrol");
     expect(document.getElementById("activity-feed")?.textContent).not.toContain("gr-wisp-ab123");
 
@@ -118,7 +119,7 @@ describe("activity feed ordering", () => {
 
     const routineTypes = [...document.querySelectorAll<HTMLElement>(".tl-entry")].map((node) => node.dataset.type);
     expect(routineTypes).toEqual(["order.completed", "bead.created"]);
-    expect(document.getElementById("activity-count")?.textContent).toBe("2");
+    expect(document.getElementById("activity-count")?.textContent).toBe("1 run / 2 lifecycle events");
     expect(document.getElementById("activity-feed")?.textContent).toContain("gate-sweep");
     expect(document.getElementById("activity-feed")?.textContent).toContain("gr-wisp-ab123");
   });
@@ -138,6 +139,7 @@ describe("activity feed ordering", () => {
       actor: "controller",
       category: "work",
       id: "mc-city:21",
+      message: "order:dolt-health",
       rig: "city",
       scope: "mc-city",
       seq: 21,
@@ -147,16 +149,17 @@ describe("activity feed ordering", () => {
     }]);
     renderActivity();
 
-    expect(document.getElementById("activity-count")?.textContent).toBe("0 + 2 routine");
-    expect(document.getElementById("activity-filters")?.textContent).toContain("Routine (2)");
+    expect(document.getElementById("activity-count")?.textContent).toBe("0 foreground / 1 run");
+    expect(document.getElementById("activity-filters")?.textContent).toContain("Routine (1 run)");
     expect(document.getElementById("activity-feed")?.textContent).toContain("No foreground activity");
-    expect(document.getElementById("activity-feed")?.textContent).toContain("Show routine (2)");
+    expect(document.getElementById("activity-feed")?.textContent).toContain("1 run; 2 lifecycle events in feed");
+    expect(document.getElementById("activity-feed")?.textContent).toContain("Show routine (1 run)");
 
     document.querySelector<HTMLButtonElement>('#activity-feed .tl-filter-btn[data-value="routine"]')?.click();
 
     const routineTypes = [...document.querySelectorAll<HTMLElement>(".tl-entry")].map((node) => node.dataset.type);
     expect(routineTypes).toEqual(["order.completed", "bead.closed"]);
-    expect(document.getElementById("activity-count")?.textContent).toBe("2");
+    expect(document.getElementById("activity-count")?.textContent).toBe("1 run / 2 lifecycle events");
     expect(document.getElementById("activity-feed")?.textContent).toContain("dolt-health");
     expect(document.getElementById("activity-feed")?.textContent).toContain("gr-wisp-health");
   });
