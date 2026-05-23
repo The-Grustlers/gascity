@@ -43,11 +43,12 @@ export async function renderCrew(): Promise<void> {
   }
 
   const sessions = data.items;
-  // The Crew table is for persistent named workers — sessions whose backing
-  // agent is classified server-side as "crew". Other agent kinds (pool,
-  // role) belong on the Rigged/Pooled panels (or stay invisible until a
-  // dedicated panel exists), so filter them out here.
-  const crew = sessions.filter((session) => session.agent_kind === "crew");
+  // The Crew table is the city-visible roster. Include persistent crew plus
+  // city role sessions such as mayor/director so the panel count lines up
+  // with the header's active-agent count instead of hiding role agents.
+  const crew = sessions.filter(
+    (session) => session.agent_kind === "crew" || session.agent_kind === "role",
+  );
   const pending = await Promise.all(
     crew.map(async (session) => {
       const res = await api.GET("/v0/city/{cityName}/session/{id}/pending", {

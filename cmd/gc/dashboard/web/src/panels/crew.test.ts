@@ -46,7 +46,7 @@ describe("crew empty states", () => {
     expect(document.getElementById("crew-empty")?.textContent).not.toContain("Select a city");
   });
 
-  it("hides agent role sessions from the crew table while keeping crew rows", async () => {
+  it("shows city role sessions alongside crew rows", async () => {
     vi.spyOn(api, "GET").mockImplementation(async (path: string) => {
       if (path === "/v0/city/{cityName}/sessions") {
         return {
@@ -64,7 +64,8 @@ describe("crew empty states", () => {
                 running: true,
                 template: "rig-a/crew/fontaine",
               },
-              // Role agents — should NOT appear in the crew table.
+              // Role agents — should appear so the roster count matches the
+              // active-agent summary.
               {
                 active_bead: "",
                 agent_kind: "role",
@@ -114,15 +115,17 @@ describe("crew empty states", () => {
     await renderCrew();
 
     const crewRows = document.querySelectorAll("#crew-tbody tr");
-    expect(crewRows.length).toBe(1);
+    expect(crewRows.length).toBe(3);
     expect(crewRows[0]?.textContent).toContain("rig-a/crew/fontaine");
-    expect(document.getElementById("crew-count")?.textContent).toBe("1");
+    expect(crewRows[1]?.textContent).toContain("rig-a/singleton");
+    expect(crewRows[2]?.textContent).toContain("rig-a/another-singleton");
+    expect(document.getElementById("crew-count")?.textContent).toBe("3");
     expect((document.getElementById("crew-table") as HTMLElement).style.display).toBe("table");
     // Pool agent should still flow through to the rigged panel.
     expect(document.getElementById("rigged-count")?.textContent).toBe("1");
   });
 
-  it("falls back to the empty state when only role/pool sessions exist", async () => {
+  it("shows role-only sessions instead of the empty crew state", async () => {
     vi.spyOn(api, "GET").mockImplementation(async (path: string) => {
       if (path === "/v0/city/{cityName}/sessions") {
         return {
@@ -164,10 +167,10 @@ describe("crew empty states", () => {
 
     await renderCrew();
 
-    expect(document.querySelectorAll("#crew-tbody tr").length).toBe(0);
-    expect((document.getElementById("crew-empty") as HTMLElement).style.display).toBe("block");
-    expect(document.getElementById("crew-empty")?.textContent).toContain("No crew configured");
-    expect(document.getElementById("crew-count")?.textContent).toBe("0");
+    expect(document.querySelectorAll("#crew-tbody tr").length).toBe(2);
+    expect((document.getElementById("crew-empty") as HTMLElement).style.display).toBe("none");
+    expect((document.getElementById("crew-table") as HTMLElement).style.display).toBe("table");
+    expect(document.getElementById("crew-count")?.textContent).toBe("2");
   });
 
   it("loads older transcript pages without losing the drawer loading sentinel", async () => {
