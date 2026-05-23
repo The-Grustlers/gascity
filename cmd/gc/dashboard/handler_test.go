@@ -48,8 +48,8 @@ func TestInjectSupervisorURL(t *testing.T) {
 	}
 }
 
-// TestStaticHandlerServesIndex confirms the handler injects the URL
-// into the served index and that dashboard.js is reachable.
+// TestStaticHandlerServesIndex confirms the handler serves a same-origin
+// dashboard shell and that dashboard.js is reachable.
 func TestStaticHandlerServesIndex(t *testing.T) {
 	h, err := NewStaticHandler("http://127.0.0.1:8372")
 	if err != nil {
@@ -63,8 +63,8 @@ func TestStaticHandlerServesIndex(t *testing.T) {
 		t.Fatalf("GET /: %d %s", rec.Code, rec.Body.String())
 	}
 	body := rec.Body.String()
-	if !strings.Contains(body, `<meta name="supervisor-url" content="http://127.0.0.1:8372">`) {
-		t.Errorf("index missing injected supervisor-url meta; body:\n%s", body)
+	if !strings.Contains(body, `<meta name="supervisor-url" content="">`) {
+		t.Errorf("index should keep same-origin supervisor-url meta; body:\n%s", body)
 	}
 
 	// Bundle.
@@ -87,6 +87,33 @@ func TestStaticHandlerServesIndex(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `<meta name="supervisor-url"`) {
 		t.Errorf("fallback did not serve SPA index")
+	}
+}
+
+func TestStaticHandlerProxiesSupervisorAPI(t *testing.T) {
+	supervisor := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Upstream-Path", r.URL.RequestURI())
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(supervisor.Close)
+
+	h, err := NewStaticHandler(supervisor.URL)
+	if err != nil {
+		t.Fatalf("NewStaticHandler: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v0/cities?limit=1", nil))
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("GET /v0/cities: %d %s", rec.Code, rec.Body.String())
+	}
+	if got := rec.Header().Get("X-Upstream-Path"); got != "/v0/cities?limit=1" {
+		t.Fatalf("proxied path = %q, want /v0/cities?limit=1", got)
+	}
+	if !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("proxied body = %q", rec.Body.String())
 	}
 }
 

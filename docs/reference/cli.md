@@ -1125,7 +1125,7 @@ gc doctor [flags]
 **Example:**
 
 ```
-  gc doctor
+gc doctor
   gc doctor --fix
   gc doctor --verbose
   gc doctor --check route-store-scope --fix

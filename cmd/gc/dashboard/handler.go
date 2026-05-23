@@ -10,6 +10,8 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -26,10 +28,10 @@ var spaBundle embed.FS
 
 const maxClientLogBody = 64 << 10
 
-// reservedNonSPAPrefixes are URL prefixes the dashboard server never serves.
-// Requests matching one of these get a 404 instead of the SPA index.html
-// so stale callers break visibly rather than silently.
-var reservedNonSPAPrefixes = []string{
+// proxiedAPIPrefixes are supervisor API prefixes served through the dashboard
+// origin. This keeps browser clients on same-origin HTTPS even when the
+// supervisor itself is bound to localhost or a private Tailscale address.
+var proxiedAPIPrefixes = []string{
 	"/api/",
 	"/v0/",
 	"/debug/",
@@ -46,12 +48,17 @@ type clientLogEntry struct {
 	URL     string          `json:"url"`
 }
 
-// NewStaticHandler returns a handler that serves the SPA bundle.
-// `supervisorURL` is injected into index.html so the SPA knows where
-// to reach the supervisor (cross-origin: the dashboard server binds
-// its own port, the supervisor binds another, the browser talks to
-// both).
+// NewStaticHandler returns a handler that serves the SPA bundle and proxies
+// supervisor API calls through the same origin.
 func NewStaticHandler(supervisorURL string) (http.Handler, error) {
+	supervisorTarget, err := url.Parse(supervisorURL)
+	if err != nil {
+		return nil, fmt.Errorf("dashboard: parse supervisor URL: %w", err)
+	}
+	if supervisorTarget.Scheme == "" || supervisorTarget.Host == "" {
+		return nil, fmt.Errorf("dashboard: supervisor URL must include scheme and host")
+	}
+
 	sub, err := fs.Sub(spaBundle, "web/dist")
 	if err != nil {
 		return nil, fmt.Errorf("dashboard: embed sub fs: %w", err)
@@ -60,22 +67,23 @@ func NewStaticHandler(supervisorURL string) (http.Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dashboard: read embedded index.html: %w", err)
 	}
-	indexWithURL := injectSupervisorURL(indexBytes, supervisorURL)
+	indexWithURL := injectSupervisorURL(indexBytes, "")
 
 	fileServer := http.FileServer(http.FS(sub))
+	apiProxy := httputil.NewSingleHostReverseProxy(supervisorTarget)
+	apiProxy.FlushInterval = 100 * time.Millisecond
+	apiProxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		log.Printf("dashboard: proxy %s %s failed: %v", r.Method, r.URL.Path, err)
+		http.Error(w, "supervisor proxy failed", http.StatusBadGateway)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/__client-log", handleClientLog)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		path := strings.TrimPrefix(r.URL.Path, "/")
-		// Reserved non-SPA prefixes: return 404 instead of handing out
-		// index.html. The dashboard server proxies nothing — these
-		// prefixes would only be hit by stale scripts or probes from
-		// the pre-migration era. Silently serving index.html to them
-		// makes old callers look healthy while they're actually broken.
-		for _, p := range reservedNonSPAPrefixes {
+		for _, p := range proxiedAPIPrefixes {
 			if strings.HasPrefix(r.URL.Path, p) {
-				http.NotFound(w, r)
+				apiProxy.ServeHTTP(w, r)
 				return
 			}
 		}
