@@ -600,17 +600,19 @@ function isTerminalTranscript(role: string, text: string): boolean {
 
 function parseCodexTerminalTranscript(text: string, timestamp: string | undefined): DisplayTurn[] {
   const turns: DisplayTurn[] = [];
-  let current: { role: string; lines: string[] } | null = null;
+  let current: { dropIfTerminalPrompt: boolean; role: string; lines: string[] } | null = null;
 
-  const flush = () => {
+  const flush = (atEnd = false) => {
     if (!current) return;
     const body = trimBlankLines(current.lines).join("\n").trimEnd();
-    if (body !== "") turns.push({ role: current.role, text: body, timestamp });
+    if (body !== "" && !(atEnd && current.dropIfTerminalPrompt)) {
+      turns.push({ role: current.role, text: body, timestamp });
+    }
     current = null;
   };
   const startTurn = (role: string, firstLine: string) => {
     flush();
-    current = { role, lines: [firstLine] };
+    current = { dropIfTerminalPrompt: false, role, lines: [firstLine] };
   };
 
   for (const rawLine of text.replace(/\r\n/g, "\n").split("\n")) {
@@ -628,14 +630,15 @@ function parseCodexTerminalTranscript(text: string, timestamp: string | undefine
       continue;
     }
     if (isCodexStatusLine(line)) {
+      if (current?.role === "user") current.dropIfTerminalPrompt = true;
       continue;
     }
     if (!current) {
-      current = { role: "system", lines: [] };
+      current = { dropIfTerminalPrompt: false, role: "system", lines: [] };
     }
     current.lines.push(line.startsWith("  ") ? line.slice(2) : line);
   }
-  flush();
+  flush(true);
   return turns;
 }
 

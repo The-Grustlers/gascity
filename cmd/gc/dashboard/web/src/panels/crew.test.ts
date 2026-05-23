@@ -350,15 +350,15 @@ describe("crew empty states", () => {
     await renderCrew();
     document.querySelector<HTMLButtonElement>(".agent-log-link")?.click();
     await waitFor(() => {
-      expect(document.querySelectorAll(".log-msg-user").length).toBe(2);
+      expect(document.querySelectorAll(".log-msg-user").length).toBe(1);
     });
 
     expect(document.querySelector(".log-msg-result")).toBeNull();
     expect(document.querySelectorAll(".log-msg-system").length).toBeGreaterThanOrEqual(1);
     expect(document.querySelectorAll(".log-msg-assistant").length).toBe(2);
     expect(document.querySelectorAll(".log-msg-user")[0]?.textContent).toContain("hi!");
-    expect(document.querySelectorAll(".log-msg-user")[1]?.textContent).toContain("Explain this codebase");
-    expect(document.querySelectorAll(".log-msg-user")[1]?.textContent).not.toContain("gpt-5.5 high");
+    expect(document.getElementById("log-drawer-messages")?.textContent).not.toContain("Explain this codebase");
+    expect(document.getElementById("log-drawer-messages")?.textContent).not.toContain("gpt-5.5 high");
     expect(document.querySelectorAll(".log-msg-assistant")[1]?.textContent).toContain("Hi. Idle until explicit request.");
   });
 
