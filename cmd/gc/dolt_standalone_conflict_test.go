@@ -320,6 +320,9 @@ func TestStartBeadsLifecycleRefusesLiveStandaloneBdDolt(t *testing.T) {
 func TestStartBeadsLifecycleIgnoresStaleStandaloneBdPID(t *testing.T) {
 	cityPath := t.TempDir()
 	writeManagedBdCityFixture(t, cityPath)
+	t.Cleanup(func() {
+		_ = shutdownBeadsProvider(cityPath)
+	})
 	// Almost-certainly-dead PID — 2147483646 (INT_MAX-1) is the largest
 	// non-special pid on a 32-bit pid_t, far outside the typical pid
 	// space on any real host.

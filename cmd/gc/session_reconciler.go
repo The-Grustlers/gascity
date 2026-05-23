@@ -1018,6 +1018,24 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 					continue
 				}
 			}
+			orphanPeek := cachedSessionPeek(cityPath, store, sp, cfg, session.ID, nil)
+			orphanRateLimitHit, orphanRateLimitErr := checkRateLimitStability(session, cfg, providerAlive, dt, store, clk, orphanPeek)
+			if orphanRateLimitHit || orphanRateLimitErr != nil {
+				if trace != nil {
+					template := normalizedSessionTemplate(*session, cfg)
+					if template == "" {
+						template = session.Metadata["template"]
+					}
+					result := "held"
+					if orphanRateLimitErr != nil {
+						result = "hold_deferred"
+					}
+					trace.recordDecision("reconciler.session.orphan_or_suspended", template, name, "rate_limit", result, traceRecordPayload{
+						"provider_alive": providerAlive,
+					}, nil, "")
+				}
+				continue
+			}
 			preserveNamed := preserveConfiguredNamedSessionBead(*session, cfg, cityName)
 			var (
 				preservedTP  TemplateParams
@@ -2244,6 +2262,12 @@ func cachedSessionPeek(cityPath string, store beads.Store, sp runtime.Provider, 
 		}
 		nextContent, nextErr := workerSessionTargetPeekWithConfig(cityPath, store, sp, cfg, target, lines, processNames)
 		if nextErr != nil {
+			if fallbackContent, fallbackErr := peekSessionRuntimeNameFallback(store, sp, target, lines); fallbackErr == nil {
+				content = fallbackContent
+				cachedLines = lines
+				cached = true
+				return content, nil
+			}
 			return nextContent, nextErr
 		}
 		// Cache only successful peeks; transient capture errors must not
@@ -2253,6 +2277,28 @@ func cachedSessionPeek(cityPath string, store beads.Store, sp runtime.Provider, 
 		cached = true
 		return content, nil
 	}
+}
+
+func peekSessionRuntimeNameFallback(store beads.Store, sp runtime.Provider, target string, lines int) (string, error) {
+	if store == nil || sp == nil {
+		return "", sessionpkg.ErrSessionNotFound
+	}
+	bead, _, err := sessionpkg.ResolveSessionBeadByExactID(store, target)
+	if err != nil {
+		id, idErr := sessionpkg.ResolveSessionID(store, target)
+		if idErr != nil {
+			return "", err
+		}
+		bead, _, err = sessionpkg.ResolveSessionBeadByExactID(store, id)
+		if err != nil {
+			return "", err
+		}
+	}
+	sessionName := strings.TrimSpace(bead.Metadata["session_name"])
+	if sessionName == "" {
+		return "", sessionpkg.ErrSessionNotFound
+	}
+	return sp.Peek(sessionName, lines)
 }
 
 func rateLimitAliveFromObservation(alive bool, err error) bool {

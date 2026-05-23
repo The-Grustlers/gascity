@@ -243,6 +243,7 @@ func poolInFlightNewRequests(cfg *config.City, sessionBeads []beads.Bead, resume
 			continue
 		}
 		template := agent.QualifiedName()
+		canonicalSingletonAvailable := reusableCanonicalInFlightSingleton(cfg, agent, template, sortedSessionBeads)
 		for _, sb := range sortedSessionBeads {
 			if sb.ID == "" || sb.Status == "closed" {
 				continue
@@ -259,6 +260,9 @@ func poolInFlightNewRequests(cfg *config.City, sessionBeads []beads.Bead, resume
 			if !poolSessionConsumesNewDemand(sb) {
 				continue
 			}
+			if canonicalSingletonAvailable && staleNonExpandingPoolSessionBead(agent, sb) {
+				continue
+			}
 			requests[template] = append(requests[template], SessionRequest{
 				Template:      template,
 				Tier:          "new",
@@ -267,6 +271,34 @@ func poolInFlightNewRequests(cfg *config.City, sessionBeads []beads.Bead, resume
 		}
 	}
 	return requests
+}
+
+func reusableCanonicalInFlightSingleton(cfg *config.City, agent *config.Agent, template string, sessionBeads []beads.Bead) bool {
+	if agent == nil || !agent.UsesCanonicalSingletonPoolIdentity() {
+		return false
+	}
+	canonical := agent.QualifiedName()
+	for _, sb := range sessionBeads {
+		if sb.ID == "" || sb.Status == "closed" {
+			continue
+		}
+		if !isEphemeralSessionBeadForAgent(sb, agent) || !isPoolManagedSessionBead(sb) {
+			continue
+		}
+		if normalizedSessionTemplate(sb, cfg) != template {
+			continue
+		}
+		if !poolSessionConsumesNewDemand(sb) {
+			continue
+		}
+		if staleNonExpandingPoolSessionBead(agent, sb) {
+			continue
+		}
+		if beadIdentifiesAsCanonical(sb, canonical) {
+			return true
+		}
+	}
+	return false
 }
 
 func poolSessionConsumesNewDemand(session beads.Bead) bool {

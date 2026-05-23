@@ -504,7 +504,8 @@ func healExpiredTimers(session *beads.Bead, store beads.Store, clk clock.Clock) 
 }
 
 // checkStability detects dead sessions that still have last_woke_at. Provider
-// rate-limit screens are retried until the hold metadata persists; ordinary
+// rate-limit screens are held as soon as the pane proves the provider stopped
+// on quota, even while a pending-create start window is still open; ordinary
 // crash wake failures are counted only inside stabilityThreshold.
 //
 // Production callers must run checkRateLimitStability before healState and
@@ -559,13 +560,6 @@ func rateLimitStabilityCandidate(session *beads.Bead, cfg *config.City, alive bo
 	}
 	lastWoke := session.Metadata["last_woke_at"]
 	if lastWoke == "" {
-		return false
-	}
-	var startupTimeout time.Duration
-	if cfg != nil {
-		startupTimeout = cfg.Session.StartupTimeoutDuration()
-	}
-	if pendingCreateStartInFlight(*session, clk, startupTimeout) {
 		return false
 	}
 	if _, err := time.Parse(time.RFC3339, lastWoke); err != nil {

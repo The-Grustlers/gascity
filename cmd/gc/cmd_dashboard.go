@@ -69,6 +69,14 @@ func bindDashboardServeFlags(cmd *cobra.Command, port *int, apiURL *string) {
 }
 
 func runDashboardServe(commandName string, port int, apiURLOverride string, stderr io.Writer) error {
+	if override := strings.TrimSpace(apiURLOverride); override != "" {
+		if err := dashboardServeHook(port, strings.TrimRight(override, "/")); err != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", commandName, err) //nolint:errcheck // best-effort stderr
+			return err
+		}
+		return nil
+	}
+
 	cityPath, cfg, err := resolveDashboardContext(stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", commandName, err) //nolint:errcheck // best-effort stderr

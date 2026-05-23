@@ -3854,19 +3854,19 @@ func TestSweepOrphanedOrderTracking_RetryOnPartialClose(t *testing.T) {
 	}
 }
 
-// countFailStore wraps a Store and fails the first N List calls.
+// countFailStore wraps a Store and fails the first N order-tracking label-list calls.
 type countFailStore struct {
 	beads.Store
 	failCount int
 	calls     int
 }
 
-func (f *countFailStore) List(query beads.ListQuery) ([]beads.Bead, error) {
+func (f *countFailStore) ListByLabel(label string, limit int, opts ...beads.QueryOpt) ([]beads.Bead, error) {
 	f.calls++
 	if f.calls <= f.failCount {
 		return nil, fmt.Errorf("connection refused")
 	}
-	return f.Store.List(query)
+	return f.Store.ListByLabel(label, limit, opts...)
 }
 
 // closeFailStore wraps a Store and always fails CloseAll with a
@@ -3877,9 +3877,9 @@ type closeFailStore struct {
 	closeN    int // number of beads "closed" before error
 }
 
-func (f *closeFailStore) List(query beads.ListQuery) ([]beads.Bead, error) {
+func (f *closeFailStore) ListByLabel(label string, limit int, opts ...beads.QueryOpt) ([]beads.Bead, error) {
 	f.listCalls++
-	return f.Store.List(query)
+	return f.Store.ListByLabel(label, limit, opts...)
 }
 
 func (f *closeFailStore) CloseAll(_ []string, _ map[string]string) (int, error) {

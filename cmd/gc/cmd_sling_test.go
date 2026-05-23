@@ -541,6 +541,7 @@ func TestDoSlingEnvPassthrough(t *testing.T) {
 		}
 
 		deps, stdout, stderr := testDeps(cfg, sp, runner.run)
+		deps.StoreRef = "rig:hello-world"
 		opts := testOpts(a, "HW-7")
 		code := doSling(opts, deps, nil, stdout, stderr)
 
@@ -976,6 +977,7 @@ func TestBuiltInSlingPoolRouteContractUsesMetadataOnly(t *testing.T) {
 	deps, stdout, stderr := testDeps(cfg, sp, runner.run)
 	store := newSlingTestStore()
 	deps.Store = store
+	deps.StoreRef = "rig:saitoc"
 
 	created, err := store.Create(beads.Bead{Title: "route contract work", Type: "task"})
 	if err != nil {
@@ -1112,6 +1114,7 @@ func TestDoSlingCustomSlingQueryExpandsTemplateContext(t *testing.T) {
 	deps, stdout, stderr := testDeps(cfg, sp, runner.run)
 	deps.CityPath = cityPath
 	deps.CityName = ""
+	deps.StoreRef = "rig:frontend"
 	opts := testOpts(a, "FR-99")
 	code := doSling(opts, deps, nil, stdout, stderr)
 

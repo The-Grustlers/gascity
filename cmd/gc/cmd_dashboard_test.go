@@ -84,6 +84,43 @@ func TestRunDashboardServeAllowsNoCityWithAPIOverride(t *testing.T) {
 	}
 }
 
+func TestRunDashboardServeAPIOverrideDoesNotRequireValidCityConfig(t *testing.T) {
+	configureIsolatedRuntimeEnv(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "city.toml"), []byte("include = [\"missing.toml\"]\n"), 0o644); err != nil {
+		t.Fatalf("write city.toml: %v", err)
+	}
+	t.Chdir(dir)
+
+	oldAlive := supervisorAliveHook
+	oldServe := dashboardServeHook
+	oldCityFlag := cityFlag
+	oldRigFlag := rigFlag
+	t.Cleanup(func() {
+		supervisorAliveHook = oldAlive
+		dashboardServeHook = oldServe
+		cityFlag = oldCityFlag
+		rigFlag = oldRigFlag
+	})
+
+	supervisorAliveHook = func() int { return 0 }
+	cityFlag = ""
+	rigFlag = ""
+
+	var gotURL string
+	dashboardServeHook = func(_ int, apiURL string) error {
+		gotURL = apiURL
+		return nil
+	}
+
+	if err := runDashboardServe("gc dashboard", 9090, "http://127.0.0.1:8372/", io.Discard); err != nil {
+		t.Fatalf("runDashboardServe() error: %v", err)
+	}
+	if gotURL != "http://127.0.0.1:8372" {
+		t.Fatalf("dashboard api URL = %q, want trimmed override", gotURL)
+	}
+}
+
 // TestRunDashboardServeUsesStandaloneControllerAPI pins the post-fixup
 // behavior: the standalone controller's API now serves supervisor-shaped
 // /v0/city/{cityName}/... routes via api.NewSupervisorMux, so `gc
