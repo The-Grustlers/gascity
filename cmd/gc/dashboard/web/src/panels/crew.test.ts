@@ -575,11 +575,93 @@ describe("crew empty states", () => {
     expect(posts[0]?.body?.intent).toBe("default");
     expect(posts[0]?.body?.message).toContain("Can you check the queue?");
     expect(posts[0]?.body?.message).toContain("![screenshot.png](data:image/png;base64,");
+    expect(new TextEncoder().encode(JSON.stringify(posts[0]?.body)).length).toBeLessThan(900_000);
     expect(input.value).toBe("");
     expect(document.getElementById("log-drawer-messages")?.textContent).toContain("Can you check the queue?");
     expect(document.querySelector(".log-msg-user")?.textContent).toContain("Can you check the queue?");
     expect(document.getElementById("log-drawer-status")?.textContent).toBe("Sent");
     expect(document.getElementById("log-drawer-count")?.textContent).toBe("1");
+  });
+
+  it("blocks chat submits that would exceed the API body limit", async () => {
+    document.body.innerHTML = `
+      <div id="crew-loading">Loading crew...</div>
+      <table id="crew-table" style="display:none"><tbody id="crew-tbody"></tbody></table>
+      <div id="crew-empty" style="display:none"><p>No crew configured</p></div>
+      <div id="rigged-body"></div>
+      <div id="pooled-body"></div>
+      <span id="crew-count"></span>
+      <span id="rigged-count"></span>
+      <span id="pooled-count"></span>
+      <div id="agent-log-drawer" style="display:none">
+        <span id="log-drawer-agent-name"></span>
+        <span id="log-drawer-count"></span>
+        <span id="log-drawer-status"></span>
+        <button id="log-drawer-older-btn" style="display:none">Load older</button>
+        <button id="log-drawer-close-btn">Close</button>
+        <div id="log-drawer-body">
+          <div id="log-drawer-messages">
+            <div id="log-drawer-loading">Loading logs...</div>
+          </div>
+        </div>
+        <form id="log-drawer-composer">
+          <textarea id="log-drawer-input"></textarea>
+          <button id="log-drawer-send-btn" type="submit">Send</button>
+        </form>
+      </div>
+    `;
+    vi.spyOn(api, "GET").mockImplementation(async (path: string) => {
+      if (path === "/v0/city/{cityName}/sessions") {
+        return {
+          data: {
+            items: [{
+              active_bead: "",
+              agent_kind: "crew",
+              attached: false,
+              id: "s-mayor",
+              last_active: "2026-04-18T20:00:00Z",
+              last_output: "",
+              running: true,
+              template: "mayor",
+            }],
+          },
+        } as never;
+      }
+      if (path === "/v0/city/{cityName}/session/{id}/pending") {
+        return { data: { pending: false } } as never;
+      }
+      if (path === "/v0/city/{cityName}/session/{id}/transcript") {
+        return {
+          data: {
+            turns: [],
+            pagination: {
+              has_older_messages: false,
+              returned_message_count: 0,
+              total_compactions: 0,
+              total_message_count: 0,
+            },
+          },
+        } as never;
+      }
+      throw new Error(`unexpected GET ${path}`);
+    });
+    const post = vi.spyOn(api, "POST").mockResolvedValue({ data: { status: "accepted" } } as never);
+
+    installCrewInteractions();
+    await renderCrew();
+    document.querySelector<HTMLButtonElement>(".agent-log-link")?.click();
+    await waitFor(() => {
+      expect((document.getElementById("agent-log-drawer") as HTMLElement).style.display).toBe("block");
+    });
+
+    const input = document.getElementById("log-drawer-input") as HTMLTextAreaElement;
+    input.value = "x".repeat(950_000);
+    document.getElementById("log-drawer-composer")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(post).not.toHaveBeenCalled();
+    expect(input.value.length).toBe(950_000);
+    expect(document.getElementById("log-drawer-count")?.textContent).not.toBe("1");
   });
 });
 

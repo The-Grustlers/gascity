@@ -41,11 +41,15 @@ interface StreamTurnPayload {
 }
 
 const MAX_CHAT_ATTACHMENTS = 4;
-const MAX_INLINE_IMAGE_BYTES = 2_000_000;
+const SESSION_SUBMIT_BODY_LIMIT_BYTES = 1_048_576;
+const SESSION_SUBMIT_SAFE_BYTES = 900_000;
+const CHAT_TEXT_RESERVE_BYTES = 40_000;
+const MIN_ATTACHMENT_MESSAGE_BYTES = 120_000;
+const MAX_DIRECT_IMAGE_BYTES = 650_000;
 const MAX_SOURCE_IMAGE_BYTES = 15_000_000;
-const IMAGE_RESIZE_MAX_EDGE = 1600;
+const IMAGE_RESIZE_MAX_EDGES = [1600, 1280, 1024, 768, 512] as const;
 const IMAGE_COMPRESS_MIME_TYPE = "image/jpeg";
-const IMAGE_COMPRESS_QUALITIES = [0.88, 0.78, 0.68, 0.58] as const;
+const IMAGE_COMPRESS_QUALITIES = [0.86, 0.74, 0.62, 0.5] as const;
 let pendingAttachments: ChatAttachment[] = [];
 
 export async function renderCrew(): Promise<void> {
@@ -469,6 +473,17 @@ async function submitLogDrawerMessage(): Promise<void> {
     return;
   }
   const submitMessage = buildSubmitMessage(message, attachments);
+  const submitBytes = submitRequestBytes(submitMessage);
+  if (submitBytes > SESSION_SUBMIT_SAFE_BYTES) {
+    statusEl?.replaceChildren(document.createTextNode(""));
+    showToast(
+      "error",
+      "Message too large",
+      `Remove an image or shorten the message (${formatBytes(submitBytes)} / ${formatBytes(SESSION_SUBMIT_BODY_LIMIT_BYTES)})`,
+    );
+    input.focus();
+    return;
+  }
 
   logSubmitting = true;
   sendBtn.disabled = true;
@@ -531,7 +546,12 @@ async function addSelectedAttachments(files: FileList | File[] | null): Promise<
       continue;
     }
     try {
-      const attachment = await prepareAttachment(file);
+      const remainingBudget = remainingAttachmentBudgetBytes();
+      if (remainingBudget < MIN_ATTACHMENT_MESSAGE_BYTES) {
+        showToast("error", "Attachment limit", "Remove an image before adding another");
+        break;
+      }
+      const attachment = await prepareAttachment(file, remainingBudget);
       pendingAttachments.push(attachment);
       renderPendingAttachments();
       if (attachment.originalSize && attachment.size < attachment.originalSize) {
@@ -544,13 +564,12 @@ async function addSelectedAttachments(files: FileList | File[] | null): Promise<
   }
 }
 
-async function prepareAttachment(file: File): Promise<ChatAttachment> {
-  if (file.size <= MAX_INLINE_IMAGE_BYTES) {
-    return readAttachment(file, file.name, file.type);
+async function prepareAttachment(file: File, maxMessageBytes: number): Promise<ChatAttachment> {
+  if (file.size <= MAX_DIRECT_IMAGE_BYTES) {
+    const direct = await readAttachment(file, file.name, file.type);
+    if (attachmentMessageBytes(direct) <= maxMessageBytes) return direct;
   }
-  const attachment = await compressImageAttachment(file);
-  if (attachment.size <= MAX_INLINE_IMAGE_BYTES) return attachment;
-  throw new Error(`${file.name} is still over ${formatBytes(MAX_INLINE_IMAGE_BYTES)} after resizing`);
+  return compressImageAttachment(file, maxMessageBytes);
 }
 
 function readAttachment(blob: Blob, name: string, type: string, originalSize?: number): Promise<ChatAttachment> {
@@ -575,32 +594,25 @@ function readAttachment(blob: Blob, name: string, type: string, originalSize?: n
   });
 }
 
-async function compressImageAttachment(file: File): Promise<ChatAttachment> {
+async function compressImageAttachment(file: File, maxMessageBytes: number): Promise<ChatAttachment> {
   const image = await loadImageSource(file);
-  const scale = Math.min(1, IMAGE_RESIZE_MAX_EDGE / Math.max(image.width, image.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(image.width * scale));
-  canvas.height = Math.max(1, Math.round(image.height * scale));
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    image.close?.();
-    throw new Error(`Could not resize ${file.name}`);
-  }
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(image.source, 0, 0, canvas.width, canvas.height);
-  image.close?.();
-
-  let smallest: Blob | null = null;
-  for (const quality of IMAGE_COMPRESS_QUALITIES) {
-    const blob = await canvasToBlob(canvas, IMAGE_COMPRESS_MIME_TYPE, quality);
-    if (!smallest || blob.size < smallest.size) smallest = blob;
-    if (blob.size <= MAX_INLINE_IMAGE_BYTES) {
-      return readAttachment(blob, imageAttachmentName(file.name), IMAGE_COMPRESS_MIME_TYPE, file.size);
+  try {
+    let smallest: Blob | null = null;
+    for (const edge of IMAGE_RESIZE_MAX_EDGES) {
+      const canvas = resizedCanvas(image.source, image.width, image.height, edge);
+      for (const quality of IMAGE_COMPRESS_QUALITIES) {
+        const blob = await canvasToBlob(canvas, IMAGE_COMPRESS_MIME_TYPE, quality);
+        if (!smallest || blob.size < smallest.size) smallest = blob;
+        if (estimatedAttachmentMessageBytes(imageAttachmentName(file.name), blob, IMAGE_COMPRESS_MIME_TYPE) <= maxMessageBytes) {
+          return readAttachment(blob, imageAttachmentName(file.name), IMAGE_COMPRESS_MIME_TYPE, file.size);
+        }
+      }
     }
+    if (!smallest) throw new Error(`Could not resize ${file.name}`);
+    throw new Error(`${file.name} is still too large after resizing`);
+  } finally {
+    image.close?.();
   }
-  if (!smallest) throw new Error(`Could not resize ${file.name}`);
-  throw new Error(`${file.name} is still over ${formatBytes(MAX_INLINE_IMAGE_BYTES)} after resizing`);
 }
 
 function loadImageSource(file: File): Promise<{ close?: () => void; height: number; source: CanvasImageSource; width: number }> {
@@ -643,9 +655,46 @@ function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number):
   });
 }
 
+function resizedCanvas(source: CanvasImageSource, width: number, height: number, maxEdge: number): HTMLCanvasElement {
+  const scale = Math.min(1, maxEdge / Math.max(width, height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("image resize failed");
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
 function imageAttachmentName(name: string): string {
   const base = name.replace(/\.[^.]+$/, "").trim() || "image";
   return `${base}.jpg`;
+}
+
+function remainingAttachmentBudgetBytes(): number {
+  return Math.max(
+    0,
+    SESSION_SUBMIT_SAFE_BYTES - CHAT_TEXT_RESERVE_BYTES - submitRequestBytes(buildSubmitMessage("", pendingAttachments)),
+  );
+}
+
+function submitRequestBytes(message: string): number {
+  return utf8Bytes(JSON.stringify({ intent: "default", message }));
+}
+
+function attachmentMessageBytes(attachment: ChatAttachment): number {
+  return utf8Bytes(`\n\n${attachmentMarkdown(attachment)}`);
+}
+
+function estimatedAttachmentMessageBytes(name: string, blob: Blob, type: string): number {
+  const dataURLLength = `data:${type};base64,`.length + Math.ceil(blob.size / 3) * 4;
+  return utf8Bytes(`\n\n![${attachmentMarkdownAlt(name)}]()` + "x".repeat(dataURLLength));
+}
+
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).length;
 }
 
 function formatBytes(bytes: number): string {
@@ -679,9 +728,13 @@ function renderPendingAttachments(): void {
 function buildSubmitMessage(message: string, attachments: ChatAttachment[]): string {
   const parts = message ? [message] : [];
   attachments.forEach((attachment) => {
-    parts.push(`![${attachmentMarkdownAlt(attachment.name)}](${attachment.dataURL})`);
+    parts.push(attachmentMarkdown(attachment));
   });
   return parts.join("\n\n");
+}
+
+function attachmentMarkdown(attachment: ChatAttachment): string {
+  return `![${attachmentMarkdownAlt(attachment.name)}](${attachment.dataURL})`;
 }
 
 function attachmentMarkdownAlt(name: string): string {
