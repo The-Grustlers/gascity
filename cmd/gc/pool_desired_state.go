@@ -311,7 +311,7 @@ func poolSessionConsumesNewDemand(session beads.Bead) bool {
 	// time out. Otherwise a slow startup/claim turn can make the next reconcile
 	// create another pool member for the same ready bead.
 	switch strings.TrimSpace(session.Metadata["state"]) {
-	case "creating", "active", "awake":
+	case string(sessionpkg.StateStartPending), "creating", "active", "awake":
 		return true
 	case "asleep":
 		return strings.TrimSpace(session.Metadata["sleep_reason"]) == "idle"

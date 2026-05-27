@@ -282,8 +282,8 @@ func TestSyncSessionBeads_CreatesNonActiveBeadWithPendingCreateStartedAt(t *test
 		t.Fatalf("expected 1 bead, got %d", len(all))
 	}
 	b := all[0]
-	if got := b.Metadata["state"]; got != "creating" {
-		t.Fatalf("state = %q, want creating", got)
+	if got := b.Metadata["state"]; got != string(session.StateStartPending) {
+		t.Fatalf("state = %q, want start-pending", got)
 	}
 	if got := b.Metadata["pending_create_claim"]; got != "true" {
 		t.Fatalf("pending_create_claim = %q, want true", got)
@@ -353,15 +353,20 @@ source = "./assets/sidecar"
 `,
 		filepath.Join(cityPath, "city.toml"): `
 [workspace]
-name = "import-regression"
 provider = "claude"
 
 [[rigs]]
 name = "repo"
-path = "./repo"
 
 [rigs.imports.gs]
 source = "./assets/sidecar"
+`,
+		filepath.Join(cityPath, ".gc", "site.toml"): `
+workspace_name = "import-regression"
+
+[[rig]]
+name = "repo"
+path = "./repo"
 `,
 		filepath.Join(cityPath, "assets", "sidecar", "pack.toml"): `
 [pack]
@@ -3885,8 +3890,8 @@ func TestSyncSessionBeads_StoppedAgent(t *testing.T) {
 	if len(all) != 1 {
 		t.Fatalf("expected 1 bead, got %d", len(all))
 	}
-	if all[0].Metadata["state"] != "creating" {
-		t.Errorf("state = %q, want %q", all[0].Metadata["state"], "creating")
+	if all[0].Metadata["state"] != string(session.StateStartPending) {
+		t.Errorf("state = %q, want %q", all[0].Metadata["state"], session.StateStartPending)
 	}
 	if all[0].Metadata["pending_create_claim"] != "true" {
 		t.Errorf("pending_create_claim = %q, want true", all[0].Metadata["pending_create_claim"])
@@ -4028,8 +4033,8 @@ func TestSyncSessionBeads_ResumedAfterSuspension(t *testing.T) {
 			closedCount++
 		case "open":
 			openCount++
-			if b.Metadata["state"] != "creating" {
-				t.Errorf("resumed bead state = %q, want %q", b.Metadata["state"], "creating")
+			if b.Metadata["state"] != string(session.StateStartPending) {
+				t.Errorf("resumed bead state = %q, want %q", b.Metadata["state"], session.StateStartPending)
 			}
 			if b.Metadata["pending_create_claim"] != "true" {
 				t.Errorf("resumed bead pending_create_claim = %q, want true", b.Metadata["pending_create_claim"])

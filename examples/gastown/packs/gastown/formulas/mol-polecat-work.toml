@@ -253,9 +253,16 @@ git status                  # Must be clean
 git log origin/{{base_branch}}..HEAD --oneline  # Must show your commits
 ```
 
-If uncommitted changes exist:
+If uncommitted changes exist, commit them with a body explaining what
+slipped through the `implement` step (typically a self-review touch-up,
+test addition, or formatter run):
 ```bash
-git add -A && git commit -m "<type>: <description> ({{issue}})"
+git add -A
+git commit -m "<type>: <imperative subject> ({{issue}})" -m "$(cat <<'BODY'
+<Explain what these residual changes are: a self-review fix,
+test-only addition, formatter run, etc. Be specific.>
+BODY
+)"
 ```
 
 NEVER discard implementation changes with `git checkout -- .`
@@ -276,13 +283,33 @@ git status --porcelain
 ```
 If ANY output (untracked files, uncommitted changes):
 ```bash
-git add -A && git commit -m "chore: capture remaining work ({{issue}})"
+git add -A
+git commit -m "chore: capture remaining work ({{issue}})" -m "$(cat <<'BODY'
+<Explain the remaining changes discovered by final clean-state
+verification and why they are safe to hand off.>
+BODY
+)"
 ```
 This is a belt-and-suspenders check — self-review should have caught this,
 but we never push with untracked work left behind.
 
 **2. Push your branch:**
 ```bash
+AUTO_PUSH=$(gc bd show {{issue}} --json | jq -r '.[0].metadata | if has("auto_push") then (.auto_push | tostring) else "" end')
+if [ "$AUTO_PUSH" = "false" ]; then
+  echo "auto_push=false: halting at branch-ready (no push, no refinery handoff)"
+  BRANCH=$(git branch --show-current)
+  gc bd update {{issue}} \
+    --status=open --assignee="" \
+    --set-metadata branch="$BRANCH" \
+    --set-metadata target={{base_branch}} \
+    --set-metadata branch_ready=true \
+    --set-metadata halt_reason=auto_push_false \
+    --set-metadata gc.routed_to="" \
+    --notes "Branch ready: auto_push=false (no push, no refinery handoff)"
+  gc runtime drain-ack
+  exit 0
+fi
 git push origin HEAD
 ```
 
@@ -308,7 +335,7 @@ the PR is open and matches the branch, base, and origin repository.
 **5. Reassign to refinery:**
 ```bash
 REFINERY_TARGET="${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery"
-gc bd update {{issue}} --status=open --assignee="$REFINERY_TARGET" --set-metadata gc.routed_to="$REFINERY_TARGET"
+gc bd update {{issue}} --status=open --assignee="$REFINERY_TARGET" --set-metadata gc.routed_to=""
 ```
 
 `${GC_RIG:+$GC_RIG/}{{binding_prefix}}refinery` resolves to
@@ -317,10 +344,10 @@ or `{{binding_prefix}}refinery` when running in an HQ-only city where
 the workspace is the rig. Writing a rendered empty rig prefix produces
 `/{{binding_prefix}}refinery` and strands beads outside the refinery pool.
 
-Update both `assignee` AND `gc.routed_to` so the reconciler stops
-counting this bead for the polecat pool and starts counting it for
-the refinery pool. Without updating `gc.routed_to`, the reconciler
-spawns phantom polecats that can't claim the bead.
+Set `assignee` to the configured refinery named-session identity and clear
+`gc.routed_to` because the direct assignment is the handoff. Generic pool
+demand is represented by unassigned work with `gc.routed_to=<target>`, so
+named-session work should not retain pool-demand metadata.
 
 The refinery will pick this up, rebase onto {{base_branch}}, run tests,
 merge, and close the bead. If there's a conflict, the refinery puts the

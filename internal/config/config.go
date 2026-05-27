@@ -175,6 +175,9 @@ type City struct {
 	// binding name; the value specifies the source and optional version,
 	// export, and transitive controls. Processed during ExpandCityPacks.
 	Imports map[string]Import `toml:"imports,omitempty"`
+	// Defaults holds city-level defaults that seed generated config. The
+	// canonical default-rig import table is [defaults.rig.imports].
+	Defaults PackDefaults `toml:"defaults,omitempty"`
 	// Agents lists all configured agents in this city. Optional: PackV2
 	// cities compose agents through [imports.*] and ship without any
 	// [[agent]] block.
@@ -1099,7 +1102,7 @@ type Workspace struct {
 	Includes []string `toml:"includes,omitempty"`
 	// DefaultRigIncludes is the legacy city.toml default-rig pack list.
 	//
-	// Deprecated: use root pack.toml [defaults.rig.imports.<binding>] instead.
+	// Deprecated: use city.toml [defaults.rig.imports.<binding>] instead.
 	// Run gc doctor to inspect; gc doctor --fix handles the safe mechanical
 	// rewrites available in this release wave.
 	DefaultRigIncludes []string `toml:"default_rig_includes,omitempty"`
@@ -1442,10 +1445,12 @@ type DoltConfig struct {
 	ArchiveLevel *int `toml:"archive_level,omitempty" jsonschema:"default=0"`
 }
 
-// FormulasConfig holds formula directory settings.
+// FormulasConfig holds legacy formula directory settings.
 type FormulasConfig struct {
-	// Dir is the path to the formulas directory. Defaults to "formulas".
-	Dir string `toml:"dir,omitempty" jsonschema:"default=formulas"`
+	// Dir is the legacy path to the formulas directory. PackV2 cities and
+	// packs use the well-known formulas/ directory; authored [formulas].dir
+	// is rejected for schema 2 configs.
+	Dir string `toml:"dir,omitempty" jsonschema:"-"`
 }
 
 // OrdersConfig holds order settings.
@@ -1766,8 +1771,11 @@ type DaemonConfig struct {
 	// dedicated dolt server, or lower to reduce contention on slow storage.
 	ProbeConcurrency *int `toml:"probe_concurrency,omitempty" jsonschema:"default=8"`
 	// MaxWakesPerTick caps how many sessions the reconciler may start in a
-	// single tick. Nil (unset) defaults to 5. Values <= 0 are treated as the
-	// default — set a positive integer to override.
+	// single tick. Fresh generic pool session-bead creation uses the same
+	// budget so the controller does not materialize more ordinary pool sessions
+	// than it can wake. Bounded dependency-floor prerequisites are exempt.
+	// Nil (unset) defaults to 5. Values <= 0 are treated as the default — set a
+	// positive integer to override.
 	MaxWakesPerTick *int `toml:"max_wakes_per_tick,omitempty" jsonschema:"default=5"`
 	// NudgeDispatcher selects how queued nudges get delivered to running
 	// sessions. "legacy" (default) auto-spawns a per-session `gc nudge poll`

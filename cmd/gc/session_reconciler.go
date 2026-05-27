@@ -481,7 +481,8 @@ func pendingCreateSessionStillLeased(session beads.Bead, cfg *config.City, clk c
 }
 
 func pendingCreateStartInFlight(session beads.Bead, clk clock.Clock, startupTimeout time.Duration) bool {
-	if strings.TrimSpace(session.Metadata["pending_create_claim"]) != "true" {
+	if strings.TrimSpace(session.Metadata["pending_create_claim"]) != "true" &&
+		sessionpkg.State(strings.TrimSpace(session.Metadata["state"])) != sessionpkg.StateCreating {
 		return false
 	}
 	lastWoke := strings.TrimSpace(session.Metadata["last_woke_at"])
@@ -533,7 +534,7 @@ func pendingCreateNeverStartedExpired(session beads.Bead, clk clock.Clock) bool 
 	if strings.TrimSpace(session.Metadata["pending_create_claim"]) != "true" {
 		return false
 	}
-	if strings.TrimSpace(session.Metadata["state"]) != "creating" {
+	if !pendingCreateRollbackState(session.Metadata["state"]) {
 		return false
 	}
 	return pendingCreateNeverStartedLeaseExpired(session, clk)
@@ -564,13 +565,12 @@ func pendingCreateLeaseExpiredForRollback(session beads.Bead, clk clock.Clock, s
 	if strings.TrimSpace(session.Metadata["pending_create_claim"]) != "true" {
 		return false
 	}
-	// Accept both "creating" and "asleep": healState transitions
-	// state=creating → state=asleep after staleCreatingStateTimeout, so
+	// Accept start-pending/creating plus healed asleep: healState transitions
+	// state=creating to state=asleep after staleCreatingStateTimeout, so
 	// blocking rollback on state=="creating" alone permanently blocks it for
-	// any healed bead. Other states (e.g. stopped, draining) are unusual
-	// for a pending-create and should follow their own reconciliation paths.
-	state := strings.TrimSpace(session.Metadata["state"])
-	if state != string(sessionpkg.StateCreating) && state != string(sessionpkg.StateAsleep) {
+	// any healed bead. Other states follow their own reconciliation paths.
+	state := sessionpkg.State(strings.TrimSpace(session.Metadata["state"]))
+	if !pendingCreateRollbackState(string(state)) {
 		return false
 	}
 	if pendingCreateStartInFlight(session, clk, startupTimeout) {
@@ -582,8 +582,26 @@ func pendingCreateLeaseExpiredForRollback(session beads.Bead, clk clock.Clock, s
 	return pendingCreateAttemptStale(session, clk)
 }
 
+func pendingCreateQueuedOrCreatingState(state string) bool {
+	switch sessionpkg.State(strings.TrimSpace(state)) {
+	case sessionpkg.StateStartPending, sessionpkg.StateCreating:
+		return true
+	default:
+		return false
+	}
+}
+
+func pendingCreateRollbackState(state string) bool {
+	if pendingCreateQueuedOrCreatingState(state) {
+		return true
+	}
+	return sessionpkg.State(strings.TrimSpace(state)) == sessionpkg.StateAsleep
+}
+
 func pendingResumePreservingNamedRestart(session beads.Bead, clk clock.Clock, startupTimeout time.Duration) bool {
-	if strings.TrimSpace(session.Metadata["state"]) != string(sessionpkg.StateCreating) {
+	switch sessionpkg.State(strings.TrimSpace(session.Metadata["state"])) {
+	case sessionpkg.StateStartPending, sessionpkg.StateCreating:
+	default:
 		return false
 	}
 	if strings.TrimSpace(session.Metadata["pending_create_claim"]) != "true" {
@@ -1420,6 +1438,73 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 			}
 		}
 
+		// Restart-requested: agent asked for a fresh session
+		// (gc runtime request-restart / gc handoff). This runs after
+		// drain-ack handling, but before autonomous rate-limit,
+		// stability, and churn gates so an explicit operator/model reset
+		// is not swallowed by crash heuristics. Use provider-session
+		// liveness (running), not process liveness (alive), so a zombie
+		// tmux/container session is still stopped before the next wake.
+		{
+			runtimeRunning := running || alive
+			tmuxRequested := false
+			if runtimeRunning && dops != nil {
+				tmuxRequested, _ = dops.isRestartRequested(name)
+			}
+			beadRequested := session.Metadata["restart_requested"] == "true"
+			if tmuxRequested || beadRequested {
+				if runtimeRunning {
+					if err := workerKillSessionTargetWithConfig("", store, sp, cfg, name); err != nil {
+						fmt.Fprintf(stderr, "session reconciler: stopping restart-requested %s: %v\n", name, err) //nolint:errcheck
+						continue
+					}
+				}
+				if identity := namedSessionIdentity(*session); identity != "" {
+					if err := resetSessionCircuitBreakerState(store, session.ID, identity, cb); err != nil {
+						fmt.Fprintf(stderr, "session reconciler: clearing session circuit breaker for restart-requested %s: %v\n", name, err) //nolint:errcheck
+						continue
+					}
+				}
+				// Providers that can inject a fresh session ID get a
+				// rotated key here so the next wake starts a brand-new
+				// conversation. Providers without SessionIDFlag must
+				// clear any stored key and wake fresh without resume.
+				// Clearing started_config_hash forces firstStart=true in
+				// resolveSessionCommand. Clearing last_woke_at masks the
+				// intentional death from crash and churn trackers (both
+				// check last_woke_at first).
+				newSessionKey, hasCapability := freshRestartSessionKey(tp, session.Metadata)
+				batch := sessionpkg.RestartRequestPatch(newSessionKey)
+				if hasCapability && newSessionKey == "" {
+					batch["session_key"] = ""
+				}
+				if err := store.SetMetadataBatch(session.ID, batch); err != nil {
+					fmt.Fprintf(stderr, "session reconciler: recording restart handoff for %s: %v\n", name, err) //nolint:errcheck
+					continue
+				}
+				if session.Metadata == nil {
+					session.Metadata = make(map[string]string, len(batch))
+				}
+				for key, value := range batch {
+					session.Metadata[key] = value
+				}
+				if runtimeRunning {
+					if tmuxRequested && dops != nil {
+						_ = dops.clearRestartRequested(name)
+					}
+					fmt.Fprintf(stdout, "Stopped restart-requested session '%s'\n", name) //nolint:errcheck
+					// Yield this tick so the kill and the next wake run
+					// on separate reconciler passes; the new start should
+					// not race the tmux alias release.
+					continue
+				}
+				// Runtime was already dead — no kill happened, no alias
+				// release to wait on. Fall through so the wake decision
+				// can pick up the freshly cleared metadata and emit a
+				// start_candidate on this same tick. See #2345.
+			}
+		}
+
 		policy := resolveSessionSleepPolicy(*session, cfg, sp)
 
 		rateLimitHit, rateLimitErr := checkRateLimitStability(session, cfg, alive, dt, store, clk, peek)
@@ -1472,89 +1557,17 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 			clearChurn(session, store)
 		}
 		if alive && shouldRollbackPendingCreate(session) {
-			if stateBeforeHeal == sessionpkg.StateCreating && pendingCreateStartInFlight(*session, clk, startupTimeout) {
-				if trace != nil {
-					trace.recordDecision("reconciler.session.pending_create", tp.TemplateName, name, "pending_create_recovery_in_flight", "deferred", nil, nil, "")
+			switch stateBeforeHeal {
+			case sessionpkg.StateStartPending, sessionpkg.StateCreating:
+				if pendingCreateStartInFlight(*session, clk, startupTimeout) {
+					if trace != nil {
+						trace.recordDecision("reconciler.session.pending_create", tp.TemplateName, name, "pending_create_recovery_in_flight", "deferred", nil, nil, "")
+					}
+					continue
 				}
-				continue
 			}
 			if !recoverRunningPendingCreate(session, tp, cfg, store, clk, trace) {
 				fmt.Fprintf(stderr, "session reconciler: recovering pending create %s: metadata repair incomplete\n", name) //nolint:errcheck
-			}
-		}
-
-		// Restart-requested: agent asked for a fresh session
-		// (gc runtime request-restart / gc handoff). Rotate session_key
-		// to a fresh value and clear started_config_hash so the next wake
-		// builds a first-start command (--session-id <new_key>). Also set
-		// continuation_reset_pending so the next wake bumps the continuation
-		// epoch instead of silently reusing the prior continuation lineage.
-		//
-		// When the runtime is alive, stop it and yield this tick so the
-		// kill and the next wake run on separate reconciler passes; that
-		// keeps the start from racing the tmux alias release. When the
-		// runtime is already dead — for example, a named-always session
-		// whose tmux was killed by `gc handoff --target` before the bead's
-		// restart_requested flag was processed — there is no live runtime
-		// to stop. Apply the patch and fall through to the wake decision
-		// on this same tick instead of waiting for the next reconciler
-		// interval. The yield-a-tick rule existed to protect a live kill;
-		// extending it to the already-dead case is what caused the
-		// patrol_interval-sized post-handoff wake delay in #2345.
-		//
-		// Check both tmux metadata (dops) and bead metadata. The bead
-		// metadata flag survives tmux session death, so this works even
-		// when the session is already dead.
-		{
-			tmuxRequested := false
-			if alive && dops != nil {
-				tmuxRequested, _ = dops.isRestartRequested(name)
-			}
-			beadRequested := session.Metadata["restart_requested"] == "true"
-			if tmuxRequested || beadRequested {
-				if alive {
-					if err := workerKillSessionTargetWithConfig("", store, sp, cfg, name); err != nil {
-						fmt.Fprintf(stderr, "session reconciler: stopping restart-requested %s: %v\n", name, err) //nolint:errcheck
-						continue
-					}
-				}
-				// Providers that can inject a fresh session ID get a
-				// rotated key here so the next wake starts a brand-new
-				// conversation. Providers without SessionIDFlag must
-				// clear any stored key and wake fresh without resume.
-				// Clearing started_config_hash forces firstStart=true in
-				// resolveSessionCommand. Clearing last_woke_at masks the
-				// intentional death from crash and churn trackers (both
-				// check last_woke_at first).
-				newSessionKey, hasCapability := freshRestartSessionKey(tp, session.Metadata)
-				batch := sessionpkg.RestartRequestPatch(newSessionKey)
-				if hasCapability && newSessionKey == "" {
-					batch["session_key"] = ""
-				}
-				if err := store.SetMetadataBatch(session.ID, batch); err != nil {
-					fmt.Fprintf(stderr, "session reconciler: recording restart handoff for %s: %v\n", name, err) //nolint:errcheck
-					continue
-				}
-				if session.Metadata == nil {
-					session.Metadata = make(map[string]string, len(batch))
-				}
-				for key, value := range batch {
-					session.Metadata[key] = value
-				}
-				if alive {
-					if tmuxRequested && dops != nil {
-						_ = dops.clearRestartRequested(name)
-					}
-					fmt.Fprintf(stdout, "Stopped restart-requested session '%s'\n", name) //nolint:errcheck
-					// Yield this tick so the kill and the next wake run
-					// on separate reconciler passes; the new start should
-					// not race the tmux alias release.
-					continue
-				}
-				// Runtime was already dead — no kill happened, no alias
-				// release to wait on. Fall through so the wake decision
-				// can pick up the freshly cleared metadata and emit a
-				// start_candidate on this same tick. See #2345.
 			}
 		}
 
@@ -1658,7 +1671,7 @@ func reconcileSessionBeadsTracedWithNamedDemand(
 								}
 								continue
 							}
-							resetConfiguredNamedSessionForConfigDrift(session, store, sp, name, alive, "creating", clk.Now().UTC(), stderr)
+							resetConfiguredNamedSessionForConfigDrift(session, store, sp, name, alive, string(sessionpkg.StateStartPending), clk.Now().UTC(), stderr)
 							if trace != nil {
 								trace.recordDecision("reconciler.session.config_drift", tp.TemplateName, name, "config_drift", "restart_in_place", configDriftTracePayload(storedHash, currentHash, driftedFields, nil), nil, "")
 							}
@@ -2918,7 +2931,7 @@ func traceHealClearedPendingCreateLease(
 	providerAlive bool,
 	batch map[string]string,
 ) {
-	if trace == nil || strings.TrimSpace(stateBeforeHeal) != string(sessionpkg.StateCreating) {
+	if trace == nil || !pendingCreateQueuedOrCreatingState(stateBeforeHeal) {
 		return
 	}
 	if cleared, ok := batch["pending_create_claim"]; !ok || cleared != "" {
@@ -3042,7 +3055,7 @@ func resetConfiguredNamedSessionForConfigDrift(
 	nextSessionState := sessionpkg.State(nextState)
 	priorSessionKey := strings.TrimSpace(session.Metadata["session_key"])
 	priorStartedConfigHash := strings.TrimSpace(session.Metadata["started_config_hash"])
-	preserveResume := nextSessionState == sessionpkg.StateCreating &&
+	preserveResume := (nextSessionState == sessionpkg.StateStartPending || nextSessionState == sessionpkg.StateCreating) &&
 		priorSessionKey != "" && priorStartedConfigHash != ""
 
 	rotatedSessionKey := ""
