@@ -370,6 +370,7 @@ function isCollapsedActivityTurn(turn: DisplayTurn, activity: ActivityItem[]): b
   if (activity.length === 0) return false;
   const presentation = turnPresentation(turn.role, turn.text.trim(), turn.trace ?? []);
   if (presentation.kind === "reminder") return false;
+  if (isNoVisibleResponseText(turn.text)) return false;
   return (turn.text ?? "").trim() === "" || presentation.kind !== "message";
 }
 
@@ -1013,6 +1014,10 @@ function isAutonomousControlPromptText(text: string): boolean {
     && trimmed.includes("claim and handle one item")
     && trimmed.includes("stay idle unless")
   );
+}
+
+function isNoVisibleResponseText(text: string): boolean {
+  return text.trim() === "Codex completed this turn without a visible response.";
 }
 
 function toolCallParts(text: string): { detail: string; name: string } {

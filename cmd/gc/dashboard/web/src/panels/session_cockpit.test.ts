@@ -690,6 +690,59 @@ describe("session cockpit", () => {
     expect(secondActivity?.textContent).not.toContain("First patrol preflight.");
   });
 
+  it("shows when Codex completes a reminder turn without visible output", async () => {
+    const reminder = [
+      "<system-reminder>",
+      "You have a deferred reminder that was queued until a safe boundary:",
+      "",
+      "- [session] Run your routed mayor autonomy/infra review now.",
+      "",
+      "Handle them after this turn.",
+      "</system-reminder>",
+    ].join("\n");
+    setupCrewCockpitDom();
+    vi.spyOn(api, "GET").mockImplementation(async (path: string) => {
+      if (path === "/v0/city/{cityName}/sessions") {
+        return { data: { items: [crewSession("s-mayor")] } } as never;
+      }
+      if (path === "/v0/city/{cityName}/session/{id}") {
+        return { data: { ...crewSession("s-mayor"), provider: "codex" } } as never;
+      }
+      if (path === "/v0/city/{cityName}/session/{id}/pending") {
+        return { data: { pending: null, supported: true } } as never;
+      }
+      if (path === "/v0/city/{cityName}/session/{id}/transcript") {
+        return {
+          data: {
+            turns: [{
+              role: "user",
+              text: reminder,
+              timestamp: "2026-05-30T21:11:20Z",
+            }, {
+              role: "system",
+              text: "Codex completed this turn without a visible response.",
+              timestamp: "2026-05-30T21:11:48Z",
+            }],
+            pagination: { has_older_messages: false, returned_message_count: 2, total_compactions: 0, total_message_count: 2 },
+          },
+        } as never;
+      }
+      throw new Error(`unexpected GET ${path}`);
+    });
+
+    installCrewInteractions();
+    await renderCrew();
+    document.querySelector<HTMLButtonElement>(".agent-log-link")?.click();
+    await waitFor(() => {
+      expect(document.querySelector(".log-msg-system")).not.toBeNull();
+    });
+
+    expect(document.querySelector(".log-msg-reminder")?.textContent).toContain("Deferred session reminder");
+    const systemNode = document.querySelector<HTMLElement>(".log-msg-system")!;
+    expect(systemNode.classList.contains("log-msg-compact")).toBe(true);
+    expect(systemNode.textContent).toContain("Codex completed this turn without a visible response.");
+  });
+
   it("renders partial system reminder bodies as compact reminder entries", async () => {
     const reminder = [
       "- [session] Run your routed mayor autonomy/infra review now. Use gc hook mayor to inspect routed mayor work.",

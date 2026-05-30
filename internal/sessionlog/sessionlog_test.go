@@ -1667,6 +1667,43 @@ func TestReadCodexFilePrefersResponseItemReasoningOverEventReasoning(t *testing.
 	}
 }
 
+func TestReadCodexFileReportsTaskCompleteWithoutVisibleResponse(t *testing.T) {
+	path := writeJSONL(t,
+		`{"timestamp":"2026-05-30T21:11:20.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"text":"<system-reminder>\ncheck again\n</system-reminder>"}]}}`,
+		`{"timestamp":"2026-05-30T21:11:48.000Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":null}}`,
+	)
+
+	sess, err := ReadCodexFile(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(sess.Messages); got != 2 {
+		t.Fatalf("Messages = %d, want user plus no-response marker", got)
+	}
+	if sess.Messages[1].Type != "system" || sess.Messages[1].Subtype != "codex_no_response" {
+		t.Fatalf("marker entry = %#v, want codex_no_response system entry", sess.Messages[1])
+	}
+	if got := strings.TrimSpace(sess.Messages[1].ContentBlocks()[0].Text); got != "Codex completed this turn without a visible response." {
+		t.Fatalf("marker text = %q", got)
+	}
+}
+
+func TestReadCodexFileSkipsTaskCompleteWithVisibleResponse(t *testing.T) {
+	path := writeJSONL(t,
+		`{"timestamp":"2026-05-30T21:11:20.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"text":"hello"}]}}`,
+		`{"timestamp":"2026-05-30T21:11:21.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"text":"hi"}]}}`,
+		`{"timestamp":"2026-05-30T21:11:22.000Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":"hi"}}`,
+	)
+
+	sess, err := ReadCodexFile(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(sess.Messages); got != 2 {
+		t.Fatalf("Messages = %d, want only visible user and assistant messages", got)
+	}
+}
+
 func TestFindCodexSessionFileIn(t *testing.T) {
 	sessDir := t.TempDir()
 	workDir := "/data/projects/myproject"
