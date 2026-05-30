@@ -2,14 +2,23 @@ import type { SessionRecord } from "../api";
 import { api, cityScope } from "../api";
 import { byId, clear, el } from "../util/dom";
 import { calculateActivity, formatTimestamp, statusBadgeClass, truncate } from "../util/legacy";
-import { connectAgentOutput, type AgentOutputMessage, type SSEHandle } from "../sse";
-import { popPause, pushPause, showToast } from "../ui";
-import { logDebug } from "../logger";
+import { showToast } from "../ui";
+import {
+  closeSessionCockpitExternal,
+  configureSessionCockpitHost,
+  installSessionCockpitInteractions,
+  isSessionCockpitOpen,
+  openSessionCockpit as openSessionCockpitDrawer,
+} from "./session_cockpit";
 
-let logHandle: SSEHandle | null = null;
-let logSessionID = "";
-let logBeforeCursor = "";
-let logCount = 0;
+let selectedWorkspaceSessionID = "";
+const pendingStateConcurrency = 8;
+
+configureSessionCockpitHost({
+  hasSelectedSession: () => selectedWorkspaceSessionID !== "",
+  markSessionSelection: markSessionWorkspaceSelection,
+  setSessionDetailVisible: setSessionsDetailVisible,
+});
 
 export async function renderCrew(): Promise<void> {
   const city = cityScope();
@@ -37,25 +46,19 @@ export async function renderCrew(): Promise<void> {
   });
   if (error || !data?.items) {
     crewLoading.textContent = "Failed to load crew";
+    resetSessionsWorkspace("Failed to load sessions");
     renderSimpleEmpty(riggedBody, "No rigged agents");
     renderSimpleEmpty(pooledBody, "No pooled agents");
     return;
   }
 
   const sessions = data.items;
+  const pendingBySessionID = await loadPendingStates(sessions);
   // The Crew table is for persistent named workers — sessions whose backing
   // agent is classified server-side as "crew". Other agent kinds (pool,
   // role) belong on the Rigged/Pooled panels (or stay invisible until a
   // dedicated panel exists), so filter them out here.
   const crew = sessions.filter((session) => session.agent_kind === "crew");
-  const pending = await Promise.all(
-    crew.map(async (session) => {
-      const res = await api.GET("/v0/city/{cityName}/session/{id}/pending", {
-        params: { path: { cityName: city, id: session.id } },
-      });
-      return Boolean(res.data?.pending);
-    }),
-  );
 
   const beadTitles = new Map<string, string>();
   await Promise.all(
@@ -69,8 +72,10 @@ export async function renderCrew(): Promise<void> {
     }),
   );
 
-  crew.forEach((session, index) => {
-    const state = classifyCrewState(session, pending[index] ?? false);
+  renderSessionsWorkspace(sessions, pendingBySessionID, beadTitles);
+
+  crew.forEach((session) => {
+    const state = classifyCrewState(session, pendingBySessionID.get(session.id) ?? false);
     const beadText = session.active_bead ? truncate(beadTitles.get(session.active_bead) ?? session.active_bead, 24) : "—";
     const row = el("tr", {}, [
       el("td", {}, [session.template]),
@@ -87,9 +92,9 @@ export async function renderCrew(): Promise<void> {
         ]),
       ]),
       el("td", {}, [
-        attachButton(session.template),
+        chatButton(session.id, session.template),
         " ",
-        logButton(session.id, session.template),
+        attachButton(session.template),
       ]),
     ]);
     crewBody.append(row);
@@ -117,7 +122,8 @@ export function resetCrewNoCity(): void {
   const pooledBody = byId("pooled-body");
   if (!crewLoading || !crewTable || !crewEmpty || !crewBody || !riggedBody || !pooledBody) return;
 
-  closeLogDrawer();
+  closeSessionCockpitExternal();
+  resetSessionsWorkspace("Select a city to view sessions");
   byId("crew-count")!.textContent = "0";
   byId("rigged-count")!.textContent = "0";
   byId("pooled-count")!.textContent = "0";
@@ -141,8 +147,231 @@ function classifyCrewState(session: SessionRecord, hasPending: boolean): string 
   return "idle";
 }
 
+async function loadPendingStates(sessions: SessionRecord[]): Promise<Map<string, boolean>> {
+  const city = cityScope();
+  const pending = new Map<string, boolean>();
+  if (!city) return pending;
+  let nextIndex = 0;
+  const workerCount = Math.min(pendingStateConcurrency, sessions.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    for (;;) {
+      const session = sessions[nextIndex++];
+      if (!session) return;
+      const res = await api.GET("/v0/city/{cityName}/session/{id}/pending", {
+        params: { path: { cityName: city, id: session.id } },
+      });
+      pending.set(session.id, Boolean(res.data?.pending));
+    }
+  }));
+  return pending;
+}
+
+function renderSessionsWorkspace(
+  sessions: SessionRecord[],
+  pendingBySessionID: Map<string, boolean>,
+  beadTitles: Map<string, string>,
+): void {
+  const count = byId("sessions-count");
+  const list = byId("sessions-list");
+  const detail = byId("sessions-detail-summary");
+  if (!count || !list || !detail) return;
+
+  const rows = [...sessions].sort(compareSessions);
+  count.textContent = String(rows.length);
+  clear(list);
+
+  if (rows.length === 0) {
+    selectedWorkspaceSessionID = "";
+    renderSimpleEmpty(list, "No active sessions");
+    renderSimpleEmpty(detail, "No session selected");
+    setSessionsDetailVisible(false);
+    return;
+  }
+
+  if (!rows.some((session) => session.id === selectedWorkspaceSessionID)) {
+    selectedWorkspaceSessionID = "";
+  }
+
+  rows.forEach((session) => {
+    const hasPending = pendingBySessionID.get(session.id) ?? false;
+    const state = sessionWorkspaceState(session, hasPending);
+    const activity = calculateActivity(session.last_active);
+    const active = session.id === selectedWorkspaceSessionID;
+    const row = el("div", {
+      class: `session-row${active ? " active" : ""}`,
+      "data-session-id": session.id,
+      tabindex: "0",
+    }, [
+      el("div", { class: "session-row-main" }, [
+        el("span", { class: "session-row-name" }, [sessionTitle(session)]),
+        el("span", { class: `badge ${sessionStateBadgeClass(state)}` }, [state]),
+      ]),
+      el("div", { class: "session-row-meta" }, [
+        el("span", {}, [sessionKind(session)]),
+        el("span", {}, [sessionLocation(session)]),
+        el("span", { class: `activity-${activity.colorClass}` }, [el("span", { class: "activity-dot" }), activity.display]),
+      ]),
+      el("div", { class: "session-row-work" }, [
+        session.active_bead ? truncate(beadTitles.get(session.active_bead) ?? session.active_bead, 72) : truncate(session.last_output, 72) || "—",
+      ]),
+      el("div", { class: "session-row-actions" }, [
+        chatButton(session.id, sessionTitle(session)),
+        " ",
+        attachButton(session.template),
+      ]),
+    ]);
+    row.addEventListener("click", (event) => {
+      if ((event.target as HTMLElement | null)?.closest("button")) return;
+      selectedWorkspaceSessionID = session.id;
+      markSessionWorkspaceSelection(session.id);
+      void openSessionCockpit(session.id, sessionTitle(session));
+    });
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      selectedWorkspaceSessionID = session.id;
+      markSessionWorkspaceSelection(session.id);
+      void openSessionCockpit(session.id, sessionTitle(session));
+    });
+    list.append(row);
+  });
+
+  const selected = rows.find((session) => session.id === selectedWorkspaceSessionID);
+  if (selected) {
+    setSessionsDetailVisible(true);
+    renderSessionWorkspaceDetail(selected, pendingBySessionID.get(selected.id) ?? false, beadTitles);
+  } else {
+    renderSimpleEmpty(detail, "No session selected");
+    setSessionsDetailVisible(false);
+  }
+}
+
+function resetSessionsWorkspace(message: string): void {
+  const count = byId("sessions-count");
+  const list = byId("sessions-list");
+  const detail = byId("sessions-detail-summary");
+  if (!count || !list || !detail) return;
+  count.textContent = "0";
+  selectedWorkspaceSessionID = "";
+  setSessionsDetailVisible(false);
+  renderSimpleEmpty(list, message);
+  renderSimpleEmpty(detail, message);
+}
+
+function renderSessionWorkspaceDetail(
+  session: SessionRecord,
+  hasPending: boolean,
+  beadTitles: Map<string, string>,
+): void {
+  const detail = byId("sessions-detail-summary");
+  if (!detail) return;
+  const state = sessionWorkspaceState(session, hasPending);
+  const activity = calculateActivity(session.last_active);
+  const work = session.active_bead ? `${session.active_bead} ${beadTitles.get(session.active_bead) ?? ""}`.trim() : "—";
+  clear(detail);
+  detail.append(
+    el("div", { class: "session-detail-header" }, [
+      el("div", {}, [
+        el("h3", {}, [sessionTitle(session)]),
+        el("div", { class: "session-detail-subtitle" }, [session.id]),
+      ]),
+      el("span", { class: `badge ${sessionStateBadgeClass(state)}` }, [state]),
+    ]),
+    el("div", { class: "session-detail-grid" }, [
+      detailField("Kind", sessionKind(session)),
+      detailField("Location", sessionLocation(session)),
+      detailField("Terminal", session.attached ? "Attached" : "Detached"),
+      detailField("Activity", activity.display),
+      detailField("Work", work),
+      detailField("Model", [session.provider, session.model].filter(Boolean).join(" / ") || "—"),
+    ]),
+    el("div", { class: "session-detail-actions" }, [
+      chatButton(session.id, sessionTitle(session)),
+      attachButton(session.template),
+    ]),
+  );
+  detail.style.display = isSessionCockpitOpen() ? "none" : "flex";
+  setSessionsDetailVisible(true);
+}
+
+function markSessionWorkspaceSelection(sessionID: string): void {
+  selectedWorkspaceSessionID = sessionID;
+  setSessionsDetailVisible(true);
+  document.querySelectorAll<HTMLElement>(".session-row").forEach((row) => {
+    row.classList.toggle("active", row.dataset.sessionId === sessionID);
+  });
+}
+
+function setSessionsDetailVisible(visible: boolean): void {
+  byId("sessions-list")?.closest(".sessions-workspace")?.classList.toggle("detail-visible", visible);
+}
+
+function detailField(label: string, value: string): HTMLElement {
+  return el("div", { class: "session-detail-field" }, [
+    el("span", { class: "session-detail-label" }, [label]),
+    el("span", { class: "session-detail-value" }, [value]),
+  ]);
+}
+
+function compareSessions(left: SessionRecord, right: SessionRecord): number {
+  const leftRank = sessionRank(left);
+  const rightRank = sessionRank(right);
+  if (leftRank !== rightRank) return leftRank - rightRank;
+  const leftTime = Date.parse(left.last_active ?? "") || 0;
+  const rightTime = Date.parse(right.last_active ?? "") || 0;
+  if (leftTime !== rightTime) return rightTime - leftTime;
+  return sessionTitle(left).localeCompare(sessionTitle(right));
+}
+
+function sessionRank(session: SessionRecord): number {
+  if (session.configured_named_session && !session.rig && !session.pool) return 0;
+  if (session.active_bead) return 1;
+  if (session.agent_kind === "crew") return 2;
+  if (session.rig) return 3;
+  if (session.pool) return 4;
+  return 5;
+}
+
+function sessionTitle(session: SessionRecord): string {
+  return session.template || session.id;
+}
+
+function sessionKind(session: SessionRecord): string {
+  if (session.configured_named_session && !session.rig && !session.pool) return "city";
+  return session.agent_kind || (session.pool ? "pool" : session.rig ? "rig" : "session");
+}
+
+function sessionLocation(session: SessionRecord): string {
+  if (session.rig && session.pool) return `${session.rig}/${session.pool}`;
+  if (session.rig) return session.rig;
+  if (session.pool) return session.pool;
+  return "city";
+}
+
+function sessionWorkspaceState(session: SessionRecord, hasPending: boolean): string {
+  if (hasPending) return "needs reply";
+  if (!session.running) return "stopped";
+  if (session.active_bead) return "working";
+  if (calculateActivity(session.last_active).colorClass === "green") return "active";
+  return "idle";
+}
+
+function sessionStateBadgeClass(state: string): string {
+  switch (state) {
+    case "active":
+    case "working":
+      return "badge-green";
+    case "needs reply":
+      return "badge-yellow";
+    case "stopped":
+      return "badge-muted";
+    default:
+      return statusBadgeClass(state);
+  }
+}
+
 function attachButton(template: string): HTMLElement {
-  const btn = el("button", { class: "attach-btn", type: "button" }, ["📎 Attach"]);
+  const btn = el("button", { class: "attach-btn", type: "button" }, ["Terminal"]);
   btn.addEventListener("click", async () => {
     const command = `gc agent attach ${template}`;
     try {
@@ -155,13 +384,24 @@ function attachButton(template: string): HTMLElement {
   return btn;
 }
 
-function logButton(sessionID: string, label: string): HTMLElement {
-  const btn = el("button", { class: "agent-log-link", type: "button", "data-session-id": sessionID }, [label]);
+function chatButton(sessionID: string, label: string): HTMLElement {
+  return logButton(sessionID, "Chat", label);
+}
+
+function logButton(sessionID: string, label: string, title = label): HTMLElement {
+  const btn = el("button", { class: "agent-log-link", type: "button", "data-session-id": sessionID, title }, [label]);
   btn.addEventListener("click", () => {
-    void openLogDrawer(sessionID, label);
+    void openSessionCockpit(sessionID, title);
   });
   return btn;
 }
+
+export async function openSessionCockpit(sessionID: string, label: string): Promise<void> {
+  await openSessionCockpitDrawer(sessionID, label);
+}
+
+export const installCrewInteractions = installSessionCockpitInteractions;
+export const closeLogDrawerExternal = closeSessionCockpitExternal;
 
 // renderRiggedAgents lists sessions attached to a specific rig. Grouping
 // is purely by the API's `rig` + `pool` fields — no role names hardcoded.
@@ -248,150 +488,4 @@ function renderPooledAgents(sessions: SessionRecord[]): void {
 function renderSimpleEmpty(container: HTMLElement, message: string): void {
   clear(container);
   container.append(el("div", { class: "empty-state" }, [el("p", {}, [message])]));
-}
-
-export function installCrewInteractions(): void {
-  byId("log-drawer-close-btn")?.addEventListener("click", () => closeLogDrawer());
-  byId("log-drawer-older-btn")?.addEventListener("click", () => {
-    logDebug("crew", "Load older transcript clicked", {
-      hasCursor: logBeforeCursor !== "",
-      sessionID: logSessionID,
-    });
-    if (!logSessionID || !logBeforeCursor) return;
-    void loadTranscript(logSessionID, true);
-  });
-}
-
-async function openLogDrawer(sessionID: string, label: string): Promise<void> {
-  const drawer = byId("agent-log-drawer");
-  const nameEl = byId("log-drawer-agent-name");
-  const messagesEl = byId("log-drawer-messages");
-  const loadingEl = byId("log-drawer-loading");
-  if (!drawer || !nameEl || !messagesEl || !loadingEl) return;
-
-  if (logSessionID === sessionID && drawer.style.display !== "none") {
-    closeLogDrawer();
-    return;
-  }
-
-  closeLogDrawer();
-  logSessionID = sessionID;
-  logBeforeCursor = "";
-  logCount = 0;
-
-  nameEl.textContent = label;
-  clear(messagesEl);
-  messagesEl.append(loadingEl);
-  loadingEl.style.display = "block";
-  drawer.style.display = "block";
-  pushPause();
-
-  await loadTranscript(sessionID, false);
-  const city = cityScope();
-  if (!city) return;
-  logHandle = connectAgentOutput(city, sessionID, (msg) => appendStreamEvent(msg));
-}
-
-function closeLogDrawer(): void {
-  logHandle?.close();
-  logHandle = null;
-  logSessionID = "";
-  logBeforeCursor = "";
-  const drawer = byId("agent-log-drawer");
-  if (drawer && drawer.style.display !== "none") {
-    drawer.style.display = "none";
-    popPause();
-  }
-}
-
-// closeLogDrawerExternal is called by main.ts when the dashboard leaves
-// city scope, so the transcript stream + its `pushPause()` token get
-// torn down along with every other city-scoped panel. Without this, a
-// drawer open at scope-change time would keep its session stream alive
-// and leave `pauseCount > 0` forever (blocking all refreshes).
-export function closeLogDrawerExternal(): void {
-  closeLogDrawer();
-}
-
-async function loadTranscript(sessionID: string, prepend: boolean): Promise<void> {
-  const city = cityScope();
-  const messagesEl = byId("log-drawer-messages");
-  const loadingEl = byId("log-drawer-loading");
-  const olderBtn = byId<HTMLButtonElement>("log-drawer-older-btn");
-  const countEl = byId("log-drawer-count");
-  if (!city || !messagesEl || !loadingEl || !olderBtn || !countEl) return;
-
-  loadingEl.style.display = "block";
-  const res = await api.GET("/v0/city/{cityName}/session/{id}/transcript", {
-    params: {
-      path: { cityName: city, id: sessionID },
-      query: { tail: String(prepend ? 50 : 25), before: prepend ? logBeforeCursor : undefined },
-    },
-  });
-  loadingEl.style.display = "none";
-  if (res.error || !res.data) {
-    showToast("error", "Transcript failed", res.error?.detail ?? "Could not load transcript");
-    return;
-  }
-
-  const fragment = document.createDocumentFragment();
-  for (const turn of res.data.turns ?? []) {
-    fragment.append(renderTurn(turn.role, turn.text, turn.timestamp));
-    logCount += 1;
-  }
-  if (prepend) {
-    messagesEl.prepend(fragment);
-  } else {
-    clear(messagesEl);
-    messagesEl.append(fragment);
-  }
-  messagesEl.append(loadingEl);
-  loadingEl.style.display = "none";
-  countEl.textContent = String(logCount);
-
-  logBeforeCursor = res.data.pagination?.truncated_before_message ?? "";
-  olderBtn.style.display = res.data.pagination?.has_older_messages && logBeforeCursor ? "inline-flex" : "none";
-  logDebug("crew", "Transcript loaded", {
-    hasOlderMessages: res.data.pagination?.has_older_messages ?? false,
-    nextBeforeCursor: logBeforeCursor,
-    prepend,
-    sessionID,
-    turnCount: res.data.turns?.length ?? 0,
-  });
-}
-
-function appendStreamEvent(msg: AgentOutputMessage): void {
-  const messagesEl = byId("log-drawer-messages");
-  if (!messagesEl) return;
-  const payload = msg.data as { data?: { message?: { role?: string; text?: string; timestamp?: string } }; event?: string } | null;
-  if (msg.type !== "message" || !payload?.data?.message) return;
-  messagesEl.append(renderTurn(payload.data.message.role ?? "agent", payload.data.message.text ?? "", payload.data.message.timestamp));
-  logCount += 1;
-  byId("log-drawer-count")!.textContent = String(logCount);
-  const body = byId("log-drawer-body");
-  if (body) body.scrollTop = body.scrollHeight;
-}
-
-function renderTurn(role: string, text: string, timestamp: string | undefined): HTMLElement {
-  return el("div", { class: "log-msg" }, [
-    el("div", { class: "log-msg-header" }, [
-      el("span", { class: `log-msg-type log-msg-type-${roleClass(role)}` }, [role]),
-      el("span", { class: "log-msg-time" }, [formatTimestamp(timestamp)]),
-    ]),
-    el("div", { class: "log-msg-body" }, [text]),
-  ]);
-}
-
-function roleClass(role: string): string {
-  switch ((role ?? "").toLowerCase()) {
-    case "assistant":
-    case "agent":
-      return "assistant";
-    case "system":
-      return "system";
-    case "result":
-      return "result";
-    default:
-      return "user";
-  }
 }
