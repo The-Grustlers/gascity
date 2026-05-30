@@ -48,6 +48,52 @@
           <div class="panel-body" id="supervisor-overview-body"></div>
         </div>
 
+        <div class="panel panel-full" id="sessions-panel">
+          <div class="panel-header">
+            <h2>Active Sessions</h2>
+            <span class="count" id="sessions-count">0</span>
+            <button class="collapse-btn" aria-label="Toggle panel">▼</button>
+            <button class="expand-btn">Expand</button>
+          </div>
+          <div class="panel-body sessions-workspace">
+            <div class="sessions-list" id="sessions-list"></div>
+            <div class="sessions-detail" id="sessions-detail">
+              <div class="sessions-detail-summary" id="sessions-detail-summary"></div>
+              <div class="session-chat" id="agent-log-drawer" style="display: none;">
+                <div class="session-chat-header">
+                  <h3>Session · <span id="log-drawer-agent-name">—</span></h3>
+                  <span class="count" id="log-drawer-count">0 blocks</span>
+                  <span class="log-drawer-status" id="log-drawer-status"></span>
+                  <button class="log-drawer-btn" id="log-drawer-older-btn" style="display: none;">Load older</button>
+                  <button class="log-drawer-close-btn" id="log-drawer-close-btn">Close</button>
+                </div>
+                <div class="log-drawer-meta" id="log-drawer-meta" style="display: none;"></div>
+                <div class="log-drawer-pending" id="log-drawer-pending" style="display: none;"></div>
+                <div class="log-drawer-body" id="log-drawer-body">
+                  <div class="log-drawer-messages" id="log-drawer-messages">
+                    <div class="loading-state" id="log-drawer-loading">Loading logs...</div>
+                  </div>
+                </div>
+                <form class="log-drawer-composer" id="log-drawer-composer">
+                  <label class="log-drawer-intent-wrap" id="log-drawer-intent-wrap" for="log-drawer-intent" style="display: none;">
+                    <span>Intent</span>
+                    <select id="log-drawer-intent" class="log-drawer-intent"></select>
+                  </label>
+                  <div class="log-drawer-attachments" id="log-drawer-attachments"></div>
+                  <div class="log-drawer-compose-row">
+                    <button class="log-drawer-attach-btn" id="log-drawer-attach-btn" type="button" title="Attach images">+</button>
+                    <label class="sr-only" for="log-drawer-file-input">Attach images</label>
+                    <input id="log-drawer-file-input" type="file" accept="image/*" multiple hidden />
+                    <label class="sr-only" for="log-drawer-input">Message</label>
+                    <textarea id="log-drawer-input" class="log-drawer-input" rows="3" placeholder="Message this session..." autocomplete="off"></textarea>
+                    <button class="log-drawer-send-btn" id="log-drawer-send-btn" type="submit">Send</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="panel" id="convoy-panel">
           <div class="panel-header">
             <h2>🚚 Convoys</h2>
@@ -147,21 +193,6 @@
             </table>
             <div class="empty-state" id="crew-empty" style="display: none;">
               <p>No crew configured</p>
-            </div>
-          </div>
-        </div>
-
-        <div class="panel panel-full" id="agent-log-drawer" style="display: none;">
-          <div class="panel-header">
-            <h2>📋 <span id="log-drawer-agent-name">—</span> — Logs</h2>
-            <span class="count" id="log-drawer-count">0</span>
-            <span class="log-drawer-status" id="log-drawer-status"></span>
-            <button class="log-drawer-btn" id="log-drawer-older-btn" style="display: none;">Load older</button>
-            <button class="log-drawer-close-btn" id="log-drawer-close-btn">✕ Close</button>
-          </div>
-          <div class="panel-body log-drawer-body" id="log-drawer-body">
-            <div class="log-drawer-messages" id="log-drawer-messages">
-              <div class="loading-state" id="log-drawer-loading">Loading logs...</div>
             </div>
           </div>
         </div>
