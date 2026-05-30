@@ -62,6 +62,70 @@ describe("activity feed ordering", () => {
     expect(document.getElementById("activity-count")?.textContent).toBe("3");
   });
 
+  it("hides routine order tracking chatter unless enabled", async () => {
+    await seedActivity([
+      {
+        category: "work",
+        id: "mc-city:20",
+        rig: "city",
+        scope: "mc-city",
+        seq: 20,
+        subject: "gr-wisp-abcde",
+        ts: "2026-04-02T10:00:00Z",
+        type: "bead.updated",
+      },
+      {
+        category: "system",
+        id: "mc-city:21",
+        message: "beads-health",
+        rig: "city",
+        scope: "mc-city",
+        seq: 21,
+        subject: "beads-health",
+        ts: "2026-04-02T10:01:00Z",
+        type: "order.completed",
+      },
+      {
+        category: "system",
+        id: "mc-city:22",
+        message: "dolt-remotes-patrol failed",
+        rig: "city",
+        scope: "mc-city",
+        seq: 22,
+        subject: "dolt-remotes-patrol",
+        ts: "2026-04-02T10:02:00Z",
+        type: "order.failed",
+      },
+      {
+        category: "work",
+        id: "mc-city:23",
+        rig: "city",
+        scope: "mc-city",
+        seq: 23,
+        subject: "gr-real",
+        ts: "2026-04-02T10:03:00Z",
+        type: "bead.updated",
+      },
+    ]);
+
+    expect([...document.querySelectorAll<HTMLElement>(".tl-entry")].map((node) => node.dataset.type)).toEqual([
+      "bead.updated",
+      "order.failed",
+    ]);
+    expect(document.getElementById("activity-count")?.textContent).toBe("2");
+
+    const toggle = document.getElementById("tl-routine-filter") as HTMLInputElement;
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event("change", { bubbles: true }));
+
+    expect(document.querySelectorAll(".tl-entry")).toHaveLength(4);
+    expect(document.getElementById("activity-count")?.textContent).toBe("4");
+
+    const resetToggle = document.getElementById("tl-routine-filter") as HTMLInputElement;
+    resetToggle.checked = false;
+    resetToggle.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
   it("computes a city stream cursor from loaded history", () => {
     const cursor = activityStreamCursorFromRecordsForTest([
       { seq: 12, type: "bead.created", actor: "human", ts: "2026-04-01T10:00:00Z" },

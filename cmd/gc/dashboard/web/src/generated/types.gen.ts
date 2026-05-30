@@ -10583,11 +10583,15 @@ export type GetV0CityByCityNameSessionByIdTranscriptData = {
          */
         format?: string;
         /**
-         * Pagination cursor: return entries before this UUID.
+         * Maximum normalized conversation turns to return after cursor filtering. 0 means no turn cap.
+         */
+        limit?: number;
+        /**
+         * Pagination cursor: return turns before this source entry UUID.
          */
         before?: string;
         /**
-         * Pagination cursor: return entries after this UUID.
+         * Pagination cursor: return turns after this source entry UUID.
          */
         after?: string;
     };

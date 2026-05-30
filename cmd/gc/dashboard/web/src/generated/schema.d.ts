@@ -12021,9 +12021,11 @@ export interface operations {
                 tail?: string;
                 /** @description Transcript format: conversation (default) or raw. */
                 format?: string;
-                /** @description Pagination cursor: return entries before this UUID. */
+                /** @description Maximum normalized conversation turns to return after cursor filtering. 0 means no turn cap. */
+                limit?: number;
+                /** @description Pagination cursor: return turns before this source entry UUID. */
                 before?: string;
-                /** @description Pagination cursor: return entries after this UUID. */
+                /** @description Pagination cursor: return turns after this source entry UUID. */
                 after?: string;
             };
             header?: never;
