@@ -4452,6 +4452,7 @@
             border-radius: 10px;
             font-size: 0.8rem;
             line-height: 1.5;
+            user-select: text;
         }
 
         .log-msg-assistant,
@@ -4550,7 +4551,7 @@
             min-height: 34px;
             padding: 8px 10px;
             color: var(--text-secondary);
-            user-select: none;
+            user-select: text;
         }
 
         .log-msg-detail-summary:hover {
@@ -4599,7 +4600,7 @@
             color: var(--text-secondary);
             font-size: 0.7rem;
             padding: 5px 7px;
-            user-select: none;
+            user-select: text;
         }
 
         .log-msg-activity-summary-main {
@@ -4648,7 +4649,7 @@
             grid-template-columns: auto auto minmax(0, 1fr) auto;
             min-height: 30px;
             padding: 6px 10px;
-            user-select: none;
+            user-select: text;
         }
 
         .log-msg-activity-item-header::-webkit-details-marker {
@@ -4768,7 +4769,7 @@
             color: var(--text-secondary);
             font-size: 0.7rem;
             padding: 5px 7px;
-            user-select: none;
+            user-select: text;
         }
 
         .log-msg-trace[open] .log-msg-trace-summary {
