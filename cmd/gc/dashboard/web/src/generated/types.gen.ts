@@ -1889,10 +1889,48 @@ export type OutboundResult = {
     TranscriptEntry: ConversationTranscriptRecord;
 };
 
+export type OutputAsset = {
+    kind: string;
+    name?: string;
+    path?: string;
+    source?: string;
+    url?: string;
+};
+
+export type OutputPart = {
+    action?: string;
+    id?: string;
+    input?: unknown;
+    is_error?: boolean;
+    kind?: string;
+    mime?: string;
+    name?: string;
+    options?: Array<string> | null;
+    output?: unknown;
+    path?: string;
+    prompt?: string;
+    request_id?: string;
+    source?: string;
+    state?: string;
+    text?: string;
+    tool?: string;
+    tool_use_id?: string;
+    type: string;
+    url?: string;
+};
+
+export type OutputTrace = {
+    kind: string;
+    text?: string;
+};
+
 export type OutputTurn = {
+    assets?: Array<OutputAsset> | null;
+    parts?: Array<OutputPart> | null;
     role: string;
     text: string;
     timestamp?: string;
+    trace?: Array<OutputTrace> | null;
 };
 
 export type PackListBody = {
@@ -10744,11 +10782,15 @@ export type GetV0CityByCityNameSessionByIdTranscriptData = {
          */
         format?: string;
         /**
-         * Pagination cursor: return entries before this UUID.
+         * Maximum normalized conversation turns to return after cursor filtering. 0 means no turn cap.
+         */
+        limit?: number;
+        /**
+         * Pagination cursor: return turns before this source entry UUID.
          */
         before?: string;
         /**
-         * Pagination cursor: return entries after this UUID.
+         * Pagination cursor: return turns after this source entry UUID.
          */
         after?: string;
     };

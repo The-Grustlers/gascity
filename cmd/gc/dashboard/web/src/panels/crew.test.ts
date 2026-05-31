@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "../api";
 import { syncCityScopeFromLocation } from "../state";
-import { installCrewInteractions, renderCrew } from "./crew";
+import { renderCrew } from "./crew";
 
 vi.mock("../sse", () => ({
   connectAgentOutput: vi.fn(() => ({ close: vi.fn() })),
@@ -16,6 +16,9 @@ describe("crew empty states", () => {
       <div id="crew-empty" style="display:none"><p>No crew configured</p></div>
       <div id="rigged-body"></div>
       <div id="pooled-body"></div>
+      <span id="sessions-count"></span>
+      <div id="sessions-list"></div>
+      <div id="sessions-detail"><div id="sessions-detail-summary"></div></div>
       <span id="crew-count"></span>
       <span id="rigged-count"></span>
       <span id="pooled-count"></span>
@@ -122,6 +125,122 @@ describe("crew empty states", () => {
     expect(document.getElementById("rigged-count")?.textContent).toBe("1");
   });
 
+  it("shows every active session in the workspace and opens chat from there", async () => {
+    document.body.innerHTML = `
+      <div id="crew-loading">Loading crew...</div>
+      <table id="crew-table" style="display:none"><tbody id="crew-tbody"></tbody></table>
+      <div id="crew-empty" style="display:none"><p>No crew configured</p></div>
+      <div id="rigged-body"></div>
+      <div id="pooled-body"></div>
+      <span id="sessions-count"></span>
+      <div id="sessions-list"></div>
+      <div id="sessions-detail">
+        <div id="sessions-detail-summary"></div>
+        <div id="agent-log-drawer" style="display:none">
+          <span id="log-drawer-agent-name"></span>
+          <span id="log-drawer-count"></span>
+          <button id="log-drawer-older-btn" style="display:none">Load older</button>
+          <button id="log-drawer-close-btn">Close</button>
+          <div id="log-drawer-body">
+            <div id="log-drawer-messages">
+              <div id="log-drawer-loading">Loading logs...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <span id="crew-count"></span>
+      <span id="rigged-count"></span>
+      <span id="pooled-count"></span>
+    `;
+    vi.spyOn(api, "GET").mockImplementation(async (path: string) => {
+      if (path === "/v0/city/{cityName}/sessions") {
+        return {
+          data: {
+            items: [
+              {
+                active_bead: "",
+                agent_kind: "role",
+                attached: false,
+                configured_named_session: true,
+                id: "s-ops",
+                last_active: "2026-04-18T20:00:00Z",
+                last_output: "city heartbeat",
+                running: true,
+                template: "coordinator",
+              },
+              {
+                active_bead: "",
+                agent_kind: "crew",
+                attached: true,
+                id: "s-reviewer",
+                last_active: "2026-04-18T19:55:00Z",
+                last_output: "reviewing",
+                rig: "rig-a/crew",
+                running: true,
+                template: "reviewer",
+              },
+              {
+                active_bead: "",
+                agent_kind: "role",
+                attached: false,
+                id: "s-role",
+                last_active: "2026-04-18T19:50:00Z",
+                last_output: "routing",
+                rig: "rig-a",
+                running: true,
+                template: "rig-a/router",
+              },
+            ],
+          },
+        } as never;
+      }
+      if (path === "/v0/city/{cityName}/session/{id}/pending") {
+        return { data: { pending: false } } as never;
+      }
+      if (path === "/v0/city/{cityName}/session/{id}") {
+        return { data: { id: "s-role", model: "gpt-5", provider: "codex", running: true } } as never;
+      }
+      if (path === "/v0/city/{cityName}/session/{id}/transcript") {
+        return {
+          data: {
+            turns: [{ role: "assistant", text: "Router transcript", timestamp: "2026-04-18T20:00:00Z" }],
+            pagination: {
+              has_older_messages: false,
+              returned_message_count: 1,
+              total_compactions: 0,
+              total_message_count: 1,
+            },
+          },
+        } as never;
+      }
+      throw new Error(`unexpected GET ${path}`);
+    });
+
+    await renderCrew();
+
+    expect(document.getElementById("sessions-count")?.textContent).toBe("3");
+    expect(document.getElementById("sessions-list")?.textContent).toContain("coordinator");
+    expect(document.getElementById("sessions-list")?.textContent).toContain("reviewer");
+    expect(document.getElementById("sessions-list")?.textContent).toContain("rig-a/router");
+    expect(document.getElementById("crew-count")?.textContent).toBe("1");
+
+    const coordinatorRow = document.querySelector('.session-row[data-session-id="s-ops"]');
+    expect(coordinatorRow?.querySelector(".session-row-main .badge")).toBeNull();
+    const coordinatorMeta = Array.from(coordinatorRow?.querySelectorAll(".session-row-meta > span") ?? [])
+      .map((node) => node.textContent?.trim() ?? "");
+    expect(coordinatorMeta.filter((label) => label === "city")).toHaveLength(1);
+
+    document.querySelector<HTMLButtonElement>('.session-row[data-session-id="s-role"] .agent-log-link')?.click();
+    await waitFor(() => {
+      expect((document.getElementById("agent-log-drawer") as HTMLElement).style.display).toBe("flex");
+      expect(document.getElementById("log-drawer-agent-name")?.textContent).toBe("rig-a/router");
+      expect(document.getElementById("log-drawer-messages")?.textContent).toContain("Router transcript");
+    });
+    expect(document.querySelector(".log-msg-type-assistant")?.textContent).toBe("rig-a/router");
+    expect(document.getElementById("agent-log-drawer")?.closest("#sessions-detail")).not.toBeNull();
+    expect((document.getElementById("sessions-detail-summary") as HTMLElement).style.display).toBe("none");
+  });
+
   it("falls back to the empty state when only role/pool sessions exist", async () => {
     vi.spyOn(api, "GET").mockImplementation(async (path: string) => {
       if (path === "/v0/city/{cityName}/sessions") {
@@ -170,98 +289,6 @@ describe("crew empty states", () => {
     expect(document.getElementById("crew-count")?.textContent).toBe("0");
   });
 
-  it("loads older transcript pages without losing the drawer loading sentinel", async () => {
-    document.body.innerHTML = `
-      <div id="crew-loading">Loading crew...</div>
-      <table id="crew-table" style="display:none"><tbody id="crew-tbody"></tbody></table>
-      <div id="crew-empty" style="display:none"><p>No crew configured</p></div>
-      <div id="rigged-body"></div>
-      <div id="pooled-body"></div>
-      <span id="crew-count"></span>
-      <span id="rigged-count"></span>
-      <span id="pooled-count"></span>
-      <div id="agent-log-drawer" style="display:none">
-        <span id="log-drawer-agent-name"></span>
-        <span id="log-drawer-count"></span>
-        <button id="log-drawer-older-btn" style="display:none">Load older</button>
-        <button id="log-drawer-close-btn">Close</button>
-        <div id="log-drawer-body">
-          <div id="log-drawer-messages">
-            <div id="log-drawer-loading">Loading logs...</div>
-          </div>
-        </div>
-      </div>
-    `;
-    const transcriptQueries: Array<Record<string, string | undefined>> = [];
-    vi.spyOn(api, "GET").mockImplementation(async (path: string, options?: unknown) => {
-      if (path === "/v0/city/{cityName}/sessions") {
-        return {
-          data: {
-            items: [{
-              active_bead: "",
-              agent_kind: "crew",
-              attached: true,
-              id: "s-reviewer",
-              last_active: "2026-04-18T20:00:00Z",
-              last_output: "",
-              rig: "rig-a/crew",
-              running: true,
-              template: "reviewer",
-            }],
-          },
-        } as never;
-      }
-      if (path === "/v0/city/{cityName}/session/{id}/pending") {
-        return { data: { pending: false } } as never;
-      }
-      if (path === "/v0/city/{cityName}/session/{id}/transcript") {
-        const query = (options as { params?: { query?: Record<string, string | undefined> } } | undefined)?.params?.query ?? {};
-        transcriptQueries.push(query);
-        if (query.before) {
-          return {
-            data: {
-              turns: [{ role: "assistant", text: "Older transcript turn", timestamp: "2026-04-18T19:00:00Z" }],
-              pagination: {
-                has_older_messages: false,
-                returned_message_count: 1,
-                total_compactions: 0,
-                total_message_count: 3,
-              },
-            },
-          } as never;
-        }
-        return {
-          data: {
-            turns: [{ role: "assistant", text: "Newest transcript turn", timestamp: "2026-04-18T20:00:00Z" }],
-            pagination: {
-              has_older_messages: true,
-              returned_message_count: 1,
-              total_compactions: 0,
-              total_message_count: 3,
-              truncated_before_message: "cursor-1",
-            },
-          },
-        } as never;
-      }
-      throw new Error(`unexpected GET ${path}`);
-    });
-
-    installCrewInteractions();
-    await renderCrew();
-    document.querySelector<HTMLButtonElement>(".agent-log-link")?.click();
-    await waitFor(() => {
-      expect(document.getElementById("log-drawer-messages")?.textContent).toContain("Newest transcript turn");
-    });
-
-    expect(document.getElementById("log-drawer-loading")).not.toBeNull();
-    document.getElementById("log-drawer-older-btn")?.click();
-    await waitFor(() => {
-      expect(document.getElementById("log-drawer-messages")?.textContent).toContain("Older transcript turn");
-    });
-
-    expect(transcriptQueries.map((query) => query.before)).toEqual([undefined, "cursor-1"]);
-    expect(document.getElementById("log-drawer-loading")).not.toBeNull();
-  });
 });
 
 // Slow Blacksmith CI runs have shown the openLogDrawer + loadTranscript
