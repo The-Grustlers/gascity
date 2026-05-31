@@ -13,13 +13,6 @@ import (
 	"github.com/gastownhall/gascity/internal/worker"
 )
 
-// outputTurn is a single conversation turn in the unified output response.
-type outputTurn struct {
-	Role      string `json:"role"`
-	Text      string `json:"text"`
-	Timestamp string `json:"timestamp,omitempty"`
-}
-
 // agentOutputResponse is the response for GET /v0/agent/{name}/output.
 type agentOutputResponse struct {
 	Agent      string                       `json:"agent"`
@@ -127,10 +120,10 @@ func (s *Server) trySessionLogOutputHuma(name string, agentCfg config.Agent, tai
 	turns := make([]outputTurn, 0, len(sess.Messages))
 	for _, e := range sess.Messages {
 		turn := entryToTurn(e)
-		if turn.Text == "" {
+		if !outputTurnHasContent(turn) {
 			continue
 		}
-		turns = append(turns, turn)
+		turns = appendOutputTurnDistinct(turns, turn)
 	}
 
 	return &agentOutputResponse{

@@ -38,6 +38,7 @@ let handle: SSEHandle | null = null;
 let categoryFilter = "all";
 let rigFilter = "all";
 let agentFilter = "all";
+let showRoutine = false;
 let streamCursor: { afterCursor?: string; afterSeq?: string } = {};
 
 export async function seedActivity(entriesFromAPI: ActivityEntry[]): Promise<void> {
@@ -124,12 +125,13 @@ export function renderActivity(): void {
   clear(feed);
 
   const filtered = entries.filter((entry) => {
+    if (!showRoutine && isRoutineActivity(entry)) return false;
     if (categoryFilter !== "all" && entry.category !== categoryFilter) return false;
     if (rigFilter !== "all" && entry.rig !== rigFilter) return false;
     if (agentFilter !== "all" && entry.actor !== agentFilter) return false;
     return true;
   });
-  byId("activity-count")!.textContent = String(entries.length);
+  byId("activity-count")!.textContent = String(filtered.length);
 
   if (filtered.length === 0) {
     feed.append(el("div", { class: "empty-state" }, [el("p", {}, ["No recent activity"])]));
@@ -210,6 +212,19 @@ function renderFilters(): void {
     renderActivity();
   });
 
+  const routineToggle = el("label", { class: "tl-routine-toggle", for: "tl-routine-filter" }, [
+    el("input", {
+      checked: showRoutine,
+      id: "tl-routine-filter",
+      type: "checkbox",
+    }),
+    " Routine",
+  ]);
+  routineToggle.querySelector("input")?.addEventListener("change", (event) => {
+    showRoutine = (event.currentTarget as HTMLInputElement).checked;
+    renderActivity();
+  });
+
   container.append(el("div", { class: "tl-filters" }, [
     el("div", { class: "tl-filter-group" }, [
       el("label", {}, ["Category:"]),
@@ -221,7 +236,30 @@ function renderFilters(): void {
     ]),
     el("div", { class: "tl-filter-group" }, [el("label", { for: "tl-rig-filter" }, ["Rig:"]), rigSelect]),
     el("div", { class: "tl-filter-group" }, [el("label", { for: "tl-agent-filter" }, ["Agent:"]), agentSelect]),
+    routineToggle,
   ]));
+}
+
+function isRoutineActivity(entry: ActivityEntry): boolean {
+  if ((entry.type === "bead.created" || entry.type === "bead.updated" || entry.type === "bead.closed") && entry.subject?.startsWith("gr-wisp-")) {
+    return true;
+  }
+  if ((entry.type === "order.fired" || entry.type === "order.completed") && entry.category === "system") {
+    return isKnownRoutineOrder(entry.subject ?? entry.message ?? "");
+  }
+  return false;
+}
+
+function isKnownRoutineOrder(value: string): boolean {
+  const subject = value.trim().toLowerCase();
+  return [
+    "beads-health",
+    "cache-reconcile",
+    "dolt-remotes-patrol",
+    "preview-freshness",
+    "provider-health",
+    "session-patrol",
+  ].some((prefix) => subject === prefix || subject.startsWith(`${prefix} `));
 }
 
 function filterButton(value: string, label: string): HTMLElement {

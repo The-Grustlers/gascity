@@ -3481,10 +3481,45 @@ export interface components {
             Receipt: components["schemas"]["PublishReceipt"];
             TranscriptEntry: components["schemas"]["ConversationTranscriptRecord"];
         };
+        OutputAsset: {
+            kind: string;
+            name?: string;
+            path?: string;
+            source?: string;
+            url?: string;
+        };
+        OutputPart: {
+            action?: string;
+            id?: string;
+            input?: unknown;
+            is_error?: boolean;
+            kind?: string;
+            mime?: string;
+            name?: string;
+            options?: string[] | null;
+            output?: unknown;
+            path?: string;
+            prompt?: string;
+            request_id?: string;
+            source?: string;
+            state?: string;
+            text?: string;
+            tool?: string;
+            tool_use_id?: string;
+            type: string;
+            url?: string;
+        };
+        OutputTrace: {
+            kind: string;
+            text?: string;
+        };
         OutputTurn: {
+            assets?: components["schemas"]["OutputAsset"][] | null;
+            parts?: components["schemas"]["OutputPart"][] | null;
             role: string;
             text: string;
             timestamp?: string;
+            trace?: components["schemas"]["OutputTrace"][] | null;
         };
         PackListBody: {
             /** @description Registered packs. */
@@ -12658,9 +12693,11 @@ export interface operations {
                 tail?: string;
                 /** @description Transcript format: conversation (default) or raw. */
                 format?: string;
-                /** @description Pagination cursor: return entries before this UUID. */
+                /** @description Maximum normalized conversation turns to return after cursor filtering. 0 means no turn cap. */
+                limit?: number;
+                /** @description Pagination cursor: return turns before this source entry UUID. */
                 before?: string;
-                /** @description Pagination cursor: return entries after this UUID. */
+                /** @description Pagination cursor: return turns after this source entry UUID. */
                 after?: string;
             };
             header?: never;

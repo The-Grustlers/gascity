@@ -99,8 +99,9 @@ type SessionTranscriptInput struct {
 	TailParam
 	ID     string `path:"id" doc:"Session ID, alias, or runtime session_name."`
 	Format string `query:"format" required:"false" doc:"Transcript format: conversation (default) or raw."`
-	Before string `query:"before" required:"false" doc:"Pagination cursor: return entries before this UUID."`
-	After  string `query:"after" required:"false" doc:"Pagination cursor: return entries after this UUID."`
+	Limit  int    `query:"limit" required:"false" minimum:"0" doc:"Maximum normalized conversation turns to return after cursor filtering. 0 means no turn cap."`
+	Before string `query:"before" required:"false" doc:"Pagination cursor: return turns before this source entry UUID."`
+	After  string `query:"after" required:"false" doc:"Pagination cursor: return turns after this source entry UUID."`
 }
 
 // SessionStreamInput is the Huma input for GET /v0/city/{cityName}/session/{id}/stream.

@@ -151,15 +151,26 @@ location is load-bearing.
 ### The dashboard projection
 
 The dashboard is a static TypeScript SPA served by a tiny Go
-binary (`cmd/gc/dashboard/`) whose only jobs are to embed the
+binary (`cmd/gc/dashboard/`) whose default jobs are to embed the
 compiled bundle and inject the supervisor URL into `index.html`.
-The SPA talks directly to the supervisor's typed OpenAPI endpoints
-from the browser — the dashboard server is NOT an API proxy. The
-dashboard server also hosts one narrow operational debug endpoint
-(`/__client-log`) that accepts browser error logs for centralized
-debugging; this endpoint is intentionally outside the typed HTTP +
-SSE control plane and may use standard `encoding/json` for body
+In default mode, the SPA talks directly to the supervisor's typed
+OpenAPI endpoints from the browser. When launched with `--proxy-api`,
+the dashboard server instead forwards `/v0/*` and `/health` to the
+configured supervisor so browser clients can use a same-origin API
+behind tunnels or supervisor addresses that browsers cannot reach
+directly. Because this exposes the supervisor API through the dashboard
+origin, `--proxy-api` is intended for trusted networks or authenticated
+tunnels. The dashboard server also hosts one narrow operational debug
+endpoint (`/__client-log`) that accepts browser error logs for
+centralized debugging; this endpoint is intentionally outside the typed
+HTTP + SSE control plane and may use standard `encoding/json` for body
 decoding.
+
+Session attachment and asset routes are the other explicit dashboard
+exception to the typed-route rule. They are registered as raw supervisor
+routes because they stream multipart uploads and image bytes, while the
+typed transcript responses carry only their structured references
+(`parts`, `assets`, and `trace`).
 
 ## 3. The typed-wire principle
 

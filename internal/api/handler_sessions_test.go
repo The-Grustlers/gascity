@@ -634,6 +634,53 @@ func writeNamedSessionJSONL(t *testing.T, searchBase, workDir, fileName string, 
 	}
 }
 
+func writeCodexTranscript(t *testing.T, searchBase, workDir string, turns int) {
+	t.Helper()
+	dir := filepath.Join(searchBase, "2026", "05", "29")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, 5, 29, 18, 0, 0, 0, time.UTC)
+	lines := make([]string, 0, turns+1)
+	lines = append(lines, mustJSONLine(t, map[string]any{
+		"timestamp": start.Format(time.RFC3339Nano),
+		"type":      "session_meta",
+		"payload": map[string]any{
+			"cwd": workDir,
+		},
+	}))
+	for i := 0; i < turns; i++ {
+		role := "assistant"
+		if i%2 == 0 {
+			role = "user"
+		}
+		lines = append(lines, mustJSONLine(t, map[string]any{
+			"timestamp": start.Add(time.Duration(i+1) * time.Second).Format(time.RFC3339Nano),
+			"type":      "response_item",
+			"payload": map[string]any{
+				"type": "message",
+				"role": role,
+				"content": []map[string]string{{
+					"text": fmt.Sprintf("turn-%03d", i),
+				}},
+			},
+		}))
+	}
+	path := filepath.Join(dir, "rollout-2026-05-29T18-00-00-long.jsonl")
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustJSONLine(t *testing.T, value any) string {
+	t.Helper()
+	data, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
 type syncResponseRecorder struct {
 	*httptest.ResponseRecorder
 	mu sync.Mutex
@@ -5315,6 +5362,63 @@ func TestHandleSessionTranscriptUsesSessionKey(t *testing.T) {
 	}
 }
 
+func TestHandleSessionTranscriptUsesProviderKindForCustomAlias(t *testing.T) {
+	fs := newSessionFakeState(t)
+	searchBase := t.TempDir()
+	base := "builtin:codex"
+	fs.cfg.Providers["router-alias"] = config.ProviderSpec{
+		Base:        &base,
+		DisplayName: "Router Alias",
+		Command:     "echo",
+	}
+	srv := New(fs)
+	h := newTestCityHandlerWith(t, fs, srv)
+	_ = h
+	srv.sessionLogSearchPaths = []string{searchBase}
+
+	mgr := session.NewManager(fs.cityBeadStore, fs.sp)
+	workDir := t.TempDir()
+	info, err := mgr.Create(context.Background(), "myrig/worker", "Router Chat", "router-alias", workDir, "router-alias", nil, session.ProviderResume{}, runtime.Config{})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := fs.cityBeadStore.SetMetadata(info.ID, "provider_kind", "codex"); err != nil {
+		t.Fatalf("SetMetadata(provider_kind): %v", err)
+	}
+
+	codexDir := filepath.Join(searchBase, "2026", "05", "29")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll codex session dir: %v", err)
+	}
+	codexPayload := strings.Join([]string{
+		fmt.Sprintf(`{"timestamp":"2026-05-29T18:00:00Z","type":"session_meta","payload":{"cwd":%q}}`, workDir),
+		`{"timestamp":"2026-05-29T18:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"text":"hello router"}]}}`,
+		`{"timestamp":"2026-05-29T18:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"text":"hello from codex transcript"}]}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(codexDir, "rollout-2026-05-29T18-00-00-test.jsonl"), []byte(codexPayload), 0o644); err != nil {
+		t.Fatalf("WriteFile codex session: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", cityURL(fs, "/session/")+info.ID+"/transcript?tail=0", nil)
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp SessionStreamMessageEvent
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Provider != "codex" {
+		t.Fatalf("Provider = %q, want codex; body: %s", resp.Provider, w.Body.String())
+	}
+	if len(resp.Turns) != 2 || resp.Turns[0].Text != "hello router" || resp.Turns[1].Text != "hello from codex transcript" {
+		t.Fatalf("Turns = %+v, want Codex turns from custom provider alias", resp.Turns)
+	}
+}
+
 func TestHandleSessionTranscriptClosedSession(t *testing.T) {
 	fs := newSessionFakeState(t)
 	searchBase := t.TempDir()
@@ -5406,6 +5510,244 @@ func TestHandleSessionTranscriptAfterCursor(t *testing.T) {
 	}
 	if resp.Turns[1].Text != "fourth" {
 		t.Errorf("Turns[1].Text = %q, want %q", resp.Turns[1].Text, "fourth")
+	}
+}
+
+func TestHandleSessionTranscriptLimitPaginatesRecentEntries(t *testing.T) {
+	fs := newSessionFakeState(t)
+	searchBase := t.TempDir()
+	srv := New(fs)
+	h := newTestCityHandlerWith(t, fs, srv)
+	_ = h
+	srv.sessionLogSearchPaths = []string{searchBase}
+
+	mgr := session.NewManager(fs.cityBeadStore, fs.sp)
+	resume := session.ProviderResume{
+		ResumeFlag:    "--resume",
+		ResumeStyle:   "flag",
+		SessionIDFlag: "--session-id",
+	}
+	workDir := t.TempDir()
+	info, err := mgr.Create(context.Background(), "myrig/worker", "Chat", "claude", workDir, "claude", nil, resume, runtime.Config{})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	writeNamedSessionJSONL(t, searchBase, workDir, info.SessionKey+".jsonl",
+		`{"uuid":"1","parentUuid":"","type":"user","message":"{\"role\":\"user\",\"content\":\"first\"}","timestamp":"2025-01-01T00:00:00Z"}`,
+		`{"uuid":"2","parentUuid":"1","type":"assistant","message":"{\"role\":\"assistant\",\"content\":\"second\"}","timestamp":"2025-01-01T00:00:01Z"}`,
+		`{"uuid":"3","parentUuid":"2","type":"user","message":"{\"role\":\"user\",\"content\":\"third\"}","timestamp":"2025-01-01T00:00:02Z"}`,
+		`{"uuid":"4","parentUuid":"3","type":"assistant","message":"{\"role\":\"assistant\",\"content\":\"fourth\"}","timestamp":"2025-01-01T00:00:03Z"}`,
+		`{"uuid":"5","parentUuid":"4","type":"user","message":"{\"role\":\"user\",\"content\":\"fifth\"}","timestamp":"2025-01-01T00:00:04Z"}`,
+	)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", cityURL(fs, "/session/")+info.ID+"/transcript?tail=0&limit=2", nil)
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp SessionStreamMessageEvent
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Turns) != 2 || resp.Turns[0].Text != "fourth" || resp.Turns[1].Text != "fifth" {
+		t.Fatalf("Turns = %+v, want fourth/fifth recent page", resp.Turns)
+	}
+	if resp.Pagination == nil || !resp.Pagination.HasOlderMessages || resp.Pagination.TruncatedBeforeMessage != "4" {
+		t.Fatalf("Pagination = %+v, want older cursor at uuid 4", resp.Pagination)
+	}
+
+	w = httptest.NewRecorder()
+	r = httptest.NewRequest("GET", cityURL(fs, "/session/")+info.ID+"/transcript?tail=0&limit=2&before=4", nil)
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("older status %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	resp = SessionStreamMessageEvent{}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode older: %v", err)
+	}
+	if len(resp.Turns) != 2 || resp.Turns[0].Text != "second" || resp.Turns[1].Text != "third" {
+		t.Fatalf("older Turns = %+v, want second/third page", resp.Turns)
+	}
+	if resp.Pagination == nil || !resp.Pagination.HasOlderMessages || resp.Pagination.TruncatedBeforeMessage != "2" {
+		t.Fatalf("older Pagination = %+v, want older cursor at uuid 2", resp.Pagination)
+	}
+}
+
+func TestHandleSessionTranscriptLimitMissingBeforeCursorReturnsEmptyPage(t *testing.T) {
+	fs := newSessionFakeState(t)
+	searchBase := t.TempDir()
+	srv := New(fs)
+	h := newTestCityHandlerWith(t, fs, srv)
+	_ = h
+	srv.sessionLogSearchPaths = []string{searchBase}
+
+	mgr := session.NewManager(fs.cityBeadStore, fs.sp)
+	resume := session.ProviderResume{
+		ResumeFlag:    "--resume",
+		ResumeStyle:   "flag",
+		SessionIDFlag: "--session-id",
+	}
+	workDir := t.TempDir()
+	info, err := mgr.Create(context.Background(), "myrig/worker", "Chat", "claude", workDir, "claude", nil, resume, runtime.Config{})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	writeNamedSessionJSONL(t, searchBase, workDir, info.SessionKey+".jsonl",
+		`{"uuid":"1","parentUuid":"","type":"user","message":"{\"role\":\"user\",\"content\":\"first\"}","timestamp":"2025-01-01T00:00:00Z"}`,
+		`{"uuid":"2","parentUuid":"1","type":"assistant","message":"{\"role\":\"assistant\",\"content\":\"second\"}","timestamp":"2025-01-01T00:00:01Z"}`,
+		`{"uuid":"3","parentUuid":"2","type":"user","message":"{\"role\":\"user\",\"content\":\"third\"}","timestamp":"2025-01-01T00:00:02Z"}`,
+	)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", cityURL(fs, "/session/")+info.ID+"/transcript?tail=0&limit=2&before=missing-cursor", nil)
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp SessionStreamMessageEvent
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Turns) != 0 {
+		t.Fatalf("Turns = %+v, want empty page for missing cursor", resp.Turns)
+	}
+	if resp.Pagination == nil || resp.Pagination.HasOlderMessages || resp.Pagination.ReturnedMessageCount != 0 {
+		t.Fatalf("Pagination = %+v, want empty terminal page", resp.Pagination)
+	}
+}
+
+func TestHandleSessionTranscriptLimitCountsRenderableTurns(t *testing.T) {
+	fs := newSessionFakeState(t)
+	searchBase := t.TempDir()
+	srv := New(fs)
+	h := newTestCityHandlerWith(t, fs, srv)
+	_ = h
+	srv.sessionLogSearchPaths = []string{searchBase}
+
+	mgr := session.NewManager(fs.cityBeadStore, fs.sp)
+	resume := session.ProviderResume{
+		ResumeFlag:    "--resume",
+		ResumeStyle:   "flag",
+		SessionIDFlag: "--session-id",
+	}
+	workDir := t.TempDir()
+	info, err := mgr.Create(context.Background(), "myrig/worker", "Chat", "claude", workDir, "claude", nil, resume, runtime.Config{})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	lines := []string{
+		mustJSONLine(t, map[string]any{
+			"uuid":      "first",
+			"type":      "user",
+			"message":   map[string]any{"role": "user", "content": "first visible turn"},
+			"timestamp": start.Format(time.RFC3339Nano),
+		}),
+	}
+	parent := "first"
+	for i := 0; i < 150; i++ {
+		id := fmt.Sprintf("system-%03d", i)
+		lines = append(lines, mustJSONLine(t, map[string]any{
+			"uuid":       id,
+			"parentUuid": parent,
+			"type":       "system",
+			"subtype":    "status",
+			"timestamp":  start.Add(time.Duration(i+1) * time.Second).Format(time.RFC3339Nano),
+		}))
+		parent = id
+	}
+	lines = append(lines, mustJSONLine(t, map[string]any{
+		"uuid":       "final",
+		"parentUuid": parent,
+		"type":       "assistant",
+		"message":    map[string]any{"role": "assistant", "content": "final visible turn"},
+		"timestamp":  start.Add(151 * time.Second).Format(time.RFC3339Nano),
+	}))
+	writeNamedSessionJSONL(t, searchBase, workDir, info.SessionKey+".jsonl", lines...)
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", cityURL(fs, "/session/")+info.ID+"/transcript?tail=0&limit=2", nil)
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp SessionStreamMessageEvent
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Turns) != 2 || resp.Turns[0].Text != "first visible turn" || resp.Turns[1].Text != "final visible turn" {
+		t.Fatalf("Turns = %+v, want both visible turns despite intervening system entries", resp.Turns)
+	}
+	if resp.Pagination == nil || resp.Pagination.HasOlderMessages || resp.Pagination.ReturnedMessageCount != 2 {
+		t.Fatalf("Pagination = %+v, want two returned renderable turns with no older visible page", resp.Pagination)
+	}
+}
+
+func TestHandleSessionTranscriptLimitCapsLongCodexTranscript(t *testing.T) {
+	fs := newSessionFakeState(t)
+	searchBase := t.TempDir()
+	base := "builtin:codex"
+	fs.cfg.Providers["router-alias"] = config.ProviderSpec{
+		Base:        &base,
+		DisplayName: "Router Alias",
+		Command:     "echo",
+	}
+	srv := New(fs)
+	h := newTestCityHandlerWith(t, fs, srv)
+	_ = h
+	srv.sessionLogSearchPaths = []string{searchBase}
+
+	mgr := session.NewManager(fs.cityBeadStore, fs.sp)
+	workDir := t.TempDir()
+	info, err := mgr.Create(context.Background(), "myrig/worker", "Long Router Chat", "router-alias", workDir, "router-alias", nil, session.ProviderResume{}, runtime.Config{})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := fs.cityBeadStore.SetMetadata(info.ID, "provider_kind", "codex"); err != nil {
+		t.Fatalf("SetMetadata(provider_kind): %v", err)
+	}
+	writeCodexTranscript(t, searchBase, workDir, 600)
+
+	started := time.Now()
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest("GET", cityURL(fs, "/session/")+info.ID+"/transcript?tail=0&limit=100", nil)
+	h.ServeHTTP(w, r)
+	t.Logf("long Codex transcript request took %s", time.Since(started))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("got status %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp SessionStreamMessageEvent
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Turns) != 100 {
+		t.Fatalf("got %d turns, want capped page of 100", len(resp.Turns))
+	}
+	if resp.Turns[0].Text != "turn-500" || resp.Turns[99].Text != "turn-599" {
+		t.Fatalf("Turns range = %q..%q, want turn-500..turn-599", resp.Turns[0].Text, resp.Turns[99].Text)
+	}
+	if resp.Pagination == nil {
+		t.Fatal("Pagination = nil, want cursor metadata")
+	}
+	if !resp.Pagination.HasOlderMessages || resp.Pagination.TotalMessageCount != 600 || resp.Pagination.ReturnedMessageCount != 100 {
+		t.Fatalf("Pagination = %+v, want capped long transcript page with older messages", resp.Pagination)
+	}
+	if resp.Pagination.TruncatedBeforeMessage == "" || resp.Pagination.TotalCompactions != 0 {
+		t.Fatalf("Pagination = %+v, want no compactions but a before cursor", resp.Pagination)
 	}
 }
 
@@ -6853,7 +7195,7 @@ func TestHandleSessionStreamConversationFiltersNonDisplayEntries(t *testing.T) {
 	}
 }
 
-func TestHandleSessionStreamConversationRedactsThinkingText(t *testing.T) {
+func TestHandleSessionStreamConversationCarriesThinkingTrace(t *testing.T) {
 	fs := newSessionFakeState(t)
 	searchBase := t.TempDir()
 	srv := New(fs)
@@ -6872,7 +7214,7 @@ func TestHandleSessionStreamConversationRedactsThinkingText(t *testing.T) {
 	}
 	writeNamedSessionJSONL(t, searchBase, workDir, info.SessionKey+".jsonl",
 		`{"uuid":"1","parentUuid":"","type":"user","message":"{\"role\":\"user\",\"content\":\"hello\"}","timestamp":"2025-01-01T00:00:00Z"}`,
-		`{"uuid":"2","parentUuid":"1","type":"assistant","message":"{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"private chain of thought\"},{\"type\":\"text\",\"text\":\"visible answer\"}]}","timestamp":"2025-01-01T00:00:01Z"}`,
+		`{"uuid":"2","parentUuid":"1","type":"assistant","message":"{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"thinking through visible answer\"},{\"type\":\"text\",\"text\":\"visible answer\"}]}","timestamp":"2025-01-01T00:00:01Z"}`,
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -6886,8 +7228,8 @@ func TestHandleSessionStreamConversationRedactsThinkingText(t *testing.T) {
 	if !strings.Contains(body, "visible answer") {
 		t.Fatalf("conversation stream body missing visible assistant answer: %s", body)
 	}
-	if strings.Contains(body, "private chain of thought") {
-		t.Fatalf("conversation stream leaked thinking text: %s", body)
+	if !strings.Contains(body, `"trace"`) || !strings.Contains(body, "thinking through visible answer") {
+		t.Fatalf("conversation stream body missing thinking trace: %s", body)
 	}
 }
 

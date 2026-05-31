@@ -28,6 +28,7 @@ import { installSharedModals } from "./modals";
 import { createRefreshScheduler } from "./refresh_scheduler";
 
 const CITY_SCOPED_PANEL_IDS = [
+  "sessions-panel",
   "convoy-panel",
   "crew-panel",
   "rigged-panel",
@@ -40,7 +41,6 @@ const CITY_SCOPED_PANEL_IDS = [
   "queues-panel",
   "beads-panel",
   "assigned-panel",
-  "agent-log-drawer",
 ];
 
 async function refreshAll(): Promise<void> {

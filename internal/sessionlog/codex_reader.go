@@ -55,14 +55,19 @@ func ReadCodexFile(path string, _ int) (*Session, error) {
 	}
 	diagnostics.MalformedTail = lastNonEmptyLineMalformed
 
-	// Check if response_item entries contain user messages (preferred source).
+	// Check if response_item entries contain preferred message variants.
 	hasResponseItemUser := false
+	hasResponseItemReasoning := false
 	for _, e := range entries {
 		if e.raw.Type == "response_item" {
 			var ri codexResponseItem
-			if json.Unmarshal(e.raw.Payload, &ri) == nil && ri.Type == "message" && ri.Role == "user" {
-				hasResponseItemUser = true
-				break
+			if json.Unmarshal(e.raw.Payload, &ri) == nil {
+				if ri.Type == "message" && ri.Role == "user" {
+					hasResponseItemUser = true
+				}
+				if ri.Type == "reasoning" && codexReasoningText(ri) != "" {
+					hasResponseItemReasoning = true
+				}
 			}
 		}
 	}
@@ -128,6 +133,9 @@ func ReadCodexFile(path string, _ int) (*Session, error) {
 				idx++
 
 			case "agent_reasoning":
+				if hasResponseItemReasoning {
+					continue // prefer response_item reasoning when Codex writes both forms
+				}
 				entry := &Entry{
 					UUID:      fmt.Sprintf("codex-event-%d", idx),
 					Type:      "assistant",
@@ -151,6 +159,26 @@ func ReadCodexFile(path string, _ int) (*Session, error) {
 					Message: mustMarshal(MessageContent{
 						Role:    "system",
 						Content: mustMarshal([]ContentBlock{{Type: "text", Text: codexErrorText(em)}}),
+					}),
+					Raw: json.RawMessage(e.line),
+				}
+				entry.ParentUUID = lastUUID
+				lastUUID = entry.UUID
+				messages = append(messages, entry)
+				idx++
+
+			case "task_complete":
+				if !codexTaskCompleteHadNoAgentMessage(em) {
+					continue
+				}
+				entry := &Entry{
+					UUID:      fmt.Sprintf("codex-event-%d", idx),
+					Type:      "system",
+					Subtype:   "codex_no_response",
+					Timestamp: ts,
+					Message: mustMarshal(MessageContent{
+						Role:    "system",
+						Content: mustMarshal([]ContentBlock{{Type: "text", Text: "Session completed this turn without a visible response."}}),
 					}),
 					Raw: json.RawMessage(e.line),
 				}
@@ -218,10 +246,7 @@ func convertResponseItem(payload json.RawMessage, rawLine string, idx int, ts ti
 		}
 
 	case "reasoning":
-		var summaryText string
-		for _, s := range ri.Summary {
-			summaryText += s.Text + "\n"
-		}
+		summaryText := codexReasoningText(ri)
 		return &Entry{
 			UUID:      uuid,
 			Type:      "assistant",
@@ -245,7 +270,7 @@ func convertResponseItem(payload json.RawMessage, rawLine string, idx int, ts ti
 					Type:  "tool_use",
 					ID:    callID,
 					Name:  ri.Name,
-					Input: cloneRawJSON(ri.Input),
+					Input: codexToolCallInput(ri),
 				}}),
 			}),
 			Raw: json.RawMessage(rawLine),
@@ -312,6 +337,45 @@ func codexErrorText(em codexEventMsg) string {
 	}
 }
 
+func codexReasoningText(ri codexResponseItem) string {
+	var summaryText string
+	for _, s := range ri.Summary {
+		summaryText += s.Text + "\n"
+	}
+	return strings.TrimSpace(summaryText)
+}
+
+func codexToolCallInput(ri codexResponseItem) json.RawMessage {
+	raw := ri.Input
+	if len(raw) == 0 {
+		raw = ri.Arguments
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil
+		}
+		if json.Valid([]byte(s)) {
+			return append(json.RawMessage(nil), []byte(s)...)
+		}
+		data, err := json.Marshal(s)
+		if err != nil {
+			return nil
+		}
+		return data
+	}
+	return cloneRawJSON(raw)
+}
+
+func codexTaskCompleteHadNoAgentMessage(em codexEventMsg) bool {
+	raw := strings.TrimSpace(string(em.LastAgentMessage))
+	return raw == "null"
+}
+
 func skipCodexEventMsgType(kind string) bool {
 	switch strings.TrimSpace(kind) {
 	case "token_count",
@@ -364,10 +428,11 @@ type codexEntry struct {
 }
 
 type codexEventMsg struct {
-	Type           string `json:"type"`             // user_message, agent_message, agent_reasoning, token_count
-	Message        string `json:"message"`          // for user_message, agent_message, error
-	Text           string `json:"text"`             // for agent_reasoning
-	CodexErrorInfo string `json:"codex_error_info"` // for usage_limit_exceeded and related errors
+	Type             string          `json:"type"`               // user_message, agent_message, agent_reasoning, token_count
+	Message          string          `json:"message"`            // for user_message, agent_message, error
+	Text             string          `json:"text"`               // for agent_reasoning
+	CodexErrorInfo   string          `json:"codex_error_info"`   // for usage_limit_exceeded and related errors
+	LastAgentMessage json.RawMessage `json:"last_agent_message"` // for task_complete
 }
 
 type codexResponseItem struct {
@@ -378,6 +443,7 @@ type codexResponseItem struct {
 	CallID    string             `json:"call_id,omitempty"`
 	Name      string             `json:"name,omitempty"`
 	Input     json.RawMessage    `json:"input,omitempty"`
+	Arguments json.RawMessage    `json:"arguments,omitempty"`
 	Output    json.RawMessage    `json:"output,omitempty"`
 	RequestID string             `json:"request_id,omitempty"`
 	ID        string             `json:"id,omitempty"`
