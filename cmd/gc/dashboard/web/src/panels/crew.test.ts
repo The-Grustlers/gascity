@@ -231,6 +231,7 @@ describe("crew empty states", () => {
       expect(document.getElementById("log-drawer-messages")?.textContent).toContain("Router transcript");
     });
     expect(document.querySelector(".log-msg-type-assistant")?.textContent).toBe("rig-a/router");
+    expect(new URL(window.location.href).searchParams.get("session")).toBe("s-role");
     expect(document.getElementById("agent-log-drawer")?.closest("#sessions-detail")).not.toBeNull();
     expect((document.getElementById("sessions-detail-summary") as HTMLElement).style.display).toBe("none");
   });

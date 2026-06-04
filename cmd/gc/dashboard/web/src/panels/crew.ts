@@ -414,7 +414,14 @@ function logButton(sessionID: string, label: string, title = label): HTMLElement
 }
 
 export async function openSessionCockpit(sessionID: string, label: string): Promise<void> {
+  writeSessionDeepLink(sessionID);
   await openSessionCockpitDrawer(sessionID, label);
+}
+
+function writeSessionDeepLink(sessionID: string): void {
+  const url = new URL(window.location.href);
+  url.searchParams.set("session", sessionID);
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 export const installCrewInteractions = installSessionCockpitInteractions;
