@@ -12,6 +12,7 @@ import {
 } from "./session_cockpit";
 
 let selectedWorkspaceSessionID = "";
+let openedSessionDeepLinkID = "";
 const pendingStateConcurrency = 8;
 
 configureSessionCockpitHost({
@@ -192,6 +193,13 @@ function renderSessionsWorkspace(
     selectedWorkspaceSessionID = "";
   }
 
+  const requestedSessionID = requestedSessionDeepLinkID();
+  if (!requestedSessionID) openedSessionDeepLinkID = "";
+  const requestedSession = requestedSessionID ? rows.find((session) => session.id === requestedSessionID) : undefined;
+  if (requestedSession && requestedSessionID !== openedSessionDeepLinkID) {
+    selectedWorkspaceSessionID = requestedSession.id;
+  }
+
   rows.forEach((session) => {
     const hasPending = pendingBySessionID.get(session.id) ?? false;
     const state = sessionWorkspaceState(session, hasPending);
@@ -244,6 +252,15 @@ function renderSessionsWorkspace(
     renderSimpleEmpty(detail, "No session selected");
     setSessionsDetailVisible(false);
   }
+
+  if (requestedSession && requestedSessionID !== openedSessionDeepLinkID) {
+    openedSessionDeepLinkID = requestedSessionID;
+    void openSessionCockpit(requestedSession.id, sessionTitle(requestedSession));
+  }
+}
+
+function requestedSessionDeepLinkID(): string {
+  return new URLSearchParams(window.location.search).get("session")?.trim() ?? "";
 }
 
 function resetSessionsWorkspace(message: string): void {
