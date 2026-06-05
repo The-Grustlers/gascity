@@ -37,6 +37,18 @@
       <div class="summary-banner" id="status-banner"></div>
 
       <div class="panels">
+        <div class="panel panel-full" id="swarm-panel">
+          <div class="panel-header">
+            <h2>Swarm</h2>
+            <span class="count" id="swarm-count">0</span>
+            <button class="collapse-btn" aria-label="Toggle panel">▼</button>
+            <button class="expand-btn">Expand</button>
+          </div>
+          <div class="panel-body" id="swarm-list">
+            <div class="loading-state">Loading swarm...</div>
+          </div>
+        </div>
+
         <div class="panel panel-full" id="supervisor-overview-panel" hidden>
           <div class="panel-header">
             <h2>🏙️ Fleet Overview</h2>

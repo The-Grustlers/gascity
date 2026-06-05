@@ -6,13 +6,13 @@ describe("dashboard state invalidation", () => {
     window.history.pushState({}, "", "/dashboard?city=mc-city");
   });
 
-  it("keeps city bead refresh scoped to status and issues", async () => {
+  it("keeps city bead refresh scoped to status, swarm, and issues", async () => {
     const { consumeInvalidated, invalidateForEventType } = await import("./state");
     consumeInvalidated();
 
     invalidateForEventType("bead.updated");
 
-    expect([...consumeInvalidated()].sort()).toEqual(["issues", "status"]);
+    expect([...consumeInvalidated()].sort()).toEqual(["issues", "status", "swarm"]);
   });
 
   it("does not refresh supervisor resources for city-scoped bead events", async () => {
@@ -26,12 +26,12 @@ describe("dashboard state invalidation", () => {
     expect([...consumeInvalidated()]).toEqual([]);
   });
 
-  it("keeps session refresh scoped to status, crew, and options", async () => {
+  it("keeps session refresh scoped to status, swarm, crew, and options", async () => {
     const { consumeInvalidated, invalidateForEventType } = await import("./state");
     consumeInvalidated();
 
     invalidateForEventType("session.updated");
 
-    expect([...consumeInvalidated()].sort()).toEqual(["crew", "options", "status"]);
+    expect([...consumeInvalidated()].sort()).toEqual(["crew", "options", "status", "swarm"]);
   });
 });

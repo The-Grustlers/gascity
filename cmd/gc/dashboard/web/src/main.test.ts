@@ -19,6 +19,7 @@ function installDOM(): void {
   document.body.innerHTML = `
     <div id="city-tabs"></div>
     <div id="connection-status"></div>
+    <div id="swarm-panel"></div>
     <div id="convoy-panel"></div>
     <div id="crew-panel"></div>
     <div id="rigged-panel"></div>
@@ -93,6 +94,10 @@ describe("dashboard city scope navigation", () => {
       installCrewInteractions: vi.fn(),
       renderCrew: vi.fn(async () => {}),
       resetCrewNoCity: vi.fn(),
+    }));
+    vi.doMock("./panels/swarm", () => ({
+      renderSwarm: vi.fn(async () => {}),
+      resetSwarmNoCity: vi.fn(),
     }));
     vi.doMock("./panels/issues", () => ({
       installIssueInteractions: vi.fn(),
@@ -188,6 +193,10 @@ describe("dashboard city scope navigation", () => {
       installCrewInteractions: vi.fn(),
       renderCrew: vi.fn(async () => {}),
       resetCrewNoCity: vi.fn(),
+    }));
+    vi.doMock("./panels/swarm", () => ({
+      renderSwarm: vi.fn(async () => {}),
+      resetSwarmNoCity: vi.fn(),
     }));
     vi.doMock("./panels/issues", () => ({
       installIssueInteractions: vi.fn(),

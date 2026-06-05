@@ -2,6 +2,7 @@ export type DashboardResource =
   | "cities"
   | "status"
   | "supervisor"
+  | "swarm"
   | "crew"
   | "issues"
   | "mail"
@@ -23,6 +24,7 @@ const ALL_RESOURCES: DashboardResource[] = [
   "cities",
   "status",
   "supervisor",
+  "swarm",
   "crew",
   "issues",
   "mail",
@@ -34,6 +36,7 @@ const ALL_RESOURCES: DashboardResource[] = [
 
 const CITY_SCOPED_RESOURCES: DashboardResource[] = [
   "status",
+  "swarm",
   "crew",
   "issues",
   "mail",
@@ -147,12 +150,12 @@ export function invalidateForEventType(type: string): boolean {
   const hasCityScope = currentCity !== "";
   if (type.startsWith("session.") || type.startsWith("agent.")) {
     if (!hasCityScope) return false;
-    invalidate("status", "crew", "options");
+    invalidate("status", "swarm", "crew", "options");
     return true;
   }
   if (type.startsWith("bead.")) {
     if (!hasCityScope) return false;
-    invalidate("status", "issues");
+    invalidate("status", "swarm", "issues");
     return true;
   }
   if (type.startsWith("mail.")) {
@@ -162,7 +165,7 @@ export function invalidateForEventType(type: string): boolean {
   }
   if (type.startsWith("convoy.")) {
     if (!hasCityScope) return false;
-    invalidate("status", "convoys");
+    invalidate("status", "swarm", "convoys");
     return true;
   }
   if (type.startsWith("city.") || type.startsWith("request.result.") || type === "request.failed") {

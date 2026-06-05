@@ -2,6 +2,7 @@ import { cityScope } from "./api";
 import { renderCityTabs } from "./panels/cities";
 import { renderStatus } from "./panels/status";
 import { renderCrew, installCrewInteractions, closeLogDrawerExternal, resetCrewNoCity } from "./panels/crew";
+import { renderSwarm, resetSwarmNoCity } from "./panels/swarm";
 import { renderIssues, installIssueInteractions, resetIssuesNoCity } from "./panels/issues";
 import { renderMail, installMailInteractions, resetMailNoCity } from "./panels/mail";
 import { renderConvoys, installConvoyInteractions, resetConvoysNoCity } from "./panels/convoys";
@@ -27,6 +28,7 @@ import { installSharedModals } from "./modals";
 import { createRefreshScheduler } from "./refresh_scheduler";
 
 const CITY_SCOPED_PANEL_IDS = [
+  "swarm-panel",
   "sessions-panel",
   "convoy-panel",
   "crew-panel",
@@ -259,6 +261,7 @@ async function refreshVisibleResources(force = false): Promise<void> {
   // the city list is known-good and proves the city is stopped or absent.
   if (canFetchCity) {
     queueRefresh(tasks, dirty, "crew", () => renderCrew());
+    queueRefresh(tasks, dirty, "swarm", () => renderSwarm());
     queueRefresh(tasks, dirty, "issues", () => renderIssues());
     queueRefresh(tasks, dirty, "mail", () => renderMail());
     queueRefresh(tasks, dirty, "convoys", () => renderConvoys());
@@ -279,6 +282,7 @@ async function refreshVisibleResources(force = false): Promise<void> {
 function resetCityScopedResourceViews(): void {
   resetConvoysNoCity();
   resetCrewNoCity();
+  resetSwarmNoCity();
   resetIssuesNoCity();
   resetMailNoCity();
   renderAdminEmptyStates();
