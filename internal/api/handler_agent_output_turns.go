@@ -29,7 +29,7 @@ func entryToTurn(e *worker.TranscriptEntry) outputTurn {
 	// Try plain string content (message is a JSON object with string content).
 	if text := e.TextContent(); text != "" {
 		turn.Text = text
-		turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: "text", Text: text})
+		turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: outputPartTypeText, Text: text})
 		assets := extractImageAssetsFromText(text, "text")
 		turn.Assets = appendOutputAssets(turn.Assets, assets...)
 		turn.Parts = appendOutputParts(turn.Parts, outputPartsFromAssets(assets)...)
@@ -44,7 +44,7 @@ func entryToTurn(e *worker.TranscriptEntry) outputTurn {
 			case "text":
 				if b.Text != "" {
 					parts = append(parts, b.Text)
-					turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: "text", Text: b.Text})
+					turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: outputPartTypeText, Text: b.Text})
 					assets := extractImageAssetsFromText(b.Text, "text")
 					turn.Assets = appendOutputAssets(turn.Assets, assets...)
 					turn.Parts = appendOutputParts(turn.Parts, outputPartsFromAssets(assets)...)
@@ -54,11 +54,11 @@ func entryToTurn(e *worker.TranscriptEntry) outputTurn {
 					parts = append(parts, formatToolUseText(b.Name, b.Input))
 				}
 				turn.Parts = appendOutputParts(turn.Parts, outputPart{
-					Type:  "tool",
+					Type:  outputPartTypeToolUse,
 					ID:    b.ID,
 					Name:  b.Name,
 					Tool:  b.Name,
-					Input: cloneOutputRawJSON(b.Input),
+					Input: outputJSONFromRaw(b.Input),
 				})
 				assets := extractImageAssetsFromToolInput(b.Input, "tool_use")
 				turn.Assets = appendOutputAssets(turn.Assets, assets...)
@@ -66,11 +66,11 @@ func entryToTurn(e *worker.TranscriptEntry) outputTurn {
 			case "tool_result":
 				text := extractToolResultText(b.Content)
 				turn.Parts = appendOutputParts(turn.Parts, outputPart{
-					Type:      "tool",
+					Type:      outputPartTypeToolResult,
 					ToolUseID: b.ToolUseID,
 					Name:      b.Name,
 					Tool:      b.Name,
-					Output:    cloneOutputRawJSON(b.Content),
+					Output:    outputJSONFromRaw(b.Content),
 					IsError:   b.IsError,
 				})
 				if text != "" {
@@ -85,11 +85,11 @@ func entryToTurn(e *worker.TranscriptEntry) outputTurn {
 			case "thinking":
 				if text := thinkingBlockText(thinkingBlockInlineText(b), b.Content); text != "" {
 					turn.Trace = appendOutputTrace(turn.Trace, outputTrace{Kind: "thinking", Text: text})
-					turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: "reasoning", Text: text})
+					turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: outputPartTypeReasoning, Text: text})
 				}
 			case "interaction":
 				turn.Parts = appendOutputParts(turn.Parts, outputPart{
-					Type:      "interaction",
+					Type:      outputPartTypeInteraction,
 					ID:        b.ID,
 					RequestID: b.RequestID,
 					Kind:      b.Kind,
@@ -109,7 +109,7 @@ func entryToTurn(e *worker.TranscriptEntry) outputTurn {
 	// containing JSON. Unwrap and try again.
 	turn.Text = unwrapDoubleEncoded(e.Message)
 	if turn.Text != "" {
-		turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: "text", Text: turn.Text})
+		turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: outputPartTypeText, Text: turn.Text})
 	}
 	assets := extractImageAssetsFromText(turn.Text, "text")
 	turn.Assets = appendOutputAssets(turn.Assets, assets...)
@@ -135,7 +135,7 @@ func historyEntryToTurn(entry worker.HistoryEntry) outputTurn {
 			case worker.BlockKindText:
 				if block.Text != "" {
 					parts = append(parts, block.Text)
-					turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: "text", Text: block.Text})
+					turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: outputPartTypeText, Text: block.Text})
 					assets := extractImageAssetsFromText(block.Text, "text")
 					turn.Assets = appendOutputAssets(turn.Assets, assets...)
 					turn.Parts = appendOutputParts(turn.Parts, outputPartsFromAssets(assets)...)
@@ -145,12 +145,12 @@ func historyEntryToTurn(entry worker.HistoryEntry) outputTurn {
 					parts = append(parts, formatToolUseText(block.Name, block.Input))
 				}
 				turn.Parts = appendOutputParts(turn.Parts, outputPart{
-					Type:      "tool",
+					Type:      outputPartTypeToolUse,
 					ID:        block.ToolUseID,
 					ToolUseID: block.ToolUseID,
 					Name:      block.Name,
 					Tool:      block.Name,
-					Input:     cloneOutputRawJSON(block.Input),
+					Input:     outputJSONFromRaw(block.Input),
 				})
 				assets := extractImageAssetsFromToolInput(block.Input, "tool_use")
 				turn.Assets = appendOutputAssets(turn.Assets, assets...)
@@ -158,12 +158,12 @@ func historyEntryToTurn(entry worker.HistoryEntry) outputTurn {
 			case worker.BlockKindToolResult:
 				text := extractToolResultText(block.Content)
 				turn.Parts = appendOutputParts(turn.Parts, outputPart{
-					Type:      "tool",
+					Type:      outputPartTypeToolResult,
 					ID:        block.ToolUseID,
 					ToolUseID: block.ToolUseID,
 					Name:      block.Name,
 					Tool:      block.Name,
-					Output:    cloneOutputRawJSON(block.Content),
+					Output:    outputJSONFromRaw(block.Content),
 					IsError:   block.IsError,
 				})
 				if text != "" {
@@ -178,11 +178,11 @@ func historyEntryToTurn(entry worker.HistoryEntry) outputTurn {
 			case worker.BlockKindThinking:
 				if text := thinkingBlockText(block.Text, block.Content); text != "" {
 					turn.Trace = appendOutputTrace(turn.Trace, outputTrace{Kind: "thinking", Text: text})
-					turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: "reasoning", Text: text})
+					turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: outputPartTypeReasoning, Text: text})
 				}
 			case worker.BlockKindInteraction:
 				part := outputPart{
-					Type:      "interaction",
+					Type:      outputPartTypeInteraction,
 					ID:        block.ToolUseID,
 					ToolUseID: block.ToolUseID,
 					Text:      block.Text,
@@ -206,7 +206,7 @@ func historyEntryToTurn(entry worker.HistoryEntry) outputTurn {
 
 	if strings.TrimSpace(entry.Text) != "" {
 		turn.Text = entry.Text
-		turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: "text", Text: turn.Text})
+		turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: outputPartTypeText, Text: turn.Text})
 		assets := extractImageAssetsFromText(turn.Text, "text")
 		turn.Assets = appendOutputAssets(turn.Assets, assets...)
 		turn.Parts = appendOutputParts(turn.Parts, outputPartsFromAssets(assets)...)
@@ -215,7 +215,7 @@ func historyEntryToTurn(entry worker.HistoryEntry) outputTurn {
 	if turn.Text == "" {
 		turn.Text = historyRawEntryText(entry.Provenance.Raw)
 		if turn.Text != "" {
-			turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: "text", Text: turn.Text})
+			turn.Parts = appendOutputParts(turn.Parts, outputPart{Type: outputPartTypeText, Text: turn.Text})
 		}
 		assets := extractImageAssetsFromText(turn.Text, "text")
 		turn.Assets = appendOutputAssets(turn.Assets, assets...)
@@ -449,7 +449,7 @@ func outputPartsFromAssets(assets []outputAsset) []outputPart {
 			kind = "image"
 		}
 		parts = append(parts, outputPart{
-			Type:   "file",
+			Type:   outputPartTypeFile,
 			Kind:   kind,
 			Name:   asset.Name,
 			Path:   asset.Path,
@@ -472,7 +472,7 @@ func appendOutputParts(existing []outputPart, incoming ...outputPart) []outputPa
 		}
 	}
 	for _, part := range incoming {
-		part.Type = strings.TrimSpace(part.Type)
+		part.Type = outputPartType(strings.TrimSpace(string(part.Type)))
 		if part.Type == "" {
 			continue
 		}
@@ -488,7 +488,7 @@ func appendOutputParts(existing []outputPart, incoming ...outputPart) []outputPa
 }
 
 func outputPartFileKey(part outputPart) string {
-	if part.Type != "file" {
+	if part.Type != outputPartTypeFile {
 		return ""
 	}
 	if part.URL != "" {
@@ -498,13 +498,6 @@ func outputPartFileKey(part outputPart) string {
 		return "path:" + part.Path
 	}
 	return ""
-}
-
-func cloneOutputRawJSON(raw json.RawMessage) json.RawMessage {
-	if len(raw) == 0 {
-		return nil
-	}
-	return append(json.RawMessage(nil), raw...)
 }
 
 // unwrapDoubleEncoded handles Claude's double-encoded message format

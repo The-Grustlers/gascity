@@ -99,6 +99,36 @@ func (e EventRotateArchiveCompressionStatus) Valid() bool {
 	}
 }
 
+// Defines values for OutputPartType.
+const (
+	File        OutputPartType = "file"
+	Interaction OutputPartType = "interaction"
+	Reasoning   OutputPartType = "reasoning"
+	Text        OutputPartType = "text"
+	ToolResult  OutputPartType = "tool_result"
+	ToolUse     OutputPartType = "tool_use"
+)
+
+// Valid indicates whether the value is a known member of the OutputPartType enum.
+func (e OutputPartType) Valid() bool {
+	switch e {
+	case File:
+		return true
+	case Interaction:
+		return true
+	case Reasoning:
+		return true
+	case Text:
+		return true
+	case ToolResult:
+		return true
+	case ToolUse:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RequestFailedPayloadOperation.
 const (
 	CityCreate     RequestFailedPayloadOperation = "city.create"
@@ -1472,6 +1502,26 @@ type InboundResult struct {
 	TranscriptEntry ConversationTranscriptRecord `json:"TranscriptEntry"`
 }
 
+// JsonValue Any valid JSON value: object, array, string, number, boolean, or null.
+type JsonValue struct {
+	union json.RawMessage
+}
+
+// JsonValue0 defines model for .
+type JsonValue0 map[string]JsonValue
+
+// JsonValue1 defines model for .
+type JsonValue1 = []JsonValue
+
+// JsonValue2 defines model for .
+type JsonValue2 = string
+
+// JsonValue3 defines model for .
+type JsonValue3 = float32
+
+// JsonValue4 defines model for .
+type JsonValue4 = bool
+
 // ListBodyAgentPatch defines model for ListBodyAgentPatch.
 type ListBodyAgentPatch struct {
 	// Items The list of items.
@@ -2030,26 +2080,35 @@ type OutputAsset struct {
 
 // OutputPart defines model for OutputPart.
 type OutputPart struct {
-	Action    *string     `json:"action,omitempty"`
-	Id        *string     `json:"id,omitempty"`
-	Input     interface{} `json:"input,omitempty"`
-	IsError   *bool       `json:"is_error,omitempty"`
-	Kind      *string     `json:"kind,omitempty"`
-	Mime      *string     `json:"mime,omitempty"`
-	Name      *string     `json:"name,omitempty"`
-	Options   *[]string   `json:"options,omitempty"`
-	Output    interface{} `json:"output,omitempty"`
-	Path      *string     `json:"path,omitempty"`
-	Prompt    *string     `json:"prompt,omitempty"`
-	RequestId *string     `json:"request_id,omitempty"`
-	Source    *string     `json:"source,omitempty"`
-	State     *string     `json:"state,omitempty"`
-	Text      *string     `json:"text,omitempty"`
-	Tool      *string     `json:"tool,omitempty"`
-	ToolUseId *string     `json:"tool_use_id,omitempty"`
-	Type      string      `json:"type"`
-	Url       *string     `json:"url,omitempty"`
+	Action *string `json:"action,omitempty"`
+	Id     *string `json:"id,omitempty"`
+
+	// Input Any valid JSON value: object, array, string, number, boolean, or null.
+	Input   *JsonValue `json:"input,omitempty"`
+	IsError *bool      `json:"is_error,omitempty"`
+	Kind    *string    `json:"kind,omitempty"`
+	Mime    *string    `json:"mime,omitempty"`
+	Name    *string    `json:"name,omitempty"`
+	Options *[]string  `json:"options,omitempty"`
+
+	// Output Any valid JSON value: object, array, string, number, boolean, or null.
+	Output    *JsonValue `json:"output,omitempty"`
+	Path      *string    `json:"path,omitempty"`
+	Prompt    *string    `json:"prompt,omitempty"`
+	RequestId *string    `json:"request_id,omitempty"`
+	Source    *string    `json:"source,omitempty"`
+	State     *string    `json:"state,omitempty"`
+	Text      *string    `json:"text,omitempty"`
+	Tool      *string    `json:"tool,omitempty"`
+	ToolUseId *string    `json:"tool_use_id,omitempty"`
+
+	// Type Kind of part within a unified transcript turn.
+	Type OutputPartType `json:"type"`
+	Url  *string        `json:"url,omitempty"`
 }
+
+// OutputPartType Kind of part within a unified transcript turn.
+type OutputPartType string
 
 // OutputTrace defines model for OutputTrace.
 type OutputTrace struct {
@@ -6972,6 +7031,146 @@ func (t EventPayload) MarshalJSON() ([]byte, error) {
 }
 
 func (t *EventPayload) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
+
+// AsJsonValue0 returns the union data inside the JsonValue as a JsonValue0
+func (t JsonValue) AsJsonValue0() (JsonValue0, error) {
+	var body JsonValue0
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromJsonValue0 overwrites any union data inside the JsonValue as the provided JsonValue0
+func (t *JsonValue) FromJsonValue0(v JsonValue0) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeJsonValue0 performs a merge with any union data inside the JsonValue, using the provided JsonValue0
+func (t *JsonValue) MergeJsonValue0(v JsonValue0) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsJsonValue1 returns the union data inside the JsonValue as a JsonValue1
+func (t JsonValue) AsJsonValue1() (JsonValue1, error) {
+	var body JsonValue1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromJsonValue1 overwrites any union data inside the JsonValue as the provided JsonValue1
+func (t *JsonValue) FromJsonValue1(v JsonValue1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeJsonValue1 performs a merge with any union data inside the JsonValue, using the provided JsonValue1
+func (t *JsonValue) MergeJsonValue1(v JsonValue1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsJsonValue2 returns the union data inside the JsonValue as a JsonValue2
+func (t JsonValue) AsJsonValue2() (JsonValue2, error) {
+	var body JsonValue2
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromJsonValue2 overwrites any union data inside the JsonValue as the provided JsonValue2
+func (t *JsonValue) FromJsonValue2(v JsonValue2) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeJsonValue2 performs a merge with any union data inside the JsonValue, using the provided JsonValue2
+func (t *JsonValue) MergeJsonValue2(v JsonValue2) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsJsonValue3 returns the union data inside the JsonValue as a JsonValue3
+func (t JsonValue) AsJsonValue3() (JsonValue3, error) {
+	var body JsonValue3
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromJsonValue3 overwrites any union data inside the JsonValue as the provided JsonValue3
+func (t *JsonValue) FromJsonValue3(v JsonValue3) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeJsonValue3 performs a merge with any union data inside the JsonValue, using the provided JsonValue3
+func (t *JsonValue) MergeJsonValue3(v JsonValue3) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsJsonValue4 returns the union data inside the JsonValue as a JsonValue4
+func (t JsonValue) AsJsonValue4() (JsonValue4, error) {
+	var body JsonValue4
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromJsonValue4 overwrites any union data inside the JsonValue as the provided JsonValue4
+func (t *JsonValue) FromJsonValue4(v JsonValue4) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeJsonValue4 performs a merge with any union data inside the JsonValue, using the provided JsonValue4
+func (t *JsonValue) MergeJsonValue4(v JsonValue4) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t JsonValue) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *JsonValue) UnmarshalJSON(b []byte) error {
 	err := t.union.UnmarshalJSON(b)
 	return err
 }

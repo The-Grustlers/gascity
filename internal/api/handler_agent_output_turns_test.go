@@ -38,7 +38,7 @@ func TestEntryToTurnAddsImageAssetsFromTextAndToolResults(t *testing.T) {
 	if turn.Parts[0].Type != "text" || !strings.Contains(turn.Parts[0].Text, "See ![chart]") {
 		t.Fatalf("Parts[0] = %#v, want text part", turn.Parts[0])
 	}
-	if turn.Parts[3].Type != "tool" || len(turn.Parts[3].Output) == 0 {
+	if turn.Parts[3].Type != "tool_result" || turn.Parts[3].Output == nil || len(turn.Parts[3].Output.Raw) == 0 {
 		t.Fatalf("Parts[3] = %#v, want tool result part", turn.Parts[3])
 	}
 	if turn.Parts[5].Type != "reasoning" || turn.Parts[5].Text != "checked tool output" {
@@ -96,10 +96,29 @@ func TestEntryToTurnAddsImageAssetFromToolUseInput(t *testing.T) {
 	if !strings.Contains(turn.Text, "[view_image]") || !strings.Contains(turn.Text, "../shots/preview.png") {
 		t.Fatalf("Text = %q, want tool call summary with input detail", turn.Text)
 	}
-	if len(turn.Parts) != 2 || turn.Parts[0].Type != "tool" || turn.Parts[1].Type != "file" {
+	if len(turn.Parts) != 2 || turn.Parts[0].Type != "tool_use" || turn.Parts[0].Input == nil || turn.Parts[1].Type != "file" {
 		t.Fatalf("Parts = %#v, want tool plus file parts", turn.Parts)
 	}
 	assertAssetPath(t, turn.Assets, "../shots/preview.png", "tool_use")
+}
+
+func TestOutputJSONValuePreservesStructuredToolPayload(t *testing.T) {
+	value := outputJSONFromRaw(mustRawJSONObject(t, map[string]any{
+		"cmd":           "gc prime",
+		"yield_time_ms": float64(1000),
+	}))
+	if value == nil {
+		t.Fatal("outputJSONFromRaw returned nil")
+	}
+	payload, err := json.Marshal(struct {
+		Input *JSONValue `json:"input,omitempty"`
+	}{Input: value})
+	if err != nil {
+		t.Fatalf("marshal JSONValue: %v", err)
+	}
+	if got, want := string(payload), `{"input":{"cmd":"gc prime","yield_time_ms":1000}}`; got != want {
+		t.Fatalf("payload = %s, want %s", got, want)
+	}
 }
 
 func TestAppendOutputTurnDistinctDeduplicatesConsecutiveTraceOnlyTurns(t *testing.T) {

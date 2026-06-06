@@ -185,29 +185,29 @@ func (s *Server) handleSessionAttachmentServe(w http.ResponseWriter, r *http.Req
 	}
 }
 
-func resolveSessionAttachmentFilePath(root, dir, filename string) (string, error) {
+func resolveSessionAttachmentFilePath(root, dir, filename string) (sessionResolvedAssetPath, error) {
 	if err := ensureAttachmentDirWithinRoot(root, dir); err != nil {
-		return "", sessionAssetErrorFromAttachmentError(err)
+		return sessionResolvedAssetPath{}, sessionAssetErrorFromAttachmentError(err)
 	}
 	dirEval, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", sessionAssetClientError{status: http.StatusNotFound, code: "not_found", message: "attachment not found"}
+			return sessionResolvedAssetPath{}, sessionAssetClientError{status: http.StatusNotFound, code: "not_found", message: "attachment not found"}
 		}
-		return "", err
+		return sessionResolvedAssetPath{}, err
 	}
 	path := filepath.Join(dir, filename)
 	targetEval, err := filepath.EvalSymlinks(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", sessionAssetClientError{status: http.StatusNotFound, code: "not_found", message: "attachment not found"}
+			return sessionResolvedAssetPath{}, sessionAssetClientError{status: http.StatusNotFound, code: "not_found", message: "attachment not found"}
 		}
-		return "", err
+		return sessionResolvedAssetPath{}, err
 	}
 	if !pathWithinDir(dirEval, targetEval) {
-		return "", sessionAssetClientError{status: http.StatusForbidden, code: "forbidden", message: "attachment path escaped storage root"}
+		return sessionResolvedAssetPath{}, sessionAssetClientError{status: http.StatusForbidden, code: "forbidden", message: "attachment path escaped storage root"}
 	}
-	return targetEval, nil
+	return sessionResolvedAssetPath{path: targetEval, allowedRoot: dirEval}, nil
 }
 
 func sessionAssetErrorFromAttachmentError(err error) error {

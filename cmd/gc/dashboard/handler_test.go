@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"bytes"
+	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -113,7 +114,7 @@ func TestProxiedHandlerServesRelativeIndexAndForwardsAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse API URL: %v", err)
 	}
-	h, err := NewProxiedHandler(target)
+	h, err := NewProxiedHandler(target, ProxyOptions{})
 	if err != nil {
 		t.Fatalf("NewProxiedHandler: %v", err)
 	}
@@ -143,6 +144,67 @@ func TestProxiedHandlerServesRelativeIndexAndForwardsAPI(t *testing.T) {
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "ok" {
 		t.Fatalf("GET /health: %d %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestProxiedHandlerRejectsMutationsByDefault(t *testing.T) {
+	var hits int
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(api.Close)
+
+	target, err := url.Parse(api.URL)
+	if err != nil {
+		t.Fatalf("parse API URL: %v", err)
+	}
+	h, err := NewProxiedHandler(target, ProxyOptions{})
+	if err != nil {
+		t.Fatalf("NewProxiedHandler: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v0/city/mc/session/s-1/submit", strings.NewReader(`{"message":"hi"}`))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("POST /v0/...: %d %s", rec.Code, rec.Body.String())
+	}
+	if hits != 0 {
+		t.Fatalf("read-only proxy forwarded %d mutation request(s)", hits)
+	}
+}
+
+func TestProxiedHandlerForwardsMutationsWhenAllowed(t *testing.T) {
+	var gotMethod string
+	var gotBody string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(api.Close)
+
+	target, err := url.Parse(api.URL)
+	if err != nil {
+		t.Fatalf("parse API URL: %v", err)
+	}
+	h, err := NewProxiedHandler(target, ProxyOptions{AllowMutations: true})
+	if err != nil {
+		t.Fatalf("NewProxiedHandler: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v0/city/mc/session/s-1/submit", strings.NewReader(`{"message":"hi"}`))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("POST /v0/...: %d %s", rec.Code, rec.Body.String())
+	}
+	if gotMethod != http.MethodPost || gotBody != `{"message":"hi"}` {
+		t.Fatalf("proxied mutation = %s %q, want POST body", gotMethod, gotBody)
 	}
 }
 

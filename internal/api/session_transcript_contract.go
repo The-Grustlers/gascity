@@ -1,7 +1,5 @@
 package api
 
-import "encoding/json"
-
 // outputTurn is the public transcript turn contract shared by agent output,
 // session transcript, and session stream responses.
 type outputTurn struct {
@@ -13,27 +11,38 @@ type outputTurn struct {
 	Trace     []outputTrace `json:"trace,omitempty"`
 }
 
+type outputPartType string
+
+const (
+	outputPartTypeText        outputPartType = "text"
+	outputPartTypeReasoning   outputPartType = "reasoning"
+	outputPartTypeToolUse     outputPartType = "tool_use"
+	outputPartTypeToolResult  outputPartType = "tool_result"
+	outputPartTypeInteraction outputPartType = "interaction"
+	outputPartTypeFile        outputPartType = "file"
+)
+
 // outputPart preserves structured provider blocks for dashboard rendering.
 type outputPart struct {
-	Type      string          `json:"type"`
-	Kind      string          `json:"kind,omitempty"`
-	Text      string          `json:"text,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Tool      string          `json:"tool,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-	Output    json.RawMessage `json:"output,omitempty"`
-	IsError   bool            `json:"is_error,omitempty"`
-	Path      string          `json:"path,omitempty"`
-	URL       string          `json:"url,omitempty"`
-	Mime      string          `json:"mime,omitempty"`
-	Source    string          `json:"source,omitempty"`
-	RequestID string          `json:"request_id,omitempty"`
-	State     string          `json:"state,omitempty"`
-	Prompt    string          `json:"prompt,omitempty"`
-	Options   []string        `json:"options,omitempty"`
-	Action    string          `json:"action,omitempty"`
+	Type      outputPartType `json:"type"`
+	Kind      string         `json:"kind,omitempty"`
+	Text      string         `json:"text,omitempty"`
+	ID        string         `json:"id,omitempty"`
+	ToolUseID string         `json:"tool_use_id,omitempty"`
+	Name      string         `json:"name,omitempty"`
+	Tool      string         `json:"tool,omitempty"`
+	Input     *JSONValue     `json:"input,omitempty"`
+	Output    *JSONValue     `json:"output,omitempty"`
+	IsError   bool           `json:"is_error,omitempty"`
+	Path      string         `json:"path,omitempty"`
+	URL       string         `json:"url,omitempty"`
+	Mime      string         `json:"mime,omitempty"`
+	Source    string         `json:"source,omitempty"`
+	RequestID string         `json:"request_id,omitempty"`
+	State     string         `json:"state,omitempty"`
+	Prompt    string         `json:"prompt,omitempty"`
+	Options   []string       `json:"options,omitempty"`
+	Action    string         `json:"action,omitempty"`
 }
 
 // outputAsset describes media that can be shown alongside a transcript turn.

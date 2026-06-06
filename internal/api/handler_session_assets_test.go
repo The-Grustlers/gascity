@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -97,6 +98,37 @@ func TestHandleSessionAssetRejectsUnsafeOrUnsupportedFiles(t *testing.T) {
 				t.Fatalf("status = %d, want %d; body: %s", rec.Code, tc.want, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestServeSessionAssetFileRejectsPathSwappedAfterResolution(t *testing.T) {
+	parent := t.TempDir()
+	workDir := filepath.Join(parent, "work")
+	imagePath := filepath.Join(workDir, "screen.png")
+	writeTestPNG(t, imagePath)
+	outside := filepath.Join(parent, "outside.png")
+	writeTestPNG(t, outside)
+
+	resolved, err := resolveSessionAssetPath(workDir, "screen.png")
+	if err != nil {
+		t.Fatalf("resolveSessionAssetPath: %v", err)
+	}
+	if err := os.Remove(imagePath); err != nil {
+		t.Fatalf("remove resolved file: %v", err)
+	}
+	if err := os.Symlink(outside, imagePath); err != nil {
+		t.Skipf("symlink not available: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/asset?path=screen.png", nil)
+	rec := httptest.NewRecorder()
+	err = serveSessionAssetFile(rec, req, resolved)
+	if err == nil {
+		t.Fatal("serveSessionAssetFile returned nil, want forbidden error")
+	}
+	var clientErr sessionAssetClientError
+	if !errors.As(err, &clientErr) || clientErr.status != http.StatusForbidden {
+		t.Fatalf("error = %#v, want forbidden client error", err)
 	}
 }
 

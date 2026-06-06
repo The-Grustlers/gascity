@@ -320,6 +320,44 @@ func TestHandleSessionAttachmentServeRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestServeSessionAttachmentRejectsPathSwappedAfterResolution(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "session", "0123456789abcdef0123456789abcdef")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir attachment dir: %v", err)
+	}
+	inside := filepath.Join(dir, "screen.png")
+	if err := os.WriteFile(inside, append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, bytes.Repeat([]byte{0}, 64)...), 0o600); err != nil {
+		t.Fatalf("write inside image: %v", err)
+	}
+	outside := filepath.Join(t.TempDir(), "outside.png")
+	if err := os.WriteFile(outside, append([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}, bytes.Repeat([]byte{0}, 64)...), 0o600); err != nil {
+		t.Fatalf("write outside image: %v", err)
+	}
+
+	resolved, err := resolveSessionAttachmentFilePath(root, dir, "screen.png")
+	if err != nil {
+		t.Fatalf("resolveSessionAttachmentFilePath: %v", err)
+	}
+	if err := os.Remove(inside); err != nil {
+		t.Fatalf("remove resolved attachment: %v", err)
+	}
+	if err := os.Symlink(outside, inside); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/attachments/id/screen.png", nil)
+	rec := httptest.NewRecorder()
+	err = serveSessionAssetFile(rec, req, resolved)
+	if err == nil {
+		t.Fatal("serveSessionAssetFile returned nil, want forbidden error")
+	}
+	var clientErr sessionAssetClientError
+	if !errors.As(err, &clientErr) || clientErr.status != http.StatusForbidden {
+		t.Fatalf("error = %#v, want forbidden client error", err)
+	}
+}
+
 func multipartBody(t *testing.T, filename, contentType string, payload []byte) (*bytes.Buffer, string) {
 	t.Helper()
 	var body bytes.Buffer

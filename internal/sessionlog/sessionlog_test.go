@@ -1383,6 +1383,28 @@ func TestReadCodexFileDiagnostics(t *testing.T) {
 	}
 }
 
+func TestReadCodexFileKeepsEventMsgAssistantWhenOnlyUserIsResponseItem(t *testing.T) {
+	path := writeJSONL(t,
+		`{"timestamp":"2026-01-02T00:00:00Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"please inspect"}]}}`,
+		`{"timestamp":"2026-01-02T00:00:01Z","type":"event_msg","payload":{"type":"agent_message","message":"I found the issue."}}`,
+	)
+
+	sess, err := ReadCodexFile(path, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(sess.Messages); got != 2 {
+		t.Fatalf("Messages = %d, want user response_item plus assistant event_msg", got)
+	}
+	if sess.Messages[0].Type != "user" {
+		t.Fatalf("Messages[0].Type = %q, want user", sess.Messages[0].Type)
+	}
+	blocks := sess.Messages[1].ContentBlocks()
+	if sess.Messages[1].Type != "assistant" || len(blocks) != 1 || blocks[0].Text != "I found the issue." {
+		t.Fatalf("assistant message = type %q blocks %#v, want event_msg assistant text", sess.Messages[1].Type, blocks)
+	}
+}
+
 func TestReadCodexFileMalformedTailDiagnostics(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "rollout.jsonl")

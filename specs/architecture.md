@@ -124,7 +124,13 @@ The dashboard is a static TypeScript SPA served by a tiny Go
 binary (`cmd/gc/dashboard/`) whose only jobs are to embed the
 compiled bundle and inject the supervisor URL into `index.html`.
 The SPA talks directly to the supervisor's typed OpenAPI endpoints
-from the browser — the dashboard server is NOT an API proxy. The
+from the browser by default. When the browser cannot reach the
+supervisor directly, `gc dashboard` may opt into a same-origin
+reverse proxy: `--proxy-api-read` forwards read-only API traffic,
+and `--proxy-api-mutate` also forwards state-changing methods for
+deployments that put an external access-control layer in front. The
+dashboard proxy does not authenticate users itself; mutation proxying
+is explicit and proxied dashboard serving binds to loopback. The
 dashboard server also hosts one narrow operational debug endpoint
 (`/__client-log`) that accepts browser error logs for centralized
 debugging; this endpoint is intentionally outside the typed HTTP +
@@ -208,11 +214,14 @@ Edge cases that are NOT wire and therefore exempt:
   see §4).
 
 Custom `MarshalJSON` / `UnmarshalJSON` on wire types are forbidden
-with two narrow, documented exceptions:
+with three narrow, documented exceptions:
 
 - **`SessionRawMessageFrame`** (`internal/api/session_frame_types.go`)
   — the raw-frame pass-through for provider-native session
   transcripts; forwards arbitrary JSON the provider wrote. See §3.6.
+- **`JSONValue`** (`internal/api/json_value.go`) — the named
+  recursive JSON value used for provider/tool-authored payloads
+  nested inside GC-owned transcript output envelopes. See §3.6.
 - **`EventPayloadUnion`** (`internal/api/convoy_event_stream.go`)
   — the wire wrapper around `events.Payload` that emits the typed
   payload as a named `oneOf` component. Its `MarshalJSON` emits
@@ -304,6 +313,17 @@ also opacify our own shapes that happen to be nested near them.
 Every GC-owned field on the same envelope as the raw frames
 (envelope metadata, provider identifier, session info) stays
 typed.
+
+Unified dashboard transcript turns use a narrower exception for tool
+payloads: `JSONValue` (`internal/api/json_value.go`). Unlike
+`SessionRawMessageFrame`, this is not provider-native frame
+pass-through; the surrounding `OutputPart` envelope is Gas City's
+projection, with typed `type` values such as `tool_use` and
+`tool_result`. Only the tool payload itself remains arbitrary JSON,
+because tool inputs and outputs are authored by providers and
+tooling outside Gas City's schema. The OpenAPI schema names this as
+recursive `JsonValue` so generated clients receive a real JSON type
+instead of `unknown`.
 
 ### 3.7 Every event type has a typed wire payload
 

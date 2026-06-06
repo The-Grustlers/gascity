@@ -3019,6 +3019,13 @@ export interface components {
             TargetSessionID: string;
             TranscriptEntry: components["schemas"]["ConversationTranscriptRecord"];
         };
+        /**
+         * JSON value
+         * @description Any valid JSON value: object, array, string, number, boolean, or null.
+         */
+        JsonValue: {
+            [key: string]: components["schemas"]["JsonValue"];
+        } | components["schemas"]["JsonValue"][] | (string | null) | number | boolean;
         ListBodyAgentPatch: {
             /** @description The list of items. */
             items: components["schemas"]["AgentPatch"][] | null;
@@ -3491,13 +3498,13 @@ export interface components {
         OutputPart: {
             action?: string;
             id?: string;
-            input?: unknown;
+            input?: components["schemas"]["JsonValue"];
             is_error?: boolean;
             kind?: string;
             mime?: string;
             name?: string;
             options?: string[] | null;
-            output?: unknown;
+            output?: components["schemas"]["JsonValue"];
             path?: string;
             prompt?: string;
             request_id?: string;
@@ -3506,9 +3513,14 @@ export interface components {
             text?: string;
             tool?: string;
             tool_use_id?: string;
-            type: string;
+            type: components["schemas"]["OutputPartType"];
             url?: string;
         };
+        /**
+         * @description Kind of part within a unified transcript turn.
+         * @enum {string}
+         */
+        OutputPartType: "text" | "reasoning" | "tool_use" | "tool_result" | "interaction" | "file";
         OutputTrace: {
             kind: string;
             text?: string;

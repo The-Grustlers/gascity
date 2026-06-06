@@ -18,14 +18,16 @@ var (
 )
 
 type dashboardServeOptions struct {
-	proxyAPI bool
+	proxyAPIRead   bool
+	proxyAPIMutate bool
 }
 
 // newDashboardCmd creates the "gc dashboard" command group.
 func newDashboardCmd(stdout, stderr io.Writer) *cobra.Command {
 	var port int
 	var apiURL string
-	var proxyAPI bool
+	var proxyAPIRead bool
+	var proxyAPIMutate bool
 	cmd := &cobra.Command{
 		Use:   "dashboard",
 		Short: "Web dashboard for monitoring the supervisor and managed cities",
@@ -36,13 +38,13 @@ city tabs. From a city directory or with --city, city-specific panels and action
 forms are enabled for that city.`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if runDashboardServeWithOptions("gc dashboard", port, apiURL, stderr, dashboardServeOptions{proxyAPI: proxyAPI}) != nil {
+			if runDashboardServeWithOptions("gc dashboard", port, apiURL, stderr, dashboardServeOptions{proxyAPIRead: proxyAPIRead, proxyAPIMutate: proxyAPIMutate}) != nil {
 				return errExit
 			}
 			return nil
 		},
 	}
-	bindDashboardServeFlags(cmd, &port, &apiURL, &proxyAPI)
+	bindDashboardServeFlags(cmd, &port, &apiURL, &proxyAPIRead, &proxyAPIMutate)
 	cmd.AddCommand(newDashboardServeCmd(stdout, stderr))
 	return cmd
 }
@@ -51,7 +53,8 @@ forms are enabled for that city.`,
 func newDashboardServeCmd(_, stderr io.Writer) *cobra.Command {
 	var port int
 	var apiURL string
-	var proxyAPI bool
+	var proxyAPIRead bool
+	var proxyAPIMutate bool
 	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Start the web dashboard",
@@ -62,20 +65,21 @@ city tabs. From a city directory or with --city, city-specific panels and action
 forms are enabled for that city.`,
 		Args: cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
-			if runDashboardServeWithOptions("gc dashboard serve", port, apiURL, stderr, dashboardServeOptions{proxyAPI: proxyAPI}) != nil {
+			if runDashboardServeWithOptions("gc dashboard serve", port, apiURL, stderr, dashboardServeOptions{proxyAPIRead: proxyAPIRead, proxyAPIMutate: proxyAPIMutate}) != nil {
 				return errExit
 			}
 			return nil
 		},
 	}
-	bindDashboardServeFlags(cmd, &port, &apiURL, &proxyAPI)
+	bindDashboardServeFlags(cmd, &port, &apiURL, &proxyAPIRead, &proxyAPIMutate)
 	return cmd
 }
 
-func bindDashboardServeFlags(cmd *cobra.Command, port *int, apiURL *string, proxyAPI *bool) {
+func bindDashboardServeFlags(cmd *cobra.Command, port *int, apiURL *string, proxyAPIRead *bool, proxyAPIMutate *bool) {
 	cmd.Flags().IntVar(port, "port", 8080, "HTTP port")
 	cmd.Flags().StringVar(apiURL, "api", "", "GC API server URL override (auto-discovered by default)")
-	cmd.Flags().BoolVar(proxyAPI, "proxy-api", false, "proxy supervisor API through the dashboard origin; use only on trusted or authenticated networks")
+	cmd.Flags().BoolVar(proxyAPIRead, "proxy-api-read", false, "proxy read-only supervisor API requests through the dashboard origin")
+	cmd.Flags().BoolVar(proxyAPIMutate, "proxy-api-mutate", false, "proxy mutating supervisor API requests through the dashboard origin; require an external access-control layer")
 }
 
 func runDashboardServe(commandName string, port int, apiURLOverride string, stderr io.Writer) error {
@@ -95,11 +99,18 @@ func runDashboardServeWithOptions(commandName string, port int, apiURLOverride s
 		return err
 	}
 
-	serve := dashboardServeHook
-	if opts.proxyAPI {
-		serve = dashboardServeProxiedHook
+	if opts.proxyAPIRead || opts.proxyAPIMutate {
+		proxyOptions := dashboard.ProxyOptions{AllowMutations: opts.proxyAPIMutate}
+		if proxyOptions.AllowMutations {
+			fmt.Fprintln(stderr, "warning: mutating dashboard API proxy enabled; only use behind a trusted access-control layer such as Cloudflare Access, Tailscale, VPN, or SSH") //nolint:errcheck // best-effort stderr
+		}
+		if err := dashboardServeProxiedHook(port, apiURL, proxyOptions); err != nil {
+			fmt.Fprintf(stderr, "%s: %v\n", commandName, err) //nolint:errcheck // best-effort stderr
+			return err
+		}
+		return nil
 	}
-	if err := serve(port, apiURL); err != nil {
+	if err := dashboardServeHook(port, apiURL); err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", commandName, err) //nolint:errcheck // best-effort stderr
 		return err
 	}

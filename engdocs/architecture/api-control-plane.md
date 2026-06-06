@@ -153,17 +153,27 @@ location is load-bearing.
 The dashboard is a static TypeScript SPA served by a tiny Go
 binary (`cmd/gc/dashboard/`) whose default jobs are to embed the
 compiled bundle and inject the supervisor URL into `index.html`.
-In default mode, the SPA talks directly to the supervisor's typed
-OpenAPI endpoints from the browser. When launched with `--proxy-api`,
-the dashboard server instead forwards `/v0/*` and `/health` to the
-configured supervisor so browser clients can use a same-origin API
-behind tunnels or supervisor addresses that browsers cannot reach
-directly. Because this exposes the supervisor API through the dashboard
-origin, `--proxy-api` is intended for trusted networks or authenticated
-tunnels. The dashboard server also hosts one narrow operational debug
-endpoint (`/__client-log`) that accepts browser error logs for
-centralized debugging; this endpoint is intentionally outside the typed
-HTTP + SSE control plane and may use standard `encoding/json` for body
+The SPA talks directly to the supervisor's typed OpenAPI endpoints
+from the browser by default.
+
+When the browser cannot reach the supervisor directly (for example,
+when a loopback supervisor is reached through an HTTPS access proxy),
+`gc dashboard` may opt into a same-origin reverse proxy. The proxy
+surface is split deliberately:
+
+- `--proxy-api-read` forwards read-only API traffic (`GET`, `HEAD`,
+  `OPTIONS`) plus `/health`.
+- `--proxy-api-mutate` also forwards state-changing methods, and must
+  only be used behind an external access-control layer such as
+  Cloudflare Access, Tailscale, VPN, or SSH.
+
+The dashboard proxy does not authenticate users itself; it preserves
+the single-operator/trusted-network posture by making mutation proxying
+an explicit CLI choice and by binding proxied dashboard serving to
+loopback. The dashboard server also hosts one narrow operational debug endpoint
+(`/__client-log`) that accepts browser error logs for centralized
+debugging; this endpoint is intentionally outside the typed HTTP +
+SSE control plane and may use standard `encoding/json` for body
 decoding.
 
 Session attachment and asset routes are the other explicit dashboard
@@ -260,11 +270,14 @@ Edge cases that are NOT wire and therefore exempt:
   see §4).
 
 Custom `MarshalJSON` / `UnmarshalJSON` on wire types are forbidden
-with two narrow, documented exceptions:
+with three narrow, documented exceptions:
 
 - **`SessionRawMessageFrame`** (`internal/api/session_frame_types.go`)
   — the raw-frame pass-through for provider-native session
   transcripts; forwards arbitrary JSON the provider wrote. See §3.6.
+- **`JSONValue`** (`internal/api/json_value.go`) — the named
+  recursive JSON value used for provider/tool-authored payloads
+  nested inside GC-owned transcript output envelopes. See §3.6.
 - **`EventPayloadUnion`** (`internal/api/convoy_event_stream.go`)
   — the wire wrapper around `events.Payload` that emits the typed
   payload as a named `oneOf` component. Its `MarshalJSON` emits
@@ -420,6 +433,17 @@ also opacify our own shapes that happen to be nested near them.
 Every GC-owned field on the same envelope as the raw frames
 (envelope metadata, provider identifier, session info) stays
 typed.
+
+Unified dashboard transcript turns use a narrower exception for tool
+payloads: `JSONValue` (`internal/api/json_value.go`). Unlike
+`SessionRawMessageFrame`, this is not provider-native frame
+pass-through; the surrounding `OutputPart` envelope is Gas City's
+projection, with typed `type` values such as `tool_use` and
+`tool_result`. Only the tool payload itself remains arbitrary JSON,
+because tool inputs and outputs are authored by providers and
+tooling outside Gas City's schema. The OpenAPI schema names this as
+recursive `JsonValue` so generated clients receive a real JSON type
+instead of `unknown`.
 
 ### 3.7 Every event type has a typed wire payload
 

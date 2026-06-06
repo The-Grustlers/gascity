@@ -48,6 +48,11 @@ type clientLogEntry struct {
 	URL     string          `json:"url"`
 }
 
+// ProxyOptions controls how the same-origin dashboard API proxy behaves.
+type ProxyOptions struct {
+	AllowMutations bool
+}
+
 // NewStaticHandler returns a handler that serves the SPA bundle. `supervisorURL`
 // is injected into index.html so the SPA knows where to reach the supervisor
 // directly. This is the default dashboard mode; ServeProxied uses
@@ -58,11 +63,11 @@ func NewStaticHandler(supervisorURL string) (http.Handler, error) {
 
 // NewProxiedHandler returns a same-origin dashboard handler. The browser uses
 // relative API URLs, while this handler forwards API requests to supervisorURL.
-func NewProxiedHandler(supervisorURL *url.URL) (http.Handler, error) {
+func NewProxiedHandler(supervisorURL *url.URL, options ProxyOptions) (http.Handler, error) {
 	if supervisorURL == nil || supervisorURL.Scheme == "" || supervisorURL.Host == "" {
 		return nil, fmt.Errorf("dashboard: supervisor URL is required")
 	}
-	return newHandler("", newSupervisorProxy(supervisorURL))
+	return newHandler("", newSupervisorProxy(supervisorURL, options))
 }
 
 func newHandler(supervisorURL string, apiProxy http.Handler) (http.Handler, error) {
@@ -117,7 +122,7 @@ func newHandler(supervisorURL string, apiProxy http.Handler) (http.Handler, erro
 	return mux, nil
 }
 
-func newSupervisorProxy(target *url.URL) http.Handler {
+func newSupervisorProxy(target *url.URL, options ProxyOptions) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
 	proxy.FlushInterval = -1
 	originalDirector := proxy.Director
@@ -129,7 +134,22 @@ func newSupervisorProxy(target *url.URL) http.Handler {
 		log.Printf("dashboard: supervisor proxy failed: %v", err)
 		http.Error(w, "supervisor proxy failed", http.StatusBadGateway)
 	}
-	return proxy
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !options.AllowMutations && isMutationMethod(r.Method) {
+			http.Error(w, "dashboard API proxy is read-only; restart with --proxy-api-mutate to forward state-changing requests", http.StatusForbidden)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	})
+}
+
+func isMutationMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	default:
+		return true
+	}
 }
 
 func handleClientLog(w http.ResponseWriter, r *http.Request) {

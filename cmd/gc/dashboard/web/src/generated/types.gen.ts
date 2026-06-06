@@ -1289,6 +1289,15 @@ export type InboundResult = {
     TranscriptEntry: ConversationTranscriptRecord;
 };
 
+/**
+ * JSON value
+ *
+ * Any valid JSON value: object, array, string, number, boolean, or null.
+ */
+export type JsonValue = {
+    [key: string]: JsonValue;
+} | Array<JsonValue> | string | null | number | boolean;
+
 export type ListBodyAgentPatch = {
     /**
      * The list of items.
@@ -1957,13 +1966,13 @@ export type OutputAsset = {
 export type OutputPart = {
     action?: string;
     id?: string;
-    input?: unknown;
+    input?: JsonValue;
     is_error?: boolean;
     kind?: string;
     mime?: string;
     name?: string;
     options?: Array<string> | null;
-    output?: unknown;
+    output?: JsonValue;
     path?: string;
     prompt?: string;
     request_id?: string;
@@ -1972,9 +1981,14 @@ export type OutputPart = {
     text?: string;
     tool?: string;
     tool_use_id?: string;
-    type: string;
+    type: OutputPartType;
     url?: string;
 };
+
+/**
+ * Kind of part within a unified transcript turn.
+ */
+export type OutputPartType = 'text' | 'reasoning' | 'tool_use' | 'tool_result' | 'interaction' | 'file';
 
 export type OutputTrace = {
     kind: string;

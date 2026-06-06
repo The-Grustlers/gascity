@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/gastownhall/gascity/cmd/gc/dashboard"
 )
 
 func TestRunDashboardServeAllowsNoCityWithSupervisor(t *testing.T) {
@@ -84,7 +86,7 @@ func TestRunDashboardServeAllowsNoCityWithAPIOverride(t *testing.T) {
 	}
 }
 
-func TestRunDashboardServeCanProxySupervisorAPI(t *testing.T) {
+func TestRunDashboardServeCanProxySupervisorAPIReadOnly(t *testing.T) {
 	configureIsolatedRuntimeEnv(t)
 	t.Chdir(t.TempDir())
 
@@ -110,8 +112,10 @@ func TestRunDashboardServeCanProxySupervisorAPI(t *testing.T) {
 		return nil
 	}
 	var gotURL string
-	dashboardServeProxiedHook = func(_ int, apiURL string) error {
+	var gotOptions dashboard.ProxyOptions
+	dashboardServeProxiedHook = func(_ int, apiURL string, options dashboard.ProxyOptions) error {
 		gotURL = apiURL
+		gotOptions = options
 		return nil
 	}
 
@@ -120,12 +124,69 @@ func TestRunDashboardServeCanProxySupervisorAPI(t *testing.T) {
 		9090,
 		"http://127.0.0.1:9999/",
 		io.Discard,
-		dashboardServeOptions{proxyAPI: true},
+		dashboardServeOptions{proxyAPIRead: true},
 	); err != nil {
 		t.Fatalf("runDashboardServeWithOptions() error: %v", err)
 	}
 	if gotURL != "http://127.0.0.1:9999" {
 		t.Fatalf("proxied dashboard api URL = %q, want trimmed override", gotURL)
+	}
+	if gotOptions.AllowMutations {
+		t.Fatalf("read proxy enabled mutations")
+	}
+}
+
+func TestRunDashboardServeCanProxySupervisorAPIMutations(t *testing.T) {
+	configureIsolatedRuntimeEnv(t)
+	t.Chdir(t.TempDir())
+
+	oldAlive := supervisorAliveHook
+	oldServe := dashboardServeHook
+	oldProxyServe := dashboardServeProxiedHook
+	oldCityFlag := cityFlag
+	oldRigFlag := rigFlag
+	t.Cleanup(func() {
+		supervisorAliveHook = oldAlive
+		dashboardServeHook = oldServe
+		dashboardServeProxiedHook = oldProxyServe
+		cityFlag = oldCityFlag
+		rigFlag = oldRigFlag
+	})
+
+	supervisorAliveHook = func() int { return 0 }
+	cityFlag = ""
+	rigFlag = ""
+
+	dashboardServeHook = func(_ int, _ string) error {
+		t.Fatal("direct dashboard serve hook should not be called when mutating proxy mode is enabled")
+		return nil
+	}
+	var gotURL string
+	var gotOptions dashboard.ProxyOptions
+	dashboardServeProxiedHook = func(_ int, apiURL string, options dashboard.ProxyOptions) error {
+		gotURL = apiURL
+		gotOptions = options
+		return nil
+	}
+
+	var stderr strings.Builder
+	if err := runDashboardServeWithOptions(
+		"gc dashboard",
+		9090,
+		"http://127.0.0.1:9999/",
+		&stderr,
+		dashboardServeOptions{proxyAPIMutate: true},
+	); err != nil {
+		t.Fatalf("runDashboardServeWithOptions() error: %v", err)
+	}
+	if gotURL != "http://127.0.0.1:9999" {
+		t.Fatalf("proxied dashboard api URL = %q, want trimmed override", gotURL)
+	}
+	if !gotOptions.AllowMutations {
+		t.Fatalf("mutating proxy did not enable mutations")
+	}
+	if !strings.Contains(stderr.String(), "mutating dashboard API proxy enabled") {
+		t.Fatalf("stderr = %q, want mutating proxy warning", stderr.String())
 	}
 }
 

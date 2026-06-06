@@ -3366,6 +3366,36 @@
         ],
         "type": "object"
       },
+      "JsonValue": {
+        "description": "Any valid JSON value: object, array, string, number, boolean, or null.",
+        "oneOf": [
+          {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "items": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "array"
+          },
+          {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          }
+        ],
+        "title": "JSON value"
+      },
       "ListBodyAgentPatch": {
         "additionalProperties": false,
         "properties": {
@@ -4789,7 +4819,9 @@
           "id": {
             "type": "string"
           },
-          "input": {},
+          "input": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
           "is_error": {
             "type": "boolean"
           },
@@ -4811,7 +4843,9 @@
               "null"
             ]
           },
-          "output": {},
+          "output": {
+            "$ref": "#/components/schemas/JsonValue"
+          },
           "path": {
             "type": "string"
           },
@@ -4837,7 +4871,7 @@
             "type": "string"
           },
           "type": {
-            "type": "string"
+            "$ref": "#/components/schemas/OutputPartType"
           },
           "url": {
             "type": "string"
@@ -4847,6 +4881,18 @@
           "type"
         ],
         "type": "object"
+      },
+      "OutputPartType": {
+        "description": "Kind of part within a unified transcript turn.",
+        "enum": [
+          "text",
+          "reasoning",
+          "tool_use",
+          "tool_result",
+          "interaction",
+          "file"
+        ],
+        "type": "string"
       },
       "OutputTrace": {
         "additionalProperties": false,

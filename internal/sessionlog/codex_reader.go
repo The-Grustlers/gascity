@@ -57,6 +57,7 @@ func ReadCodexFile(path string, _ int) (*Session, error) {
 
 	// Check if response_item entries contain preferred message variants.
 	hasResponseItemUser := false
+	hasResponseItemAssistant := false
 	hasResponseItemReasoning := false
 	for _, e := range entries {
 		if e.raw.Type == "response_item" {
@@ -64,6 +65,9 @@ func ReadCodexFile(path string, _ int) (*Session, error) {
 			if json.Unmarshal(e.raw.Payload, &ri) == nil {
 				if ri.Type == "message" && ri.Role == "user" {
 					hasResponseItemUser = true
+				}
+				if ri.Type == "message" && ri.Role == "assistant" && codexMessageText(ri) != "" {
+					hasResponseItemAssistant = true
 				}
 				if ri.Type == "reasoning" && codexReasoningText(ri) != "" {
 					hasResponseItemReasoning = true
@@ -112,9 +116,7 @@ func ReadCodexFile(path string, _ int) (*Session, error) {
 				idx++
 
 			case "agent_message":
-				// Skip — response_item has the complete text.
-				// Only include if no response_items exist.
-				if hasResponseItemUser {
+				if hasResponseItemAssistant {
 					continue
 				}
 				entry := &Entry{
@@ -343,6 +345,14 @@ func codexReasoningText(ri codexResponseItem) string {
 		summaryText += s.Text + "\n"
 	}
 	return strings.TrimSpace(summaryText)
+}
+
+func codexMessageText(ri codexResponseItem) string {
+	var fullText string
+	for _, c := range ri.Content {
+		fullText += c.Text
+	}
+	return strings.TrimSpace(fullText)
 }
 
 func codexToolCallInput(ri codexResponseItem) json.RawMessage {

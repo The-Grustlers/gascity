@@ -1,5 +1,9 @@
 export type SubmitIntent = "default" | "follow_up" | "interrupt_now";
 
+export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+
+export type TranscriptPartType = "text" | "reasoning" | "tool_use" | "tool_result" | "interaction" | "file";
+
 export interface ChatAttachment {
   id: string;
   name: string;
@@ -31,13 +35,13 @@ export interface TranscriptTrace {
 export interface TranscriptPart {
   action?: string;
   id?: string;
-  input?: unknown;
+  input?: JsonValue;
   is_error?: boolean;
   kind?: string;
   mime?: string;
   name?: string;
   options?: string[] | null;
-  output?: unknown;
+  output?: JsonValue;
   path?: string;
   prompt?: string;
   request_id?: string;
@@ -46,7 +50,7 @@ export interface TranscriptPart {
   text?: string;
   tool?: string;
   tool_use_id?: string;
-  type?: string;
+  type?: TranscriptPartType;
   url?: string;
 }
 
