@@ -53,8 +53,8 @@ const cleanupLiveSessionProbeQuery = "SELECT db, COUNT(*) FROM information_schem
 // on a healthy Dolt server; 2 s is the FAIL-CLOSED threshold.
 //
 // Declared as var (not const) so TestProbeLiveSessions_TimesOut can
-// shrink it to keep CI wall time under 250 ms while still exercising
-// the timeout wiring. Production never mutates it; the assertion in
+// shrink it to keep CI wall time short while still exercising the
+// timeout wiring. Production never mutates it; the assertion in
 // TestProbeLiveSessions_FailClosed pins the live value at 2*time.Second.
 var cleanupLiveSessionProbeTimeout = 2 * time.Second
 

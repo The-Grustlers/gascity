@@ -3384,16 +3384,27 @@ func writeBSDLikeGrep(t *testing.T, binDir string) {
 	if err != nil {
 		t.Fatalf("find grep: %v", err)
 	}
-	writeExecutable(t, filepath.Join(binDir, "grep"), fmt.Sprintf(`#!/usr/bin/env bash
-set -euo pipefail
-bre_alternation='\|'
-if [ "$#" -ge 2 ] && { [ "$1" = "-vi" ] || [ "$1" = "-i" ]; } && [[ "$2" == *"$bre_alternation"* ]]; then
-  if [ "$1" = "-vi" ]; then
-    shift 2
-    cat "$@"
-    exit 0
-  fi
-  exit 1
+	writeExecutable(t, filepath.Join(binDir, "grep"), fmt.Sprintf(`#!/bin/sh
+set -eu
+if [ "$#" -ge 2 ]; then
+  case "$1" in
+    -vi|-i)
+      case "$2" in
+        *'\|'*)
+          if [ "$1" = "-vi" ]; then
+            shift 2
+            if [ "$#" -eq 0 ]; then
+              cat
+            else
+              cat "$@"
+            fi
+            exit 0
+          fi
+          exit 1
+          ;;
+      esac
+      ;;
+  esac
 fi
 exec %s "$@"
 `, shellQuote(realGrep)))
@@ -3710,7 +3721,7 @@ esac
 exit 0
 `)
 
-	out := runDogScript(t, "mol-dog-doctor.sh", binDir, cityPath, dataDir, "GC_DOCTOR_BACKUP_STALE_S=1")
+	out := runDogScript(t, "mol-dog-doctor.sh", binDir, cityPath, dataDir, "GC_DOCTOR_BACKUP_STALE_S=3600")
 	if !strings.Contains(out, "server: ok") {
 		t.Fatalf("unexpected doctor output:\n%s", out)
 	}
@@ -3760,7 +3771,7 @@ esac
 exit 0
 `)
 
-	out := runDogScript(t, "mol-dog-doctor.sh", binDir, cityPath, dataDir, "GC_DOCTOR_BACKUP_STALE_S=1")
+	out := runDogScript(t, "mol-dog-doctor.sh", binDir, cityPath, dataDir, "GC_DOCTOR_BACKUP_STALE_S=3600")
 	if !strings.Contains(out, "server: ok") {
 		t.Fatalf("unexpected doctor output:\n%s", out)
 	}
@@ -3821,7 +3832,7 @@ esac
 exit 0
 `)
 
-	out := runDogScript(t, "mol-dog-doctor.sh", binDir, cityPath, dataDir, "GC_DOCTOR_BACKUP_STALE_S=1")
+	out := runDogScript(t, "mol-dog-doctor.sh", binDir, cityPath, dataDir, "GC_DOCTOR_BACKUP_STALE_S=3600")
 	if !strings.Contains(out, "server: ok") {
 		t.Fatalf("unexpected doctor output:\n%s", out)
 	}
@@ -3924,7 +3935,7 @@ esac
 exit 0
 `)
 
-	out := runDogScript(t, "mol-dog-doctor.sh", binDir, cityPath, dataDir, "GC_DOCTOR_BACKUP_STALE_S=1")
+	out := runDogScript(t, "mol-dog-doctor.sh", binDir, cityPath, dataDir, "GC_DOCTOR_BACKUP_STALE_S=3600")
 	if !strings.Contains(out, "server: ok") {
 		t.Fatalf("unexpected doctor output:\n%s", out)
 	}

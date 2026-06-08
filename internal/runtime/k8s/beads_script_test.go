@@ -159,9 +159,42 @@ func TestBeadsScriptListUsesScopedWorkdir(t *testing.T) {
 		t.Fatalf("gc-beads-k8s list error = %v\noutput:\n%s", result.err, result.output)
 	}
 	assertCallContains(t, result.callLog, "/workspace/frontend")
-	assertCallContains(t, result.callLog, "list --json --limit 0 --all")
+	assertCallContains(t, result.callLog, "list --json --include-infra --include-gates --limit 0")
 	assertCallContains(t, result.callLog, `export BEADS_DIR="$workdir/.beads"`)
 	assertCallContains(t, result.callLog, `git config --global beads.role`)
+}
+
+func TestBeadsScriptListMapsExternalScopeRootAndSyncsMetadata(t *testing.T) {
+	externalRoot := t.TempDir()
+	beadsDir := filepath.Join(externalRoot, ".beads")
+	if err := os.MkdirAll(beadsDir, 0o755); err != nil {
+		t.Fatalf("mkdir .beads: %v", err)
+	}
+	for name, content := range map[string]string{
+		"config.yaml":    "issue_prefix: ex\n",
+		"metadata.json":  `{"backend":"dolt","dolt_database":"ex"}`,
+		"identity.toml":  "project_id = \"external\"\n",
+		".local_version": "1.0.0\n",
+	} {
+		if err := os.WriteFile(filepath.Join(beadsDir, name), []byte(content), 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	result := runBeadsScript(t, beadsScriptOptions{
+		Op: "list",
+		Env: map[string]string{
+			"GC_CITY_PATH":  "/city",
+			"GC_STORE_ROOT": externalRoot,
+		},
+		ListOutput: "[]",
+	})
+	if result.err != nil {
+		t.Fatalf("gc-beads-k8s list error = %v\noutput:\n%s", result.err, result.output)
+	}
+	assertCallContains(t, result.callLog, "exec -i gc-beads-runner -- sh -c")
+	assertCallContains(t, result.callLog, "/workspace/external/")
+	assertCallContains(t, result.callLog, `export BEADS_DIR="$workdir/.beads"`)
 }
 
 func TestBeadsScriptListDoesNotRewriteIssuePrefixPerCommand(t *testing.T) {
@@ -300,8 +333,12 @@ fi
 if [[ "$joined" == *" wait --for=condition=Ready pod/gc-beads-runner "* ]]; then
   exit 0
 fi
+if [[ "$joined" == *" exec -i gc-beads-runner -- sh -c "* ]]; then
+  cat >/dev/null
+  exit 0
+fi
 if [[ "$joined" == *" exec gc-beads-runner -- sh -c "* ]]; then
-  if [[ "$*" == *"bd list --json --limit 0 --all"* ]]; then
+  if [[ "$*" == *"bd list --json"* ]]; then
     printf '%%s' "$list_output"
     exit 0
   fi
