@@ -16,9 +16,10 @@ func TestBeadsScriptEnsureReadyDoesNotAutoInitSharedWorkspace(t *testing.T) {
 	result := runBeadsScript(t, beadsScriptOptions{
 		Op: "ensure-ready",
 		Env: map[string]string{
-			"GC_K8S_IMAGE": "gc-beads:latest",
-			"GC_DOLT_HOST": "canonical-dolt.example.com",
-			"GC_DOLT_PORT": "4406",
+			"GC_K8S_IMAGE":            "gc-beads:latest",
+			"GC_DOLT_HOST":            "canonical-dolt.example.com",
+			"GC_DOLT_PORT":            "4406",
+			"GC_K8S_DOLT_SECRET_NAME": "dolt-credentials",
 		},
 	})
 	if result.err != nil {
@@ -29,6 +30,29 @@ func TestBeadsScriptEnsureReadyDoesNotAutoInitSharedWorkspace(t *testing.T) {
 	}
 	if _, ok := result.manifestEnv["GC_DOLT_PORT"]; ok {
 		t.Fatalf("manifest unexpectedly projected GC_DOLT_PORT: %#v", result.manifestEnv)
+	}
+	if got := result.manifestEnv["BEADS_DOLT_SERVER_HOST"]; got != "canonical-dolt.example.com" {
+		t.Fatalf("BEADS_DOLT_SERVER_HOST = %q, want canonical Dolt host", got)
+	}
+	if got := result.manifestEnv["BEADS_DOLT_SERVER_PORT"]; got != "4406" {
+		t.Fatalf("BEADS_DOLT_SERVER_PORT = %q, want canonical Dolt port", got)
+	}
+	if got := result.manifestEnv["HOME"]; got != "/home/ubuntu" {
+		t.Fatalf("HOME = %q, want runner user's home", got)
+	}
+	if !strings.Contains(result.manifest, `"name": "BEADS_DOLT_SERVER_USER"`) ||
+		!strings.Contains(result.manifest, `"name": "dolt-credentials"`) ||
+		!strings.Contains(result.manifest, `"name": "BEADS_DOLT_PASSWORD"`) ||
+		!strings.Contains(result.manifest, `"key": "BEADS_DOLT_PASSWORD"`) ||
+		!strings.Contains(result.manifest, `"name": "BEADS_DOLT_SERVER_PASSWORD"`) ||
+		!strings.Contains(result.manifest, `"optional": true`) {
+		t.Fatalf("manifest does not project Dolt credential secret refs:\n%s", result.manifest)
+	}
+	if !strings.Contains(result.manifest, `"mountPath": "/workspace"`) {
+		t.Fatalf("manifest does not mount writable workspace:\n%s", result.manifest)
+	}
+	if !strings.Contains(result.manifest, `"emptyDir": {}`) {
+		t.Fatalf("manifest does not declare workspace emptyDir:\n%s", result.manifest)
 	}
 	assertCallNotContains(t, result.callLog, "bd init")
 	assertCallNotContains(t, result.callLog, "config set issue_prefix")
@@ -284,6 +308,7 @@ type beadsScriptOptions struct {
 
 type beadsScriptResult struct {
 	manifestEnv map[string]string
+	manifest    string
 	callLog     string
 	output      string
 	err         error
@@ -398,6 +423,7 @@ exit 1
 
 	return beadsScriptResult{
 		manifestEnv: manifestEnv,
+		manifest:    string(manifestBytes),
 		callLog:     string(callLogBytes),
 		output:      string(out),
 		err:         err,
