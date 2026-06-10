@@ -68,7 +68,7 @@ func (h providerSessionResponseHandle) State(context.Context) (worker.State, err
 }
 
 func (h providerSessionResponseHandle) Peek(_ context.Context, lines int) (string, error) {
-	if h.provider == nil || !h.provider.IsRunning(h.sessionName) {
+	if h.provider == nil {
 		return "", fmt.Errorf("%w: %s", session.ErrSessionInactive, h.sessionName)
 	}
 	return h.provider.Peek(h.sessionName, lines)

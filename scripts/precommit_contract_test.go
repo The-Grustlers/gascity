@@ -120,6 +120,17 @@ func TestLocalParallelAllowlistIncludesObservableEnv(t *testing.T) {
 	}
 }
 
+func TestLocalParallelUnitCoreUsesExplicitTimeout(t *testing.T) {
+	repoRoot := repoRoot(t)
+	script, err := os.ReadFile(filepath.Join(repoRoot, "scripts", "test-local-parallel"))
+	if err != nil {
+		t.Fatalf("read test-local-parallel: %v", err)
+	}
+	if !strings.Contains(string(script), "go test -timeout=20m") {
+		t.Fatalf("unit-core job should set an explicit package timeout")
+	}
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	wd, err := os.Getwd()

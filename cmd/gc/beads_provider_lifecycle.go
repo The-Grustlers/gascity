@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/gastownhall/gascity/internal/beads"
@@ -226,6 +227,10 @@ func startBeadsLifecycle(cityPath, _ string, cfg *config.City, stderr io.Writer)
 	if len(cfg.Rigs) > 0 {
 		allRigs := collectRigRoutes(cityPath, cfg)
 		if err := writeAllRoutes(allRigs); err != nil {
+			if isReadOnlyFilesystemError(err) {
+				fmt.Fprintf(stderr, "gc start: warning: writing routes skipped for read-only bead scope: %v\n", err) //nolint:errcheck
+				return nil
+			}
 			return fmt.Errorf("writing routes: %w", err)
 		}
 	}
@@ -516,8 +521,8 @@ func initAndHookDir(cityPath, dir, prefix string) error {
 		return err
 	} else if usesPostgres {
 		if installHooks {
-			if err := installBeadHooks(dir, cityPath); err != nil {
-				return fmt.Errorf("install hooks at %s: %w", dir, err)
+			if err := installBeadHooksIfWritable(dir, cityPath); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -555,11 +560,31 @@ func initAndHookDir(cityPath, dir, prefix string) error {
 	}
 	// Non-fatal: hooks are convenience (event forwarding), not critical.
 	if installHooks {
-		if err := installBeadHooks(dir, cityPath); err != nil {
-			return fmt.Errorf("install hooks at %s: %w", dir, err)
+		if err := installBeadHooksIfWritable(dir, cityPath); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func installBeadHooksIfWritable(dir, cityPath string) error {
+	if err := installBeadHooks(dir, cityPath); err != nil {
+		if isReadOnlyFilesystemError(err) {
+			return nil
+		}
+		return fmt.Errorf("install hooks at %s: %w", dir, err)
+	}
+	return nil
+}
+
+func isReadOnlyFilesystemError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.EROFS) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "read-only file system")
 }
 
 func scopeUsesPostgresBackendForInit(cityPath, dir string) (bool, error) {
