@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -174,10 +175,10 @@ func TestBuildOrderRunFeedItemsUsesAllOrdersForDisabledExecMetadata(t *testing.T
 	}
 }
 
-func TestOrderTrackingUpdatedAtLogsLookupFailure(t *testing.T) {
-	store := labelFailListStore{
-		Store:     beads.NewMemStore(),
-		failLabel: "order-run:digest",
+func TestLatestOrderRunTimesLogsLookupFailure(t *testing.T) {
+	store := labelPrefixFailListStore{
+		Store:      beads.NewMemStore(),
+		failPrefix: "order-run:",
 	}
 	tracking := beads.Bead{
 		CreatedAt: time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC),
@@ -191,12 +192,58 @@ func TestOrderTrackingUpdatedAtLogsLookupFailure(t *testing.T) {
 	}
 	defer func() { orderFeedLogf = origLogf }()
 
-	got := orderTrackingUpdatedAt(store, tracking, "digest")
-	if !got.Equal(tracking.CreatedAt) {
+	runTimes := latestOrderRunTimes(store, "myrig")
+	if len(runTimes) != 0 {
+		t.Fatalf("runTimes = %v, want empty on scan failure", runTimes)
+	}
+	if got := orderTrackingUpdatedAt(tracking, "digest", runTimes); !got.Equal(tracking.CreatedAt) {
 		t.Fatalf("updatedAt = %s, want %s", got, tracking.CreatedAt)
 	}
-	if !strings.Contains(logs.String(), "order feed update lookup failed") {
-		t.Fatalf("logs = %q, want update lookup failure warning", logs.String())
+	if !strings.Contains(logs.String(), "order feed run scan failed") {
+		t.Fatalf("logs = %q, want run scan failure warning", logs.String())
+	}
+}
+
+func TestBuildOrderRunFeedItemsUsesLatestRunForUpdatedAt(t *testing.T) {
+	state := newFakeState(t)
+	state.cityBeadStore = beads.NewMemStore()
+	state.allOrders = []orders.Order{
+		{Name: "digest", Exec: "scripts/digest.sh", Trigger: "cooldown", Interval: "1h"},
+	}
+
+	tracking, err := state.cityBeadStore.Create(beads.Bead{
+		Title:  "order:digest",
+		Labels: []string{"order-tracking", "order-run:digest", "wisp"},
+	})
+	if err != nil {
+		t.Fatalf("create tracking bead: %v", err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	run, err := state.cityBeadStore.Create(beads.Bead{
+		Title:  "order run",
+		Labels: []string{"order-run:digest", "wisp"},
+	})
+	if err != nil {
+		t.Fatalf("create run bead: %v", err)
+	}
+
+	got, err := buildOrderRunFeedItems(state, "city", "test-city")
+	if err != nil {
+		t.Fatalf("buildOrderRunFeedItems: %v", err)
+	}
+	if len(got.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(got.Items))
+	}
+	item := got.Items[0]
+	if item.BeadID != tracking.ID {
+		t.Fatalf("bead_id = %q, want %q", item.BeadID, tracking.ID)
+	}
+	wantUpdated := run.CreatedAt.Format(time.RFC3339Nano)
+	if item.UpdatedAt != wantUpdated {
+		t.Fatalf("updated_at = %q, want run bead time %q", item.UpdatedAt, wantUpdated)
+	}
+	if item.StartedAt != tracking.CreatedAt.Format(time.RFC3339Nano) {
+		t.Fatalf("started_at = %q, want tracking bead time %q", item.StartedAt, tracking.CreatedAt.Format(time.RFC3339Nano))
 	}
 }
 
@@ -204,16 +251,85 @@ type workflowProjectionStore struct {
 	*beads.MemStore
 }
 
-type labelFailListStore struct {
+type labelPrefixFailListStore struct {
 	beads.Store
-	failLabel string
+	failPrefix string
 }
 
-func (s labelFailListStore) List(query beads.ListQuery) ([]beads.Bead, error) {
-	if query.Label == s.failLabel {
+func (s labelPrefixFailListStore) List(query beads.ListQuery) ([]beads.Bead, error) {
+	if query.LabelPrefix == s.failPrefix {
 		return nil, errors.New("list failed")
 	}
 	return s.Store.List(query)
+}
+
+// listCountingStore counts List calls so a benchmark can report how many
+// backing queries a feed build issues. In production each call is a `bd
+// list`/dolt round-trip, so the count is the cost this change targets.
+type listCountingStore struct {
+	*beads.MemStore
+	lists int64
+}
+
+func (s *listCountingStore) List(query beads.ListQuery) ([]beads.Bead, error) {
+	atomic.AddInt64(&s.lists, 1)
+	return s.MemStore.List(query)
+}
+
+// BenchmarkBuildOrderRunFeedItems exercises the order feed against a store
+// holding N tracked orders, reporting store_lists/op alongside the timing.
+// Before the batch-scan change the build issued one order-run lookup per
+// tracked order (N+1 store queries); afterward it issues a single
+// label-prefix scan (2 store queries) regardless of N.
+func BenchmarkBuildOrderRunFeedItems(b *testing.B) {
+	for _, n := range []int{10, 100, 500} {
+		b.Run(fmt.Sprintf("orders=%d", n), func(b *testing.B) {
+			store := &listCountingStore{MemStore: beads.NewMemStore()}
+			state := newFakeState(b)
+			state.cityBeadStore = store
+			state.stores = nil // isolate the city store so the count is unambiguous
+
+			allOrders := make([]orders.Order, 0, n)
+			for i := 0; i < n; i++ {
+				name := fmt.Sprintf("order-%04d", i)
+				allOrders = append(allOrders, orders.Order{Name: name, Formula: "review"})
+				if _, err := store.Create(beads.Bead{
+					Title:  "order:" + name,
+					Labels: []string{"order-tracking", "order-run:" + name, "wisp"},
+				}); err != nil {
+					b.Fatal(err)
+				}
+				// A few run beads per order so the lookup has history to scan.
+				for r := 0; r < 3; r++ {
+					if _, err := store.Create(beads.Bead{
+						Title:  "run",
+						Labels: []string{"order-run:" + name, "wisp"},
+					}); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+			state.allOrders = allOrders
+			cityScopeRef := workflowCityScopeRef(state.CityName())
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			var lists int64
+			for i := 0; i < b.N; i++ {
+				atomic.StoreInt64(&store.lists, 0)
+				res, err := buildOrderRunFeedItems(state, "city", cityScopeRef)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(res.Items) != n {
+					b.Fatalf("items = %d, want %d", len(res.Items), n)
+				}
+				lists = atomic.LoadInt64(&store.lists)
+			}
+			b.StopTimer()
+			b.ReportMetric(float64(lists), "store_lists/op")
+		})
+	}
 }
 
 func (s *workflowProjectionStore) List(query beads.ListQuery) ([]beads.Bead, error) {
