@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/gastownhall/gascity/internal/beads"
+	"github.com/gastownhall/gascity/internal/controlkind"
 	"github.com/gastownhall/gascity/internal/formula"
 	"github.com/gastownhall/gascity/internal/molecule"
 	"github.com/gastownhall/gascity/internal/sourceworkflow"
@@ -112,28 +113,15 @@ func ProcessControl(store beads.Store, bead beads.Bead, opts ProcessOptions) (Co
 		return result, err
 	}
 
-	switch bead.Metadata["gc.kind"] {
-	case "retry":
-		return processRetryControl(store, bead, opts)
-	case "ralph":
-		return processRalphControl(store, bead, opts)
-	case "check":
-		return processRalphCheck(store, bead, opts)
-	case "retry-eval":
-		return processRetryEval(store, bead, opts)
-	case "fanout":
-		return processFanout(store, bead, opts)
-	case "scope-check":
-		return processScopeCheck(store, bead, opts)
-	case "workflow-finalize":
-		return processWorkflowFinalize(store, bead, opts)
-	default:
+	handler, ok := controlHandlerFor(bead.Metadata["gc.kind"])
+	if !ok {
 		return ControlResult{}, fmt.Errorf("%s: unsupported control bead kind %q", bead.ID, bead.Metadata["gc.kind"])
 	}
+	return handler(store, bead, opts)
 }
 
 func closeOrphanedControl(store beads.Store, bead beads.Bead, opts ProcessOptions) (ControlResult, bool, error) {
-	if bead.Metadata["gc.kind"] == "workflow-finalize" {
+	if controlkind.SkipsOrphanedWorkflowRootClose(bead.Metadata["gc.kind"]) {
 		return ControlResult{}, false, nil
 	}
 	rootID := strings.TrimSpace(bead.Metadata["gc.root_bead_id"])

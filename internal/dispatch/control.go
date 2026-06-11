@@ -11,6 +11,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/controlkind"
 	"github.com/gastownhall/gascity/internal/convergence"
 	"github.com/gastownhall/gascity/internal/formula"
 	"github.com/gastownhall/gascity/internal/fsys"
@@ -721,8 +722,15 @@ func buildAttemptRecipeFanoutControl(source formula.RecipeStep, onComplete *form
 		"gc.kind":        "fanout",
 		"gc.control_for": sourceRef,
 		"gc.for_each":    onComplete.ForEach,
-		"gc.bond":        onComplete.Bond,
 		"gc.fanout_mode": "parallel",
+	}
+	if onComplete.Bond != "" {
+		meta["gc.bond"] = onComplete.Bond
+	}
+	if len(onComplete.Template) > 0 {
+		if data, err := json.Marshal(onComplete.Template); err == nil {
+			meta["gc.fanout_template"] = string(data)
+		}
 	}
 	if onComplete.Sequential {
 		meta["gc.fanout_mode"] = "sequential"
@@ -818,12 +826,10 @@ func attemptRecipeStepNeedsScopeCheck(step formula.RecipeStep) bool {
 	if step.Metadata["gc.scope_role"] == "teardown" {
 		return false
 	}
-	switch step.Metadata["gc.kind"] {
-	case "scope", "scope-check", "workflow-finalize", "fanout", "check", "spec":
+	if controlkind.IsScopeCheckExempt(step.Metadata["gc.kind"]) {
 		return false
-	default:
-		return true
 	}
+	return true
 }
 
 func loadAttemptRouteConfig(cityPath string) *config.City {
@@ -945,12 +951,7 @@ func resolveAttemptControlAssignee(target string, cfg *config.City, store beads.
 }
 
 func isAttemptControlKind(kind string) bool {
-	switch kind {
-	case "check", "fanout", "retry-eval", "scope-check", "workflow-finalize", "retry", "ralph":
-		return true
-	default:
-		return false
-	}
+	return controlkind.IsControlDispatcher(kind)
 }
 
 type attemptRouteBinding struct {
@@ -1281,9 +1282,10 @@ func latestAttemptFromCandidates(control beads.Bead, candidates []beads.Bead) be
 		// Skip beads that are control infrastructure, not actual work.
 		// For ralph controls, scope beads ARE the iterations — don't skip them.
 		kind := b.Metadata["gc.kind"]
-		switch kind {
-		case "scope-check", "workflow-finalize", "fanout", "check", "retry-eval", "retry", "ralph", "workflow":
+		if controlkind.IsLatestAttemptCandidateExempt(kind) {
 			continue
+		}
+		switch kind {
 		case "scope":
 			if controlKind != "ralph" {
 				continue
