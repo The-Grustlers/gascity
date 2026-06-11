@@ -11,6 +11,7 @@ import (
 	"github.com/gastownhall/gascity/internal/agentutil"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/controlkind"
 	"github.com/gastownhall/gascity/internal/formula"
 	"github.com/gastownhall/gascity/internal/session"
 )
@@ -53,12 +54,7 @@ type graphStepTarget struct {
 // IsControlDispatcherKind reports whether a gc.kind value is a control-
 // dispatcher kind (routed to the control dispatcher agent).
 func IsControlDispatcherKind(kind string) bool {
-	switch kind {
-	case "check", "fanout", "retry-eval", "scope-check", "workflow-finalize", "retry", "ralph":
-		return true
-	default:
-		return false
-	}
+	return controlkind.IsControlDispatcher(kind)
 }
 
 // IsWorkflowTopologyKind reports whether a gc.kind value identifies a
@@ -66,12 +62,7 @@ func IsControlDispatcherKind(kind string) bool {
 // Routing never lands on these — they exist to structure the graph, not
 // to be claimed by an agent.
 func IsWorkflowTopologyKind(kind string) bool {
-	switch kind {
-	case "workflow", "scope", "spec":
-		return true
-	default:
-		return false
-	}
+	return controlkind.IsWorkflowTopology(kind)
 }
 
 // IsCompiledGraphWorkflow reports whether a compiled recipe is a graph.v2
@@ -248,8 +239,8 @@ func ResolveGraphStepBindingWithVars(stepID string, stepByID map[string]*formula
 
 	target := parseGraphStepRouteTarget(step, routeVars)
 	if target.value == "" {
-		switch step.Metadata["gc.kind"] {
-		case "scope-check":
+		switch controlkind.GraphRouteModeFor(step.Metadata["gc.kind"]) {
+		case controlkind.GraphRouteControlFor:
 			controlTarget := strings.TrimSpace(step.Metadata["gc.control_for"])
 			if controlTarget != "" {
 				binding, err := ResolveGraphStepBindingWithVars(controlTarget, stepByID, stepAlias, depsByStep, cache, resolving, routeVars, fallback, rigContext, store, cityName, cfg, deps)
@@ -259,20 +250,10 @@ func ResolveGraphStepBindingWithVars(stepID string, stepByID map[string]*formula
 				cache[stepID] = binding
 				return binding, nil
 			}
-		case "fanout":
-			controlTarget := strings.TrimSpace(step.Metadata["gc.control_for"])
-			if controlTarget != "" {
-				binding, err := ResolveGraphStepBindingWithVars(controlTarget, stepByID, stepAlias, depsByStep, cache, resolving, routeVars, fallback, rigContext, store, cityName, cfg, deps)
-				if err != nil {
-					return GraphRouteBinding{}, err
-				}
-				cache[stepID] = binding
-				return binding, nil
-			}
-		case "workflow-finalize":
+		case controlkind.GraphRouteFallback:
 			cache[stepID] = fallback
 			return fallback, nil
-		case "retry-eval":
+		case controlkind.GraphRouteRetryEvalSubject:
 			var subjectID string
 			for _, depID := range depsByStep[step.ID] {
 				depStep := stepByID[depID]
@@ -298,7 +279,7 @@ func ResolveGraphStepBindingWithVars(stepID string, stepByID map[string]*formula
 				cache[stepID] = binding
 				return binding, nil
 			}
-		case "check":
+		case controlkind.GraphRouteMergeDeps:
 			var resolved GraphRouteBinding
 			found := false
 			for _, depID := range depsByStep[step.ID] {

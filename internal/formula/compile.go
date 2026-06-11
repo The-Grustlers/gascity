@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"sync/atomic"
+
+	"github.com/gastownhall/gascity/internal/controlkind"
 )
 
 // Compile loads a formula by name and runs the full compilation pipeline.
@@ -523,12 +525,7 @@ func isDetachedGraphStep(step *Step) bool {
 	if step == nil {
 		return false
 	}
-	switch step.Metadata["gc.kind"] {
-	case "ralph", "run", "check", "retry", "retry-run", "retry-eval":
-		return true
-	default:
-		return false
-	}
+	return controlkind.IsDetachedGraphStep(step.Metadata["gc.kind"])
 }
 
 func addWorkflowRootDeps(rootID string, steps []*Step, idMapping map[string]string, deps *[]RecipeDep) {

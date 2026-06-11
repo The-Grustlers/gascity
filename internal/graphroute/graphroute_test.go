@@ -40,7 +40,7 @@ func TestIsCompiledGraphWorkflow(t *testing.T) {
 }
 
 func TestIsControlDispatcherKind(t *testing.T) {
-	for _, kind := range []string{"check", "fanout", "retry-eval", "scope-check", "workflow-finalize", "retry", "ralph"} {
+	for _, kind := range []string{"check", "fanout", "retry-eval", "scope-check", "workflow-finalize", "retry", "ralph", "review-quorum-plan", "review-quorum-finalize"} {
 		if !IsControlDispatcherKind(kind) {
 			t.Errorf("expected true for %q", kind)
 		}

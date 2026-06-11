@@ -96,7 +96,8 @@ reads committed description file content from that ref.
 
 The core pack includes `mol-review-quorum`, a Gas City-owned review quorum
 formula scaffold. It is a `graph.v2` formula that fans out exactly two reviewer
-lanes and then routes synthesis for their durable outputs:
+lanes and then finalizes their durable outputs with the code-owned
+`gc.kind=review-quorum-finalize` control:
 
 - lane one, with ID, provider, model, and dispatch target supplied by formula
   variables
@@ -106,17 +107,21 @@ lanes and then routes synthesis for their durable outputs:
 Lane IDs, providers, model targets, and dispatch targets are configured through
 the required formula variables `lane_one_id`, `lane_one_provider`,
 `lane_one_model`, `lane_one_target`, `lane_two_id`, `lane_two_provider`,
-`lane_two_model`, and `lane_two_target`. The synthesis dispatch target is
-configured through `synthesis_target`.
+`lane_two_model`, and `lane_two_target`. `synthesis_target` is retained as a
+deprecated compatibility variable; synthesis is no longer agent-routed.
 Reviewer lanes use retry semantics with
 `on_exhausted = "soft_fail"` for transient provider failures so synthesis can
 continue with degraded coverage when one lane exhausts its retry budget.
 
-Reviewer and synthesis steps must persist structured JSON state for future
-automation. The lane output contract includes `lane_id`, `provider`, `model`,
-`verdict`, `summary`, `findings_count`, `findings`, `evidence`, `usage`,
+Reviewer steps must persist structured JSON state for future automation. The
+lane output contract includes `lane_id`, `provider`, `model`, `verdict`,
+`summary`, `findings_count`, `findings`, `evidence`, `usage`,
 `read_only_enforcement`, `mutations_delta`, `failure_class`, and
-`failure_reason`.
+`failure_reason`. The finalizer reads each retry control's `gc.output_json`;
+soft-failed transient retry controls without JSON become blocked transient lane
+outputs. It writes canonical `review-quorum.summary.v1` JSON to
+`gc.output_json` and closes with `gc.outcome=pass` once the summary is written,
+even when the review verdict is `fail` or `blocked`.
 The summary output keeps reviewer mutation deltas under each lane and reserves
 top-level `mutations_delta` for synthesis-created changes. Summary
 `findings_count` is the deduplicated finding count. When the Go finalizer
@@ -129,11 +134,18 @@ against the mutation baseline they recorded before review with
 `git status --porcelain=v1 -z`. Pre-existing dirty state and pre-existing
 untracked files are not reviewer-created mutations.
 
-`internal/reviewquorum` defines the durable Go contract and finalizer, but the
-current formula synthesis step is still agent-executed and does not call
-`reviewquorum.Finalize` directly. `dx-review` is a future compatibility
-consumer for this durable output shape; it does not own the lifecycle of
-`mol-review-quorum`.
+`internal/reviewquorum` defines the durable Go contract and finalizer.
+`dx-review` is a future compatibility consumer for this durable output shape;
+it does not own the lifecycle of `mol-review-quorum`.
+
+The core pack also includes `mol-review-quorum-dynamic`, a lane-driven variant.
+It accepts required `lanes_json`, a JSON array of lane specs with `id`,
+`provider`, `model`, `target`, and optional `focus`. A code-owned
+`gc.kind=review-quorum-plan` step validates the config and writes
+`{"lanes":[...]}`; existing `on_complete` fanout expands an inline
+retry-wrapped reviewer template once per item; the same
+`review-quorum-finalize` control waits for every expected lane ID and finalizes
+N lane outputs.
 
 ## Variable Substitution
 

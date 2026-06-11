@@ -1,6 +1,10 @@
 package formula
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/gastownhall/gascity/internal/controlkind"
+)
 
 // ApplyGraphControls applies graph control metadata to steps in the formula.
 func ApplyGraphControls(f *Formula) {
@@ -35,8 +39,15 @@ func applyGraphControls(f *Formula, includeWorkflowFinalize bool) {
 			"gc.kind":        "fanout",
 			"gc.control_for": step.ID,
 			"gc.for_each":    step.OnComplete.ForEach,
-			"gc.bond":        step.OnComplete.Bond,
 			"gc.fanout_mode": "parallel",
+		}
+		if step.OnComplete.Bond != "" {
+			controlMetadata["gc.bond"] = step.OnComplete.Bond
+		}
+		if len(step.OnComplete.Template) > 0 {
+			if data, err := json.Marshal(step.OnComplete.Template); err == nil {
+				controlMetadata["gc.fanout_template"] = string(data)
+			}
 		}
 		if step.OnComplete.Sequential {
 			controlMetadata["gc.fanout_mode"] = "sequential"
@@ -121,12 +132,10 @@ func needsScopeCheck(step *Step) bool {
 	if step.Metadata["gc.scope_role"] == "teardown" {
 		return false
 	}
-	switch step.Metadata["gc.kind"] {
-	case "scope", "scope-check", "workflow-finalize", "fanout", "check", "spec":
+	if controlkind.IsScopeCheckExempt(step.Metadata["gc.kind"]) {
 		return false
-	default:
-		return true
 	}
+	return true
 }
 
 func rewriteGraphRefs(in []string, replacements map[string]string) []string {

@@ -16,6 +16,7 @@ import (
 	"github.com/gastownhall/gascity/internal/agentutil"
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/controlkind"
 	convoycore "github.com/gastownhall/gascity/internal/convoy"
 	"github.com/gastownhall/gascity/internal/formula"
 	"github.com/gastownhall/gascity/internal/runtime"
@@ -1249,8 +1250,8 @@ func resolveGraphStepBindingWithVars(stepID string, stepByID map[string]*formula
 
 	target := graphStepRouteTarget(step, routeVars)
 	if target.value == "" {
-		switch step.Metadata["gc.kind"] {
-		case "scope-check":
+		switch controlkind.GraphRouteModeFor(step.Metadata["gc.kind"]) {
+		case controlkind.GraphRouteControlFor:
 			controlTarget := strings.TrimSpace(step.Metadata["gc.control_for"])
 			if controlTarget != "" {
 				binding, err := resolveGraphStepBindingWithVars(controlTarget, stepByID, stepAlias, depsByStep, cache, resolving, routeVars, fallback, rigContext, store, cityName, cityPath, cfg)
@@ -1260,20 +1261,10 @@ func resolveGraphStepBindingWithVars(stepID string, stepByID map[string]*formula
 				cache[stepID] = binding
 				return binding, nil
 			}
-		case "fanout":
-			controlTarget := strings.TrimSpace(step.Metadata["gc.control_for"])
-			if controlTarget != "" {
-				binding, err := resolveGraphStepBindingWithVars(controlTarget, stepByID, stepAlias, depsByStep, cache, resolving, routeVars, fallback, rigContext, store, cityName, cityPath, cfg)
-				if err != nil {
-					return graphRouteBinding{}, err
-				}
-				cache[stepID] = binding
-				return binding, nil
-			}
-		case "workflow-finalize":
+		case controlkind.GraphRouteFallback:
 			cache[stepID] = fallback
 			return fallback, nil
-		case "retry-eval":
+		case controlkind.GraphRouteRetryEvalSubject:
 			var subjectID string
 			for _, depID := range depsByStep[step.ID] {
 				depStep := stepByID[depID]
@@ -1299,7 +1290,7 @@ func resolveGraphStepBindingWithVars(stepID string, stepByID map[string]*formula
 				cache[stepID] = binding
 				return binding, nil
 			}
-		case "check":
+		case controlkind.GraphRouteMergeDeps:
 			var resolved graphRouteBinding
 			found := false
 			for _, depID := range depsByStep[step.ID] {

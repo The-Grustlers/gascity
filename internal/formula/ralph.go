@@ -3,6 +3,8 @@ package formula
 import (
 	"fmt"
 	"strconv"
+
+	"github.com/gastownhall/gascity/internal/controlkind"
 )
 
 // ApplyRalph expands inline Ralph steps into control + iteration beads.
@@ -247,8 +249,7 @@ func markRalphBodyOutputSinks(steps []*Step) {
 		if step == nil {
 			continue
 		}
-		switch step.Metadata["gc.kind"] {
-		case "scope", "scope-check", "workflow-finalize", "fanout", "check", "ralph", "spec":
+		if controlkind.IsRalphOutputExempt(step.Metadata["gc.kind"]) {
 			continue
 		}
 		if step.Metadata["gc.scope_role"] == "teardown" {

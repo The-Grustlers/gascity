@@ -16,6 +16,7 @@ import (
 
 	"github.com/gastownhall/gascity/internal/beads"
 	"github.com/gastownhall/gascity/internal/config"
+	"github.com/gastownhall/gascity/internal/controlkind"
 	"github.com/gastownhall/gascity/internal/dispatch"
 	"github.com/gastownhall/gascity/internal/formula"
 	"github.com/gastownhall/gascity/internal/sourceworkflow"
@@ -183,16 +184,8 @@ func runControlDispatcherWithStoreAndConfig(cityPath, storePath string, store be
 
 	opts := dispatch.ProcessOptions{CityPath: cityPath, StorePath: storePath}
 	opts.Tracef = workflowTracef
-	loadCfg := false
-	switch bead.Metadata["gc.kind"] {
-	case "check", "fanout", "retry-eval", "retry", "ralph":
-		loadCfg = true
-	case "workflow-finalize":
-		// Need cfg to resolve "city:<name>" / "rig:<name>" store refs when
-		// closing parent source beads in their native stores.
-		loadCfg = true
-	}
-	if loadCfg {
+	requirements, _ := controlkind.RuntimeRequirementsFor(bead.Metadata["gc.kind"])
+	if requirements.NeedsCityConfig {
 		if cfg == nil {
 			if cfgLoadErr != nil {
 				return cfgLoadErr
@@ -200,28 +193,21 @@ func runControlDispatcherWithStoreAndConfig(cityPath, storePath string, store be
 			return fmt.Errorf("loading city config for %s: unavailable after warning-only load", cityPath)
 		}
 		opts.ResolveStoreRef = makeStoreRefResolver(cityPath, cfg)
-		if bead.Metadata["gc.kind"] == "workflow-finalize" {
+		if requirements.NeedsSourceWorkflowCoordination {
 			sourceWorkflowCtx, cancelSourceWorkflowCtx := sourceWorkflowCommandContext()
 			defer cancelSourceWorkflowCtx()
 			opts.SourceWorkflowLock = makeSourceWorkflowLocker(sourceWorkflowCtx, cityPath, cfg, storePath)
 			opts.SourceWorkflowStores = makeSourceWorkflowStoresLister(cityPath, cfg)
 		}
-		switch bead.Metadata["gc.kind"] {
-		case "check", "fanout":
+		if requirements.NeedsFormulaSearchPaths {
 			opts.FormulaSearchPaths = workflowFormulaSearchPaths(cfg, bead)
+		}
+		if requirements.NeedsPrepareFragment {
 			opts.PrepareFragment = func(fragment *formula.FragmentRecipe, source beads.Bead) error {
 				return decorateDynamicFragmentRecipe(fragment, source, store, loadedCityName(cfg, cityPath), cityPath, cfg)
 			}
-		case "retry-eval":
-			sp := dispatchControlSessionProvider()
-			opts.RecycleSession = func(subject beads.Bead) error {
-				if strings.TrimSpace(subject.Assignee) == "" {
-					return fmt.Errorf("subject %s missing assignee for pooled retry recycle", subject.ID)
-				}
-				return workerKillSessionTargetWithConfig("", store, sp, cfg, subject.Assignee)
-			}
-		case "retry", "ralph":
-			opts.FormulaSearchPaths = workflowFormulaSearchPaths(cfg, bead)
+		}
+		if requirements.NeedsSessionRecycle {
 			sp := dispatchControlSessionProvider()
 			opts.RecycleSession = func(subject beads.Bead) error {
 				if strings.TrimSpace(subject.Assignee) == "" {
@@ -635,12 +621,12 @@ func propagateDynamicScopeMetadata(step *formula.RecipeStep, source beads.Bead) 
 	switch step.Metadata["gc.kind"] {
 	case "scope":
 		return
-	case "scope-check", "workflow-finalize", "fanout", "check", "retry-eval", "retry", "ralph":
+	}
+	if controlkind.IsDynamicScopeControl(step.Metadata["gc.kind"]) {
 		step.Metadata["gc.scope_role"] = "control"
 		return
-	default:
-		step.Metadata["gc.scope_role"] = "member"
 	}
+	step.Metadata["gc.scope_role"] = "member"
 }
 
 func newConvoyDeleteCmd(stdout, stderr io.Writer) *cobra.Command {
